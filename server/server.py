@@ -21,20 +21,24 @@ def _tmp_user():
     BASE = 'QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm1234567890'
     str_uuid = lambda n: ''.join([BASE[uuid4().int//(len(BASE)**i)%len(BASE)] 
                                  for i in range(n)])
-    user = str_uuid(9)
+    user_id = str_uuid(9)
     token = str_uuid(19)
 
-    r.hset('users', user, token)
-    return jsonify({'user_id': user, 'token': token})
+    p = r.pipeline()
+    p.hset('user:'+user_id, 'token', token)
+    p.expire('user:'+user_id, 300)
+    p.execute()
+
+    return jsonify({'user_id': user_id, 'token': token})
 
 @app.route('/check_token/<user_id>', methods=['GET'])
 def _check_token(user_id):
-    token = str(r.hget('users', user_id), 'utf-8')
+    token = str(r.hget('user:'+user_id, 'token'), 'utf-8')
     return 'OK' if (token == request.headers.get('Token')) else 'UNAUTHORIZED'
 
 @app.route('/serve/<user_id>/<service_id>', methods=['GET'])
 def _serve(user_id, service_id):
-    token = str(r.hget('users', user_id), 'utf-8')
+    token = str(r.hget('user:'+user_id, 'token'), 'utf-8')
     
     if token != request.headers.get('Token'):
         return Response('Authentication Error', 401)
