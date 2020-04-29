@@ -27,6 +27,6 @@ cmrr = Cmrr('https://cmrr.es')
 # Create a new endpoint
 cmrr.serve(lambda name='World': 'Hello ' + name, 'hello')
 
-print('\nCall this from another notebook (anywhare in the world):\n',
+print('\nCall this from another notebook (anywhere in the world):\n',
       "cmrr.call('hello', kwargs={'name': 'stranger'}, user_id='"+cmrr.user_id+"')")
 ```
