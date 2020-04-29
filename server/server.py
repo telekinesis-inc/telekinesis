@@ -9,7 +9,7 @@ r = Redis()
 app = Flask(__name__)
 cors = CORS(app, resources={"/*": {"origins": "*"}})
 
-with open('server/landing.html', 'r') as f:
+with open('landing.html', 'r') as f:
     LANDING = f.read()
 
 @app.route('/', methods=['GET'])
@@ -90,4 +90,5 @@ def _return(call_id, value):
     r.hdel('calls', call_id)
     return str(r.publish('call:'+call_id, value))
 
-app.run('0.0.0.0', threaded=True)
+if __name__ == '__main__':
+    app.run('0.0.0.0', threaded=True)
