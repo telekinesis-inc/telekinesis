@@ -43,21 +43,27 @@ def _serve(user_id, service_id):
     route = user_id +'/'+ service_id
     
     print('serving:', route)
-    last = {('stream:'+ route): 0}
+    # last = {('stream:'+ route): 0}
     
-    while True:
-        last_id = r.xread(last, None, 0)[0][1][-1][0]
-        print(last_id)
-        for queue in ['backlog:', 'backlog:', 'working:']:
-            call_id = r.rpoplpush(queue + route,
-                               'working:'+ route)
-            if call_id is not None:
-                return jsonify({
-                    'call_id': str(call_id, 'utf-8'),
-                    'kwargs': str(r.hget('args', call_id), 'utf-8')
-                })
-            time.sleep(2)
-        last['stream:' + route] = last_id
+    with r.pubsub() as pb:
+        call_id = uuid4().hex
+        pb.subscribe('stream:'+route)
+        listener = pb.listen()
+        next(listener)
+        # last_id = r.xread(last, None, 0)[0][1][-1][0]
+        while True:
+            # print(last_id)
+            for queue in ['backlog:', 'backlog:', 'working:']:
+                call_id = r.rpoplpush(queue + route,
+                                'working:'+ route)
+                if call_id is not None:
+                    return jsonify({
+                        'call_id': str(call_id, 'utf-8'),
+                        'kwargs': str(r.hget('args', call_id), 'utf-8')
+                    })
+                time.sleep(1)
+            next(listener)
+        # last['stream:' + route] = last_id
 
 @app.route('/call/<user_id>/<service_id>', methods=['GET'])
 def _call(user_id, service_id):
@@ -72,12 +78,18 @@ def _call(user_id, service_id):
         next(listener)
         
         args = json.dumps(request.args.to_dict())
+
+        p = r.pipeline()
         
-        r.hset('calls', call_id, route)
-        r.hset('args', call_id, args)
+        p.hset('calls', call_id, route)
+        p.hset('args', call_id, args)
         
-        r.lpush('backlog:'+ route, call_id)
-        r.xadd('stream:'+ route, {'call_id': call_id, 'kwargs': args})
+        p.lpush('backlog:'+ route, call_id)
+        p.publish('stream:'+ route, call_id)
+
+        p.execute()
+        # r.xadd('stream:'+ route, {'call_id': call_id, 'kwargs': args})
+
         
         return str(next(listener)['data'], 'utf-8')
         
@@ -88,4 +100,4 @@ def _return(call_id, value):
     r.hdel('calls', call_id)
     return str(r.publish('call:'+call_id, value))
 
-app.run('0.0.0.0')
+app.run('0.0.0.0', threaded=True)
