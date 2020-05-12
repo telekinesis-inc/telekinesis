@@ -136,6 +136,9 @@ class Server():
 
             return len(self.services[m['function']]['backlog'])
 
+        if m['method'] == 'LIST':
+            return list(self.services.keys())
+
         return 'Error: method not found'
 
     async def serve(self, host='localhost', port=3388):

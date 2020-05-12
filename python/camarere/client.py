@@ -77,9 +77,13 @@ class Client:
                         call['return'] = function(*call['args'], **call['kwargs'])
                     await self._send(call)
 
-
     async def call(self, function_name, *args, **kwargs):
         await self._send({'method': 'CALL', 'function': function_name, 'args': args, 'kwargs': kwargs})
         print(await self._recv())
+
+        return await self._recv()
+
+    async def list(self):
+        await self._send({'method': 'LIST'})
 
         return await self._recv()
