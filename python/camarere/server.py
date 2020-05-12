@@ -7,22 +7,13 @@ import time
 import http
 from .encryption import verify
 
-async def default_check_credentials(username, password): # 15 second window signed timestamp
-    if username:
-        timestamp = password[:10]
-        signature = password[10:]+'='
-
-        if verify(signature, timestamp, username+'==') is None and (int(timestamp) > time.time()-15):
-            return True
-        return False
-    return True
-
 class Server():
-    def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None):
+    def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK'):
         self.master_pubkeys = master_pubkeys if (isinstance(master_pubkeys, list) 
                                                  or master_pubkeys is None ) \
                                              else [master_pubkeys]
 
+        self.unautheticated_message = unautheticated_message
         self.static = {}
         self.clients = {}
         self.services = {}
@@ -35,14 +26,25 @@ class Server():
     
     async def handle_incoming(self, path, headers):
         route = path.split('?')[0]
+        route = route[:-1] if route[-1] == '/' else route
         query = '?'.join(path.split('?')[1:])
         if route in self.static:
             page = self.static[route]
             if 'function' in page:
-                await self.assign({'function': page['function'], 
-                                   'call_id': self.str_uuid(3),
-                                   'query': query})
-            return page['code'], page['headers'], page['content']
+                await self.assign_call({'function': page['function'], 
+                                        'caller': None,
+                                        'call_id': self.str_uuid(3),
+                                        'query': query})
+            if isinstance(page, dict):
+                return http.HTTPStatus(page['code'] if 'code' in page else 200), \
+                    page['headers'] if 'headers' in page else {'Access-Control-Allow-Origin': '*', 
+                                                                'Content-Type': 'text/html; charset=UTF-8'}, \
+                    bytes(page['content'], 'utf-8')
+            elif isinstance(page, str):
+                return http.HTTPStatus(200), \
+                    {'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/html; charset=UTF-8'}, \
+                    bytes(page, 'utf-8')
+
         return None
 
     async def handle_client(self, websocket, path):
@@ -50,7 +52,7 @@ class Server():
         self.clients[i] = {'websocket': websocket,
                            'services': set(),
                            'calls': {},
-                           'pubkey': websocket.username+'=='}
+                           'pubkey': None}
         try:
             async for raw_message in websocket:
                 await websocket.send(json.dumps(await self.handle_message(i, json.loads(raw_message))))
@@ -59,9 +61,9 @@ class Server():
             for service in c['services']:
                 self.services[service]['workers'].remove(i)
             for call_id in c['calls']:
-                self.assign(c['calls'][call_id])
+                self.assign_call(c['calls'][call_id])
 
-    async def assign(self, call):
+    async def assign_call(self, call):
         if self.services[call['function']]['workers']:
             worker = self.services[call['function']]['workers'].pop()
             self.clients[worker]['calls'][call['call_id']] = call
@@ -75,6 +77,18 @@ class Server():
         if 'method' not in m:
             return 'MALFORMED MESSAGE: `method` not found in message'
 
+        if m['method'] == 'AUTHENTICATE':
+            if 'pubkey' not in m or 'timestamp' not in m or 'signature' not in m:
+                return 'MALFORMED MESSAGE: `pubkey` or `timestamp` or `signature` not found in `AUTHENTICATE` message'
+    
+            if verify(m['signature'], m['timestamp'], m['pubkey']) is None and (int(m['timestamp']) > time.time()-15):
+                self.clients[i]['pubkey'] = m['pubkey']
+                return 'OK'
+            return 'Error: Bad Authentication'
+
+        if m['method'] == 'SKIP_AUTH':
+            return self.unautheticated_message
+
         if m['method'] == 'PUBLISH':
             if self.master_pubkeys is not None:
                 if self.clients[i]['pubkey'] not in self.master_pubkeys:
@@ -84,6 +98,9 @@ class Server():
                 return 'MALFORMED MESSAGE: `function` not found in `PUBLISH` message'
             self.services[m['function']] = {'workers': set(),
                                             'backlog': deque()}
+
+            if 'static' in m:
+                self.static['/'+m['function']] = m['static']
             return 'OK'
             
         if m['method'] == 'SUPPLY':
@@ -104,8 +121,7 @@ class Server():
             m['caller'] = i
             m['call_id'] = self.str_uuid(3)
             
-            return await self.assign(m)
-
+            return await self.assign_call(m)
 
         if m['method'] == 'RETURN':
             if 'function' not in m:
@@ -122,16 +138,12 @@ class Server():
 
             return len(self.services[m['function']]['backlog'])
 
-    async def serve(self, host='localhost', port=3388, check_credentials=None):
-        if check_credentials is None:
-            check_credentials = default_check_credentials
+        return 'Error: method not found'
+
+    async def serve(self, host='localhost', port=3388):
         self.server = await websockets.serve(self.handle_client, host, port, 
-                                             process_request=self.handle_incoming,
-                                             create_protocol=websockets.basic_auth_protocol_factory(
-                                                 'camarere',
-                                                 check_credentials=check_credentials
-                                             ))
-        return self.server
+                                             process_request=self.handle_incoming)
+        return self
     
     async def close(self):
         return self.server.close()

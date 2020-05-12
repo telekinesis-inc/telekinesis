@@ -5,23 +5,35 @@ import time
 from .encryption import generate_public_serial, read_private_key, sign
 
 class Client:
-    def __init__(self, url='ws://localhost:3388', private_key_path=None, password=None):
+    def __init__(self, url='ws://localhost:3388', email=None, private_key_path=None, key_password=None):
         self.url = url
         self.is_connected = lambda: False
         self.server = None
         self.private_key = None
+        self.email = email
         if private_key_path is not None:
-            self.private_key = read_private_key(private_key_path, password)
+            self.private_key = read_private_key(private_key_path, key_password)
 
-    async def connect(self, user='', password=''):
-        if not user and not password and self.private_key is not None:
-            user = generate_public_serial(self.private_key)[:-2] #remove padding
-            timestamp = str(int(time.time()))
-            signature = sign(timestamp, self.private_key)[:-1]
-            password = timestamp + signature
-        url = self.url.split('//')[0]+'//'+user+':'+password+'@'+'//'.join(self.url.split('//')[1:])
-        self.server = await websockets.connect(url)
+    async def connect(self):
+        self.server = await websockets.connect(self.url)
+
         self.is_connected = lambda: not self.server.closed
+
+        if self.private_key is not None: # Authenticate
+            pubkey = generate_public_serial(self.private_key)
+            timestamp = str(int(time.time()))
+            signature = sign(timestamp, self.private_key)
+
+            await self._send({
+                'method': 'AUTHENTICATE',
+                'email': self.email,
+                'pubkey': pubkey,
+                'timestamp': timestamp,
+                'signature': signature
+            })
+        else:
+            await self._send({'method': 'SKIP_AUTH'})
+        print(await self._recv())
         return self
     
     async def close(self):
@@ -41,13 +53,13 @@ class Client:
     async def __aexit__(self, _, __, ___):
         await self.close()
     
-    async def publish(self, function, function_name, offer=True):
-        await self._send({'method': 'PUBLISH', 'function': function_name})
+    async def publish(self, function, function_name, static_page=None):
+        message = {'method': 'PUBLISH', 'function': function_name} 
+        if static_page is not None:
+            message['static'] = static_page
+        await self._send(message)
         message = await self._recv()
         print(message)
-        # if message == 'OK' and offer:
-        #     print('hi')
-        #     return await self.offer(function, function_name)
 
     async def supply(self, function, function_name):
         await self._send({'method': 'SUPPLY', 'function': function_name})
