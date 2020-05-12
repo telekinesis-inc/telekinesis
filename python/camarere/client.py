@@ -76,14 +76,27 @@ class Client:
                     else:
                         call['return'] = function(*call['args'], **call['kwargs'])
                     await self._send(call)
+                elif isinstance(call, str):
+                    break
 
     async def call(self, function_name, *args, **kwargs):
         await self._send({'method': 'CALL', 'function': function_name, 'args': args, 'kwargs': kwargs})
-        print(await self._recv())
+        
+        message = await self._recv()
+        print(message)
+        if message == 'SERVICE NOT FOUND':
+            return None
 
         return await self._recv()
 
     async def list(self):
         await self._send({'method': 'LIST'})
+
+        return await self._recv()
+
+    async def remove(self, function_name):
+        await self._send({'method': 'REMOVE', 'function': function_name})
+
+        await asyncio.sleep(2)
 
         return await self._recv()

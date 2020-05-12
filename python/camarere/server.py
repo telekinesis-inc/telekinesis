@@ -139,6 +139,27 @@ class Server():
         if m['method'] == 'LIST':
             return list(self.services.keys())
 
+        if m['method'] == 'REMOVE':
+            if self.master_pubkeys is not None:
+                if self.clients[i]['pubkey'] not in self.master_pubkeys:
+                    return 'UNAUTHORIZED'
+
+            if 'function' not in m:
+                return 'MALFORMED MESSAGE: `function` not found in `PUBLISH` message'
+            
+            service = self.services.pop(m['function'], None)
+            if service is not None:
+                for worker in service['workers']:
+                    if worker in self.clients and m['function'] in self.clients[worker]['services']:
+                        self.clients[worker]['services'].remove(m['function'])
+                        await self.clients[worker]['websocket'].send(json.dumps(m['function'] + ' removed'))
+
+                for call in service['backlog']:
+                    if call['caller'] in self.clients:
+                        await self.clients[call['caller']]['websocket'].send(json.dumps(m['function'] + ' removed'))
+
+            return m['function'] + ' removed'
+
         return 'Error: method not found'
 
     async def serve(self, host='localhost', port=3388):
