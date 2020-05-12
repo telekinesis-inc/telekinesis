@@ -15,7 +15,7 @@ class Client:
             self.private_key = read_private_key(private_key_path, key_password)
 
     async def connect(self):
-        self.server = await websockets.connect(self.url)
+        self.server = await websockets.connect(self.url+'/client')
 
         self.is_connected = lambda: not self.server.closed
 

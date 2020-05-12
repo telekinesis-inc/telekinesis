@@ -26,7 +26,7 @@ class Server():
     
     async def handle_incoming(self, path, headers):
         route = path.split('?')[0]
-        route = route[:-1] if route[-1] == '/' else route
+        route = route[:-1] if route[-1] == '/' and len(route) > 1 else route
         query = '?'.join(path.split('?')[1:])
         if route in self.static:
             page = self.static[route]
@@ -34,16 +34,12 @@ class Server():
                 await self.assign_call({'function': page['function'], 
                                         'caller': None,
                                         'call_id': self.str_uuid(3),
-                                        'query': query})
-            if isinstance(page, dict):
-                return http.HTTPStatus(page['code'] if 'code' in page else 200), \
-                    page['headers'] if 'headers' in page else {'Access-Control-Allow-Origin': '*', 
-                                                                'Content-Type': 'text/html; charset=UTF-8'}, \
-                    bytes(page['content'], 'utf-8')
-            elif isinstance(page, str):
-                return http.HTTPStatus(200), \
-                    {'Access-Control-Allow-Origin': '*', 'Content-Type': 'text/html; charset=UTF-8'}, \
-                    bytes(page, 'utf-8')
+                                        'args': [],
+                                        'kwargs': {kv.split('=')[0]: '='.join(kv.split('=')[1:]) for kv in query.split('&')}})
+            return http.HTTPStatus(page['code'] if 'code' in page else 200), \
+                page['headers'] if 'headers' in page else {'Access-Control-Allow-Origin': '*', 
+                                                            'Content-Type': 'text/html; charset=UTF-8'}, \
+                bytes(page['content'], 'utf-8')
 
         return None
 
@@ -100,7 +96,9 @@ class Server():
                                             'backlog': deque()}
 
             if 'static' in m:
-                self.static['/'+m['function']] = m['static']
+                static = m['static'] if isinstance(m['static'], dict) else {'content': m['static']}
+                static['function'] = m['function']
+                self.static['/'+m['function']] = static
             return 'OK'
             
         if m['method'] == 'SUPPLY':
