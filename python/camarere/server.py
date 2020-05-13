@@ -148,6 +148,8 @@ class Server():
                 return 'MALFORMED MESSAGE: `function` not found in `PUBLISH` message'
             
             service = self.services.pop(m['function'], None)
+            self.static.pop('/'+m['function'], None)
+
             if service is not None:
                 for worker in service['workers']:
                     if worker in self.clients and m['function'] in self.clients[worker]['services']:
