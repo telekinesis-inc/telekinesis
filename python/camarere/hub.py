@@ -7,7 +7,7 @@ import time
 import http
 from .encryption import verify
 
-class Server():
+class Hub():
     def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK'):
         self.master_pubkeys = master_pubkeys if (isinstance(master_pubkeys, list) 
                                                  or master_pubkeys is None ) \
@@ -101,7 +101,7 @@ class Server():
                 self.static['/'+m['function']] = static
             return 'OK'
             
-        if m['method'] == 'SUPPLY':
+        if m['method'] == 'SERVE':
             if 'function' not in m:
                 return 'MALFORMED MESSAGE: `function` not found in `OFFER` message'
             if m['function'] not in self.services:
@@ -164,7 +164,7 @@ class Server():
 
         return 'Error: method not found'
 
-    async def serve(self, host='localhost', port=3388):
+    async def start(self, host='localhost', port=3388):
         self.server = await websockets.serve(self.handle_client, host, port, 
                                              process_request=self.handle_incoming)
         return self

@@ -61,8 +61,8 @@ class Client:
         message = await self._recv()
         print(message)
 
-    async def supply(self, function, function_name):
-        await self._send({'method': 'SUPPLY', 'function': function_name})
+    async def serve(self, function, function_name):
+        await self._send({'method': 'SERVE', 'function': function_name})
         message = await self._recv()
         print(message)
         if not isinstance(message, str):
