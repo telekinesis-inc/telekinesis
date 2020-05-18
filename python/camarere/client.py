@@ -2,72 +2,108 @@ import json
 import asyncio
 import websockets
 import time
+import uuid
 from .encryption import generate_public_serial, read_private_key, sign
 
-class Client:
-    def __init__(self, url='ws://localhost:3388', email=None, private_key_path=None, key_password=None):
+class Connection:
+    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None):
         self.url = url
         self.is_connected = lambda: False
-        self.server = None
-        self.private_key = None
-        self.email = email
-        if private_key_path is not None:
+        if private_key_path is None:
+            self.private_key = None
+        else:
             self.private_key = read_private_key(private_key_path, key_password)
+        self.hub = None
 
     async def connect(self):
-        self.server = await websockets.connect(self.url+'/client')
-
-        self.is_connected = lambda: not self.server.closed
+        self.hub = await websockets.connect(self.url+'/ws/')
+        self.is_connected = lambda: not self.hub.closed
 
         if self.private_key is not None: # Authenticate
             pubkey = generate_public_serial(self.private_key)
             timestamp = str(int(time.time()))
             signature = sign(timestamp, self.private_key)
 
-            await self._send({
+            await self.send({
                 'method': 'AUTHENTICATE',
-                'email': self.email,
                 'pubkey': pubkey,
                 'timestamp': timestamp,
                 'signature': signature
             })
         else:
-            await self._send({'method': 'SKIP_AUTH'})
-        print(await self._recv())
+            await self.send({'method': 'SKIP_AUTH'})
+        print(await self.recv())
+        return self
+    
+    async def send(self, message, thread_id=None):
+        if not self.is_connected():
+            await self.connect()
+        return await self.hub.send(json.dumps(message))
+    
+    async def recv(self, thread_id=None):
+        return json.loads(await self.hub.recv())
+    
+    def close(self):
+        return self.hub.close()
+
+class Client:
+    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
+        if connection is None:
+            self.c = Connection(url, private_key_path, key_password)
+        else:
+            self.c = connection
+
+    async def connect(self):
+        await self.c.connect()
         return self
     
     async def close(self):
-        return await self.server.close()
+        return await self.c.close()
     
-    async def _send(self, message):
-        if not self.is_connected():
-            await self.connect()
-        return await self.server.send(json.dumps(message))
-
-    async def _recv(self):
-        return json.loads(await self.server.recv())
+    async def call(self, function_name, *args, **kwargs):
+        await self.c.send({'method': 'CALL', 'function': function_name, 'args': args, 'kwargs': kwargs})
         
-    async def __aenter__(self):
-        await self.connect()
+        message = await self.c.recv()
+        print(message)
+        if message == 'SERVICE NOT FOUND':
+            return None
 
-    async def __aexit__(self, _, __, ___):
-        await self.close()
+        return await self.c.recv()
+
+    async def list(self):
+        await self.c.send({'method': 'LIST'})
+
+        return await self.c.recv()
+
+class Server:
+    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
+        if connection is None:
+            self.c = Connection(url, private_key_path, key_password)
+        else:
+            self.c = connection
+
+    async def connect(self):
+        await self.c.connect()
+        return self
+    
+    async def close(self):
+        return await self.c.close()
     
     async def publish(self, function, function_name, static_page=None):
         message = {'method': 'PUBLISH', 'function': function_name} 
         if static_page is not None:
             message['static'] = static_page
-        await self._send(message)
-        message = await self._recv()
+        await self.c.send(message)
+        message = await self.c.recv()
         print(message)
 
     async def serve(self, function, function_name):
-        await self._send({'method': 'SERVE', 'function': function_name})
-        message = await self._recv()
+        await self.c.send({'method': 'SERVE', 'function': function_name})
+        message = await self.c.recv()
         print(message)
         if not isinstance(message, str):
             while True:
-                call = await self._recv()
+                call = await self.c.recv()
                 print(call)
                 if isinstance(call, dict):
                     call['method'] = 'RETURN'
@@ -75,28 +111,13 @@ class Client:
                         call['return'] = await function(*call['args'], **call['kwargs'])
                     else:
                         call['return'] = function(*call['args'], **call['kwargs'])
-                    await self._send(call)
+                    await self.c.send(call)
                 elif isinstance(call, str):
                     break
 
-    async def call(self, function_name, *args, **kwargs):
-        await self._send({'method': 'CALL', 'function': function_name, 'args': args, 'kwargs': kwargs})
-        
-        message = await self._recv()
-        print(message)
-        if message == 'SERVICE NOT FOUND':
-            return None
-
-        return await self._recv()
-
-    async def list(self):
-        await self._send({'method': 'LIST'})
-
-        return await self._recv()
-
     async def remove(self, function_name):
-        await self._send({'method': 'REMOVE', 'function': function_name})
+        await self.c.send({'method': 'REMOVE', 'function': function_name})
 
         await asyncio.sleep(2)
 
-        return await self._recv()
+        return await self.c.recv()

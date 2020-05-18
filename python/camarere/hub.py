@@ -15,7 +15,7 @@ class Hub():
 
         self.unautheticated_message = unautheticated_message
         self.static = {}
-        self.clients = {}
+        self.connections = {}
         self.services = {}
         self.server = None
 
@@ -25,6 +25,8 @@ class Hub():
                         for i in range(n)])
     
     async def handle_incoming(self, path, headers):
+        if path[:3] == 'ws/':
+            return None
         route = path.split('?')[0]
         route = route[:-1] if route[-1] == '/' and len(route) > 1 else route
         query = '?'.join(path.split('?')[1:])
@@ -41,11 +43,10 @@ class Hub():
                                                             'Content-Type': 'text/html; charset=UTF-8'}, \
                 bytes(page['content'], 'utf-8')
 
-        return None
 
     async def handle_client(self, websocket, path):
         i = self.str_uuid(5) 
-        self.clients[i] = {'websocket': websocket,
+        self.connections[i] = {'websocket': websocket,
                            'services': set(),
                            'calls': {},
                            'pubkey': None}
@@ -53,7 +54,7 @@ class Hub():
             async for raw_message in websocket:
                 await websocket.send(json.dumps(await self.handle_message(i, json.loads(raw_message))))
         finally:
-            c = self.clients.pop(i)
+            c = self.connections.pop(i)
             for service in c['services']:
                 self.services[service]['workers'].remove(i)
             for call_id in c['calls']:
@@ -62,8 +63,8 @@ class Hub():
     async def assign_call(self, call):
         if self.services[call['function']]['workers']:
             worker = self.services[call['function']]['workers'].pop()
-            self.clients[worker]['calls'][call['call_id']] = call
-            await self.clients[worker]['websocket'].send(json.dumps(call))
+            self.connections[worker]['calls'][call['call_id']] = call
+            await self.connections[worker]['websocket'].send(json.dumps(call))
             return worker
 
         self.services[call['function']]['backlog'].appendleft(call)
@@ -78,7 +79,7 @@ class Hub():
                 return 'MALFORMED MESSAGE: `pubkey` or `timestamp` or `signature` not found in `AUTHENTICATE` message'
     
             if verify(m['signature'], m['timestamp'], m['pubkey']) is None and (int(m['timestamp']) > time.time()-15):
-                self.clients[i]['pubkey'] = m['pubkey']
+                self.connections[i]['pubkey'] = m['pubkey']
                 return 'OK'
             return 'Error: Bad Authentication'
 
@@ -87,7 +88,7 @@ class Hub():
 
         if m['method'] == 'PUBLISH':
             if self.master_pubkeys is not None:
-                if self.clients[i]['pubkey'] not in self.master_pubkeys:
+                if self.connections[i]['pubkey'] not in self.master_pubkeys:
                     return 'UNAUTHORIZED'
 
             if 'function' not in m:
@@ -108,7 +109,7 @@ class Hub():
                 return 'SERVICE NOT FOUND'
 
             self.services[m['function']]['workers'].add(i)  
-            self.clients[i]['services'].add(m['function'])
+            self.connections[i]['services'].add(m['function'])
             return len(self.services[m['function']]['workers'])
 
         if m['method'] == 'CALL':
@@ -127,9 +128,9 @@ class Hub():
             if 'return' in m:
                 if 'caller' not in m:
                     return 'MALFROMED MESSAGE: `caller` not found in `RETURN` message with `return`'
-                if m['caller'] in self.clients:
-                    await self.clients[m['caller']]['websocket'].send(json.dumps(m['return']))
-            self.clients[i]['calls'].pop(m['call_id'], None)
+                if m['caller'] in self.connections:
+                    await self.connections[m['caller']]['websocket'].send(json.dumps(m['return']))
+            self.connections[i]['calls'].pop(m['call_id'], None)
             if self.services[m['function']]['backlog']:
                 return self.services[m['function']]['backlog'].pop()
             self.services[m['function']]['workers'].add(i)
@@ -141,7 +142,7 @@ class Hub():
 
         if m['method'] == 'REMOVE':
             if self.master_pubkeys is not None:
-                if self.clients[i]['pubkey'] not in self.master_pubkeys:
+                if self.connections[i]['pubkey'] not in self.master_pubkeys:
                     return 'UNAUTHORIZED'
 
             if 'function' not in m:
@@ -152,13 +153,13 @@ class Hub():
 
             if service is not None:
                 for worker in service['workers']:
-                    if worker in self.clients and m['function'] in self.clients[worker]['services']:
-                        self.clients[worker]['services'].remove(m['function'])
-                        await self.clients[worker]['websocket'].send(json.dumps(m['function'] + ' removed'))
+                    if worker in self.connections and m['function'] in self.connections[worker]['services']:
+                        self.connections[worker]['services'].remove(m['function'])
+                        await self.connections[worker]['websocket'].send(json.dumps(m['function'] + ' removed'))
 
                 for call in service['backlog']:
-                    if call['caller'] in self.clients:
-                        await self.clients[call['caller']]['websocket'].send(json.dumps(m['function'] + ' removed'))
+                    if call['caller'] in self.connections:
+                        await self.connections[call['caller']]['websocket'].send(json.dumps(m['function'] + ' removed'))
 
             return m['function'] + ' removed'
 
