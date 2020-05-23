@@ -33,44 +33,66 @@ class Hub():
         if route in self.static:
             page = self.static[route]
             if 'function' in page:
-                await self.assign_call({'function': page['function'], 
-                                        'caller': None,
-                                        'call_id': self.str_uuid(3),
-                                        'args': [],
-                                        'kwargs': {kv.split('=')[0]: '='.join(kv.split('=')[1:]) for kv in query.split('&')}})
+                await self.assign_call(page['function'], 
+                        kwargs={kv.split('=')[0]: '='.join(kv.split('=')[1:]) for kv in query.split('&')})
+
             return http.HTTPStatus(page['code'] if 'code' in page else 200), \
                 page['headers'] if 'headers' in page else {'Access-Control-Allow-Origin': '*', 
                                                             'Content-Type': 'text/html; charset=UTF-8'}, \
                 bytes(page['content'], 'utf-8')
 
-
     async def handle_client(self, websocket, path):
-        i = self.str_uuid(5) 
-        self.connections[i] = {'websocket': websocket,
-                           'services': set(),
-                           'calls': {},
-                           'pubkey': None}
+        conn_id = self.str_uuid(22) 
+        self.connections[conn_id] = {'websocket': websocket,
+                               'threads': {},
+                               'pubkey': None}
         try:
             async for raw_message in websocket:
-                await websocket.send(json.dumps(await self.handle_message(i, json.loads(raw_message))))
+                message_in = json.loads(raw_message[32:])
+                thread_id = raw_message[:32]
+                message_out = await self.handle_message(conn_id, thread_id, message_in)
+
+                if message_out is not None:
+                    await self._send(conn_id, thread_id, message_out)
         finally:
-            c = self.connections.pop(i)
-            for service in c['services']:
-                self.services[service]['workers'].remove(i)
-            for call_id in c['calls']:
-                self.assign_call(c['calls'][call_id])
+            connection = self.connections.pop(conn_id)
+            for thread_id in connection['threads']:
+                await self.close_thread(conn_id, connection['threads'][thread_id])
 
-    async def assign_call(self, call):
-        if self.services[call['function']]['workers']:
-            worker = self.services[call['function']]['workers'].pop()
-            self.connections[worker]['calls'][call['call_id']] = call
-            await self.connections[worker]['websocket'].send(json.dumps(call))
-            return worker
+    async def close_thread(self, conn_id, thread):
+        if thread is not None:
+            for service in thread['services']:
+                self.services[service]['workers'].remove((conn_id, thread['thread_id']))
+            for call_id in thread['calls']:
+                await self.assign_call(**thread['calls'][call_id])
 
-        self.services[call['function']]['backlog'].appendleft(call)
-        return len(self.services[call['function']]['backlog'])
+    async def assign_call(self, function, args=None, kwargs=None, caller_id=None, caller_thread=None, call_id=None):
+        if call_id is None:
+            call_id = self.str_uuid(5)
+        
+        call = {
+            'call_id': call_id,
+            'caller_id': caller_id,
+            'caller_thread': caller_thread,
+            'function': function,
+            'args': args,
+            'kwargs': kwargs
+        }
+        
+        if self.services[function]['workers']:
+            worker_id, thread_id = self.services[function]['workers'].pop()
 
-    async def handle_message(self, i, m):
+            worker = self.connections[worker_id]
+            
+            worker['threads'][thread_id]['calls'][call_id] = call
+
+            await self._send(worker_id, thread_id, {'args': args, 'kwargs': kwargs, 'call_id': call_id})
+            return -1
+        else:
+            self.services[call['function']]['backlog'].appendleft(call)
+        return call_id
+    
+    async def handle_message(self, conn_id, thread_id, m):
         if 'method' not in m:
             return 'MALFORMED MESSAGE: `method` not found in message'
 
@@ -79,7 +101,7 @@ class Hub():
                 return 'MALFORMED MESSAGE: `pubkey` or `timestamp` or `signature` not found in `AUTHENTICATE` message'
     
             if verify(m['signature'], m['timestamp'], m['pubkey']) is None and (int(m['timestamp']) > time.time()-15):
-                self.connections[i]['pubkey'] = m['pubkey']
+                self.connections[conn_id]['pubkey'] = m['pubkey']
                 return 'OK'
             return 'Error: Bad Authentication'
 
@@ -88,7 +110,7 @@ class Hub():
 
         if m['method'] == 'PUBLISH':
             if self.master_pubkeys is not None:
-                if self.connections[i]['pubkey'] not in self.master_pubkeys:
+                if self.connections[conn_id]['pubkey'] not in self.master_pubkeys:
                     return 'UNAUTHORIZED'
 
             if 'function' not in m:
@@ -108,8 +130,15 @@ class Hub():
             if m['function'] not in self.services:
                 return 'SERVICE NOT FOUND'
 
-            self.services[m['function']]['workers'].add(i)  
-            self.connections[i]['services'].add(m['function'])
+            self.services[m['function']]['workers'].add((conn_id, thread_id))
+            
+            if thread_id not in self.connections[conn_id]['threads']:
+                self.connections[conn_id]['threads'][thread_id] = {
+                    'thread_id': thread_id,
+                    'services': set(),
+                    'calls': {}
+                }
+            self.connections[conn_id]['threads'][thread_id]['services'].add(m['function'])
             return len(self.services[m['function']]['workers'])
 
         if m['method'] == 'CALL':
@@ -117,32 +146,34 @@ class Hub():
                 return 'MALFORMED MESSAGE: `function` not found in `CALL` message'
             if m['function'] not in self.services:
                 return 'SERVICE NOT FOUND'
-            m['caller'] = i
-            m['call_id'] = self.str_uuid(3)
             
-            return await self.assign_call(m)
+            return await self.assign_call(m['function'], m.get('args'), m.get('kwargs'), conn_id, thread_id)
 
         if m['method'] == 'RETURN':
-            if 'function' not in m:
-                return 'MALFORMED MESSAGE: `function` not found in `RETURN` message'
-            if 'return' in m:
-                if 'caller' not in m:
-                    return 'MALFROMED MESSAGE: `caller` not found in `RETURN` message with `return`'
-                if m['caller'] in self.connections:
-                    await self.connections[m['caller']]['websocket'].send(json.dumps(m['return']))
-            self.connections[i]['calls'].pop(m['call_id'], None)
-            if self.services[m['function']]['backlog']:
-                return self.services[m['function']]['backlog'].pop()
-            self.services[m['function']]['workers'].add(i)
+            if 'call_id' not in m:
+                return 'MALFORMED MESSAGE: `call_id` not found in `RETURN` message'
+            call = self.connections[conn_id]['threads'][thread_id]['calls'].pop(m['call_id'], None)
 
-            return len(self.services[m['function']]['backlog'])
+            if 'return' in m:
+                if call['caller_id'] in self.connections:
+                    await self._send(call['caller_id'], call['caller_thread'], m['return'])
+
+            if self.services[call['function']]['backlog']:
+                new_call = self.services[call['function']]['backlog'].pop()
+                self.connections[conn_id]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
+                return {'args': new_call['args'], 'kwargs': new_call['kwargs'], 'call_id': new_call['call_id']}
+
+            else:
+                self.services[call['function']]['workers'].add((conn_id, thread_id))
+
+            return len(self.services[call['function']]['backlog'])
 
         if m['method'] == 'LIST':
             return list(self.services.keys())
 
         if m['method'] == 'REMOVE':
             if self.master_pubkeys is not None:
-                if self.connections[i]['pubkey'] not in self.master_pubkeys:
+                if self.connections[conn_id]['pubkey'] not in self.master_pubkeys:
                     return 'UNAUTHORIZED'
 
             if 'function' not in m:
@@ -152,18 +183,26 @@ class Hub():
             self.static.pop('/'+m['function'], None)
 
             if service is not None:
-                for worker in service['workers']:
-                    if worker in self.connections and m['function'] in self.connections[worker]['services']:
-                        self.connections[worker]['services'].remove(m['function'])
-                        await self.connections[worker]['websocket'].send(json.dumps(m['function'] + ' removed'))
+                for worker_id, worker_thread in service['workers']:
+                    if worker_id in self.connections and m['function'] in self.connections[worker_id]['threads'][worker_thread]['services']:
+                        self.connections[worker_id]['threads'][worker_thread]['services'].remove(m['function'])
+                        await self._send(worker_id, worker_thread, m['function'] + ' removed')
 
                 for call in service['backlog']:
-                    if call['caller'] in self.connections:
-                        await self.connections[call['caller']]['websocket'].send(json.dumps(m['function'] + ' removed'))
+                    if call['caller_id'] in self.connections:
+                        await self._send(call['caller_id'], call['caller_thread'], m['function'] + ' removed')
 
             return m['function'] + ' removed'
 
-        return 'Error: method not found'
+        if m['method'] == 'CLOSE_THREAD':
+            thread = self.connections[conn_id]['threads'].pop(thread_id, None)
+            await self.close_thread(conn_id, thread)
+            return None
+
+        return 'Error: method not found ' + m['method']
+    
+    async def _send(self, conn_id, thread_id, message):
+        await self.connections[conn_id]['websocket'].send(thread_id+json.dumps(message))
 
     async def start(self, host='localhost', port=3388):
         self.server = await websockets.serve(self.handle_client, host, port, 
