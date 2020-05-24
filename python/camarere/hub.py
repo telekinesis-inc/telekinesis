@@ -8,7 +8,7 @@ import http
 from .encryption import verify
 
 class Hub():
-    def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK'):
+    def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK', allow_origins=None):
         self.master_pubkeys = master_pubkeys if (isinstance(master_pubkeys, list) 
                                                  or master_pubkeys is None ) \
                                              else [master_pubkeys]
@@ -18,6 +18,7 @@ class Hub():
         self.connections = {}
         self.services = {}
         self.server = None
+        self.allow_origins = allow_origins if allow_origins is not None else []
 
     def str_uuid(self, n):# TODO avoid collissions
         BASE = 'QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm1234567890'
@@ -25,8 +26,9 @@ class Hub():
                         for i in range(n)])
     
     async def handle_incoming(self, path, headers):
-        if path[:3] == 'ws/':
-            return None
+        if path[:4] == '/ws/':
+            if headers.get('Origin') is None or headers.get('Origin') in self.allow_origins:
+                return None
         route = path.split('?')[0]
         route = route[:-1] if route[-1] == '/' and len(route) > 1 else route
         query = '?'.join(path.split('?')[1:])
@@ -40,6 +42,8 @@ class Hub():
                 page['headers'] if 'headers' in page else {'Access-Control-Allow-Origin': '*', 
                                                             'Content-Type': 'text/html; charset=UTF-8'}, \
                 bytes(page['content'], 'utf-8')
+        
+        return http.HTTPStatus(504), {}, 'UNAUTHORIZED'
 
     async def handle_client(self, websocket, path):
         conn_id = self.str_uuid(22) 
