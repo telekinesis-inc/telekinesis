@@ -17,7 +17,7 @@ async def main():
         try:
             c = await Server(private_key_path='PRIVATE.pem').connect()
             await c.publish(log_enter, '', LANDING)
-            await c.supply(log_enter, '')
+            await c.serve(log_enter, '')
         except Exception as e:
             print(e)
             await asyncio.sleep(1)
