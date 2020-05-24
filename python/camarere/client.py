@@ -6,6 +6,91 @@ import uuid
 from collections import deque
 from .encryption import generate_public_serial, read_private_key, sign
 
+class Client:
+    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
+        if connection is None:
+            self.c = Connection(url, private_key_path, key_password)
+        else:
+            self.c = connection
+
+    async def connect(self):
+        await self.c.connect()
+        return self
+    
+    async def close(self):
+        return await self.c.close()
+    
+    async def call(self, function_name, *args, **kwargs):
+        async with Thread(self.c) as thread:
+            await thread.send({
+                'method': 'CALL', 
+                'function': function_name, 
+                'args': args, 
+                'kwargs': kwargs})
+            
+            message = await thread.recv()
+            print(message)
+            if message == 'SERVICE NOT FOUND':
+                return None
+
+            return await thread.recv()
+
+    async def list(self):
+        async with Thread(self.c) as thread:
+            await thread.send({'method': 'LIST'})
+
+            return await thread.recv()
+
+class Server:
+    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
+        if connection is None:
+            self.c = Connection(url, private_key_path, key_password)
+        else:
+            self.c = connection
+
+    async def connect(self):
+        await self.c.connect()
+        return self
+    
+    async def close(self):
+        return await self.c.close()
+    
+    async def publish(self, function, function_name, static_page=None):
+        message = {'method': 'PUBLISH', 'function': function_name} 
+        if static_page is not None:
+            message['static'] = static_page
+        async with Thread(self.c) as thread:
+            await thread.send(message)
+            message = await thread.recv()
+            print(message)
+
+    async def serve(self, function, function_name):
+        async with Thread(self.c) as thread:
+            await thread.send({'method': 'SERVE', 'function': function_name})
+            message = await thread.recv()
+            print(message)
+            if not isinstance(message, str):
+                while True:
+                    call = await thread.recv()
+                    print(call)
+                    if isinstance(call, dict):
+                        call['method'] = 'RETURN'
+                        if asyncio.iscoroutinefunction(function):
+                            call['return'] = await function(*call['args'], **call['kwargs'])
+                        else:
+                            call['return'] = function(*call['args'], **call['kwargs'])
+                        await thread.send(call)
+                    elif isinstance(call, str):
+                        break
+
+    async def remove(self, function_name):
+        async with Thread(self.c) as thread:
+            await thread.send({'method': 'REMOVE', 'function': function_name})
+
+            await asyncio.sleep(2)
+
+            return await thread.recv()
+
 class Thread:
     def __init__(self, connection):
         while True:
@@ -95,88 +180,3 @@ class Connection:
     def close(self):
         self.listener.cancel()
         return self.hub.close()
-
-class Client:
-    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
-        if connection is None:
-            self.c = Connection(url, private_key_path, key_password)
-        else:
-            self.c = connection
-
-    async def connect(self):
-        await self.c.connect()
-        return self
-    
-    async def close(self):
-        return await self.c.close()
-    
-    async def call(self, function_name, *args, **kwargs):
-        async with Thread(self.c) as thread:
-            await thread.send({
-                'method': 'CALL', 
-                'function': function_name, 
-                'args': args, 
-                'kwargs': kwargs})
-            
-            message = await thread.recv()
-            print(message)
-            if message == 'SERVICE NOT FOUND':
-                return None
-
-            return await thread.recv()
-
-    async def list(self):
-        async with Thread(self.c) as thread:
-            await thread.send({'method': 'LIST'})
-
-            return await thread.recv()
-
-class Server:
-    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
-        if connection is None:
-            self.c = Connection(url, private_key_path, key_password)
-        else:
-            self.c = connection
-
-    async def connect(self):
-        await self.c.connect()
-        return self
-    
-    async def close(self):
-        return await self.c.close()
-    
-    async def publish(self, function, function_name, static_page=None):
-        message = {'method': 'PUBLISH', 'function': function_name} 
-        if static_page is not None:
-            message['static'] = static_page
-        async with Thread(self.c) as thread:
-            await thread.send(message)
-            message = await thread.recv()
-            print(message)
-
-    async def serve(self, function, function_name):
-        async with Thread(self.c) as thread:
-            await thread.send({'method': 'SERVE', 'function': function_name})
-            message = await thread.recv()
-            print(message)
-            if not isinstance(message, str):
-                while True:
-                    call = await thread.recv()
-                    print(call)
-                    if isinstance(call, dict):
-                        call['method'] = 'RETURN'
-                        if asyncio.iscoroutinefunction(function):
-                            call['return'] = await function(*call['args'], **call['kwargs'])
-                        else:
-                            call['return'] = function(*call['args'], **call['kwargs'])
-                        await thread.send(call)
-                    elif isinstance(call, str):
-                        break
-
-    async def remove(self, function_name):
-        async with Thread(self.c) as thread:
-            await thread.send({'method': 'REMOVE', 'function': function_name})
-
-            await asyncio.sleep(2)
-
-            return await thread.recv()

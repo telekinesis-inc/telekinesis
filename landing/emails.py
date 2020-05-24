@@ -1,4 +1,4 @@
-from camarere import Client
+from camarere import Server
 from datetime import datetime
 import asyncio
 
@@ -11,7 +11,7 @@ async def main():
     c = []
     while True:
         try:
-            c = await Client(private_key_path='PRIVATE.pem').connect()
+            c = await Server(private_key_path='PRIVATE.pem').connect()
 
             await c.publish(log_email, 'register_email', 'Thank you for registering!')
             await c.supply(log_email, 'register_email')
