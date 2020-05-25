@@ -16,7 +16,7 @@ async def main():
     while True:
         try:
             c = await Server(private_key_path='PRIVATE.pem').connect()
-            await c.publish(log_enter, '', LANDING)
+            await c.publish('', LANDING)
             await c.serve(log_enter, '')
         except Exception as e:
             print(e)

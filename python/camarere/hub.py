@@ -20,10 +20,11 @@ class Hub():
         self.server = None
         self.allow_origins = allow_origins if allow_origins is not None else []
 
-    def str_uuid(self, n):# TODO avoid collissions
-        BASE = 'QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm1234567890'
-        return ''.join([BASE[uuid4().int//(len(BASE)**i)%len(BASE)] 
-                        for i in range(n)])
+    def _str_uuid(self, n, d=None):
+        while True:
+            i = uuid4().hex[:n]
+            if d is None or i not in d:
+                return i
     
     async def handle_incoming(self, path, headers):
         if path[:4] == '/ws/':
@@ -46,14 +47,42 @@ class Hub():
         return http.HTTPStatus(504), {}, 'UNAUTHORIZED'
 
     async def handle_client(self, websocket, path):
-        conn_id = self.str_uuid(22) 
+
+        conn_id = self._str_uuid(5, self.connections) 
         self.connections[conn_id] = {'websocket': websocket,
                                'threads': {},
                                'pubkey': None}
         try:
             async for raw_message in websocket:
-                message_in = json.loads(raw_message[32:])
                 thread_id = raw_message[:32]
+                if thread_id not in self.connections[conn_id]['threads']:
+                    self.connections[conn_id]['threads'][thread_id] = {
+                        'thread_id': thread_id,
+                        'chunks': {},
+                        'services': set(),
+                        'calls': {}}
+                if raw_message[32] != '.':
+                    message_in = json.loads(raw_message[32:])
+                else:
+                    chunk_id = raw_message[33:65]
+                    chunk_x = int(raw_message[65:68])
+                    chunk_n = int(raw_message[68:71])
+
+                    chunk = raw_message[72:]
+
+                    chunks = self.connections[conn_id]['threads'][thread_id]['chunks']
+
+                    if chunk_id not in chunks:
+                        chunks[chunk_id] = {}
+                    
+                    chunks[chunk_id][chunk_x] = chunk
+
+                    if len(chunks[chunk_id]) < chunk_n:
+                        continue
+                    
+                    d = chunks.pop(chunk_id)
+                    message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
+
                 message_out = await self.handle_message(conn_id, thread_id, message_in)
 
                 if message_out is not None:
@@ -72,7 +101,7 @@ class Hub():
 
     async def assign_call(self, function, args=None, kwargs=None, caller_id=None, caller_thread=None, call_id=None):
         if call_id is None:
-            call_id = self.str_uuid(5)
+            call_id = self._str_uuid(10)
         
         call = {
             'call_id': call_id,
@@ -97,6 +126,7 @@ class Hub():
         return call_id
     
     async def handle_message(self, conn_id, thread_id, m):
+
         if 'method' not in m:
             return 'MALFORMED MESSAGE: `method` not found in message'
 
@@ -136,12 +166,6 @@ class Hub():
 
             self.services[m['function']]['workers'].add((conn_id, thread_id))
             
-            if thread_id not in self.connections[conn_id]['threads']:
-                self.connections[conn_id]['threads'][thread_id] = {
-                    'thread_id': thread_id,
-                    'services': set(),
-                    'calls': {}
-                }
             self.connections[conn_id]['threads'][thread_id]['services'].add(m['function'])
             return len(self.services[m['function']]['workers'])
 
@@ -203,14 +227,28 @@ class Hub():
             await self.close_thread(conn_id, thread)
             return None
 
+        if m['method'] == 'ECHO':
+            return m
+
         return 'Error: method not found ' + m['method']
     
     async def _send(self, conn_id, thread_id, message):
-        await self.connections[conn_id]['websocket'].send(thread_id+json.dumps(message))
+        dump = json.dumps(message)
+        ws = self.connections[conn_id]['websocket']
 
-    async def start(self, host='localhost', port=3388):
+        if len(dump) >= (2**20-32):
+            n = (len(dump)-1)//(2**20-72) + 1
+            chunk_id = uuid4().hex
+            for i in range(n):
+                await ws.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
+                              dump[(i*(2**20-72)):((i+1)*(2**20-72))])
+        else:
+            await ws.send(thread_id+dump)
+
+    async def start(self, host='localhost', port=3388, **kwargs):
         self.server = await websockets.serve(self.handle_client, host, port, 
-                                             process_request=self.handle_incoming)
+                                             process_request=self.handle_incoming,
+                                             **kwargs)
         return self
     
     async def close(self):

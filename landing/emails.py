@@ -13,7 +13,7 @@ async def main():
         try:
             c = await Server(private_key_path='PRIVATE.pem').connect()
 
-            await c.publish(log_email, 'register_email', 'Thank you for registering!')
+            await c.publish('register_email', 'Thank you for registering!')
             await c.serve(log_email, 'register_email')
         except Exception as e:
             print(e)

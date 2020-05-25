@@ -2,7 +2,7 @@ import json
 import asyncio
 import websockets
 import time
-import uuid
+from uuid import uuid4
 from collections import deque
 from .encryption import generate_public_serial, read_private_key, sign
 
@@ -55,7 +55,7 @@ class Server:
     async def close(self):
         return await self.c.close()
     
-    async def publish(self, function, function_name, static_page=None):
+    async def publish(self, function_name, static_page=None):
         message = {'method': 'PUBLISH', 'function': function_name} 
         if static_page is not None:
             message['static'] = static_page
@@ -94,21 +94,32 @@ class Server:
 class Thread:
     def __init__(self, connection):
         while True:
-            thread_id = uuid.uuid4().hex
+            thread_id = uuid4().hex
             if thread_id not in connection.threads:
                 connection.threads[thread_id] = self
                 break
 
         self.event = asyncio.Event()
         self.queue = deque()
+        self.chunks = {}
         self.thread_id = thread_id
         self.connection = connection
 
     async def send(self, message):
         if not self.connection.is_connected():
             await self.connection.connect()
-        
-        await self.connection.hub.send(self.thread_id+json.dumps(message))
+        dump = json.dumps(message)
+        ws = self.connection.hub
+        thread_id = self.thread_id
+
+        if len(dump) >= (2**20-32):
+            chunk_id = uuid4().hex
+            n = (len(dump)-1)//(2**20-72) + 1
+            for i in range(n):
+                await ws.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
+                              dump[(i*(2**20-72)):((i+1)*(2**20-72))])
+        else:
+            await ws.send(thread_id+dump)
 
     async def recv(self):
         await self.event.wait()
@@ -169,8 +180,30 @@ class Connection:
     async def _listen(self):
         while True:
             raw_message = await self.hub.recv()
-            message = json.loads(raw_message[32:])
             thread_id = raw_message[:32]
+
+            if raw_message[32] != '.':
+                message = json.loads(raw_message[32:])
+            else:
+                chunk_id = raw_message[33:65]
+                chunk_x = int(raw_message[65:68])
+                chunk_n = int(raw_message[68:71])
+
+                chunk = raw_message[72:]
+
+                chunks = self.threads[thread_id].chunks
+
+                if chunk_id not in chunks:
+                    chunks[chunk_id] = {}
+                
+                chunks[chunk_id][chunk_x] = chunk
+
+                if len(chunks[chunk_id]) < chunk_n:
+                    continue
+                
+                d = chunks.pop(chunk_id)
+                message = json.loads(''.join([d[i] for i in range(chunk_n)]))
+
             if thread_id in self.threads:
                 self.threads[thread_id].queue.appendleft(message)
                 self.threads[thread_id].event.set()
