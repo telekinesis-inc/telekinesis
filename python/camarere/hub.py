@@ -5,7 +5,7 @@ from uuid import uuid4
 from collections import deque
 import time
 import http
-from .encryption import verify
+from .common import verify
 
 class Hub():
     def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK', allow_origins=None):
@@ -89,6 +89,7 @@ class Hub():
                     await self._send(conn_id, thread_id, message_out)
         finally:
             connection = self.connections.pop(conn_id)
+            print(conn_id, 'disconnected')
             for thread_id in connection['threads']:
                 await self.close_thread(conn_id, connection['threads'][thread_id])
 
@@ -163,10 +164,16 @@ class Hub():
                 return 'MALFORMED MESSAGE: `function` not found in `OFFER` message'
             if m['function'] not in self.services:
                 return 'SERVICE NOT FOUND'
+            self.connections[conn_id]['threads'][thread_id]['services'].add(m['function'])
+
+            if self.services[m['function']]['backlog']:
+                await self._send(conn_id, thread_id, -1)
+                new_call = self.services[m['function']]['backlog'].pop()
+                self.connections[conn_id]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
+                return {'args': new_call['args'], 'kwargs': new_call['kwargs'], 'call_id': new_call['call_id']}
 
             self.services[m['function']]['workers'].add((conn_id, thread_id))
             
-            self.connections[conn_id]['threads'][thread_id]['services'].add(m['function'])
             return len(self.services[m['function']]['workers'])
 
         if m['method'] == 'CALL':

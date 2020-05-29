@@ -1,10 +1,11 @@
+from collections import namedtuple
+import base64
+import json
+
 import cryptography
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
-import base64
-
-
 
 PAD_ENCRYPT = padding.OAEP(
             mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -15,6 +16,8 @@ PAD_SIGN = padding.PSS(
     mgf=padding.MGF1(hashes.SHA256()),
     salt_length=padding.PSS.MAX_LENGTH
 )
+
+Token = namedtuple('Token', ['created_by', 'signature', 'payload'])
 
 encode = lambda x, enc=base64.b64encode: str(enc(x), 'utf-8')
 decode = lambda y, enc=base64.b64decode: enc(bytes(y, 'utf-8'))
@@ -69,21 +72,59 @@ def verify(signature, message, public_serial):
     return deserialize_public_key(public_serial)\
              .verify(decode(signature, base64.b32decode), bytes(message, 'utf-8'), PAD_SIGN, hashes.SHA3_256())
 
+def extend_permissions(from_private_key, from_role, recipient, sub_role, recipient_is_role=False):
+    payload = json.dumps({
+        'from_role': from_role,
+        'recipient': recipient,
+        'recipient_is_role': recipient_is_role,
+        'sub_role': sub_role,
+    })
+    return Token(generate_public_serial(from_private_key),
+                 sign(payload, from_private_key),
+                 payload)
 
-# public_key.encrypt(b'test', PAD_ENCRYPT), PAD_ENCRYPT)
+def check_extension(token):
+    try:
+        verify(token.signature, token.payload, token.created_by)
+        return True
+    except:
+        pass
+    return False
 
-# public_key.verify(, b'test2', PAD_SIGN, hashes.SHA3_256())
+def list_roles(root_serial, public_serial, *tokens):
+    def add_sub(d, i, v):
+        if i not in d:
+            d[i] = set()
+        d[i].add(v)            
+    
+    validated_serials = {}
+    add_sub(validated_serials, root_serial, ())
+    
+    validated_roles = {}
+    
+    remaining_tokens = set([Token(*t) for t in tokens])
+    while True:
+        for token in remaining_tokens:
+            if token.created_by in validated_serials:
+                payload = json.loads(token.payload)
+                for k in payload:
+                    if isinstance(payload[k], list):
+                        payload[k] = tuple(payload[k])
 
-# read_data = []
-# private_key = read_private()
-# with open('test.txt', "rb") as f:
-#     for encrypted in f:
-#         print(encrypted)
-#         read_data.append(
-#             private_key.decrypt(
-#                 encrypted,
-#             padding.OAEP(
-#                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
-#                 algorithm=hashes.SHA256(),
-#                 label=None
-#             )))
+                if payload['from_role'] in validated_serials[token.created_by]:
+                    if check_extension(token):
+                        new_role = tuple(payload['from_role']) + tuple(payload['sub_role'])
+                        if payload['recipient_is_role']:
+                            add_sub(validated_roles, payload['recipient'], new_role)
+                            for serial in validated_serials:
+                                if payload['recipient'] in validated_serials[serial]:
+                                    add_sub(validated_serials, serial, new_role)
+                        else:
+                            add_sub(validated_serials, payload['recipient'], new_role)
+                            if new_role in validated_roles:
+                                for sub_role in validated_roles[new_role]:
+                                    add_sub(validated_serials, payload['recipient'], sub_role)
+                    remaining_tokens.remove(token)
+                    break
+        else:
+            return validated_serials.get(public_serial)

@@ -4,7 +4,7 @@ import websockets
 import time
 from uuid import uuid4
 from collections import deque
-from .encryption import generate_public_serial, read_private_key, sign
+from .common import generate_public_serial, read_private_key, sign
 
 class Client:
     def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
