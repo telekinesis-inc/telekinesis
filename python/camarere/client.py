@@ -4,7 +4,7 @@ import websockets
 import time
 from uuid import uuid4
 from collections import deque
-from .common import generate_public_serial, read_private_key, sign
+from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key
 
 class Client:
     def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
@@ -142,15 +142,18 @@ class Thread:
         await self.close()
 
 class Connection:
-    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None):
+    def __init__(self, url='ws://localhost:3388', auth_file=None, key_password=None):
         self.url = url
         self.is_connected = lambda: False
         self.threads = {}
+        self.role_certificates = []
 
-        if private_key_path is None:
-            self.private_key = None
-        else:
-            self.private_key = read_private_key(private_key_path, key_password)
+        self.private_key = create_private_key()
+
+        # if private_key_path is None:
+        #     self.private_key = None
+        # else:
+        #     self.private_key = read_private_key(private_key_path, key_password)
         self.hub = None
         self.listener = None
 
@@ -159,23 +162,26 @@ class Connection:
         self.is_connected = lambda: not self.hub.closed
 
         self.listener = asyncio.create_task(self._listen())
+        self.roles = []
 
-        async with Thread(self) as thread:
-            if self.private_key is not None: # Authenticate
-                pubkey = generate_public_serial(self.private_key)
-                timestamp = str(int(time.time()))
-                signature = sign(timestamp, self.private_key)
-
-                await thread.send({
-                    'method': 'AUTHENTICATE',
-                    'pubkey': pubkey,
-                    'timestamp': timestamp,
-                    'signature': signature
-                })
-            else:
-                await thread.send({'method': 'SKIP_AUTH'})
-            print(await thread.recv())
+        await self.authenticate()
         return self
+    
+    async def authenticate(self):
+        async with Thread(self) as thread:
+            pubkey = generate_public_serial(self.private_key)
+            timestamp = str(int(time.time()))
+            signature = sign(timestamp, self.private_key)
+
+            await thread.send({
+                'method': 'AUTHENTICATE',
+                'pubkey': pubkey,
+                'timestamp': timestamp,
+                'signature': signature,
+                'role_certificates': self.role_certificates
+            })
+            self.roles = await thread.recv()
+
     
     async def _listen(self):
         while True:

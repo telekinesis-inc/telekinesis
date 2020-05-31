@@ -1,6 +1,7 @@
 from collections import namedtuple
 import base64
 import json
+from uuid import uuid4
 
 import cryptography
 from cryptography.hazmat.backends import default_backend
@@ -22,28 +23,28 @@ Token = namedtuple('Token', ['created_by', 'signature', 'payload'])
 encode = lambda x, enc=base64.b64encode: str(enc(x), 'utf-8')
 decode = lambda y, enc=base64.b64decode: enc(bytes(y, 'utf-8'))
 
-def read_private_key(path, password=None):
-    with open(path, "rb") as key_file:
-        private_key = serialization.load_pem_private_key(
-            key_file.read(),
-            password=None if password is None else bytes(password, 'utf-8'),
-            backend=default_backend()
-        )
-    return private_key
+def deserialize_private_key(private_key_serial, password=None):
+    return serialization.load_pem_private_key(
+        bytes(private_key_serial, 'utf-8'),
+        password=None if password is None else bytes(password, 'utf-8'),
+        backend=default_backend()
+    )
 
-def create_private_key(path, password=None):
-    private_key = rsa.generate_private_key(
+def create_private_key():
+    return rsa.generate_private_key(
         public_exponent=65537,
         key_size=3072,
         backend=default_backend()
     )
+
+def serialize_private_key(private_key, password=None):
     serial_private = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption() if password is None
                              else serialization.BestAvailableEncryption(bytes(password, 'utf-8'))
     )
-    with open(path, 'wb') as f: f.write(serial_private)
+    return str(serial_private, 'utf-8')
 
 def generate_public_serial(private_key):
     serial_pub = private_key.public_key().public_bytes(
@@ -72,7 +73,7 @@ def verify(signature, message, public_serial):
     return deserialize_public_key(public_serial)\
              .verify(decode(signature, base64.b32decode), bytes(message, 'utf-8'), PAD_SIGN, hashes.SHA3_256())
 
-def extend_permissions(from_private_key, from_role, recipient, sub_role, recipient_is_role=False):
+def extend_role(from_private_key, from_role, recipient, sub_role, recipient_is_role=False):
     payload = json.dumps({
         'from_role': from_role,
         'recipient': recipient,
@@ -98,7 +99,7 @@ def list_roles(root_serial, public_serial, *tokens):
         d[i].add(v)            
     
     validated_serials = {}
-    add_sub(validated_serials, root_serial, ())
+    add_sub(validated_serials, root_serial, ('', 0))
     
     validated_roles = {}
     
@@ -113,7 +114,9 @@ def list_roles(root_serial, public_serial, *tokens):
 
                 if payload['from_role'] in validated_serials[token.created_by]:
                     if check_extension(token):
-                        new_role = tuple(payload['from_role']) + tuple(payload['sub_role'])
+                        sep = '' if '' in [payload['from_role'][0], payload['sub_role'][0]] else '/'
+                        new_role = (payload['from_role'][0] + sep + payload['sub_role'][0],
+                                    max(payload['from_role'][1], payload['sub_role'][1]))
                         if payload['recipient_is_role']:
                             add_sub(validated_roles, payload['recipient'], new_role)
                             for serial in validated_serials:
@@ -127,4 +130,64 @@ def list_roles(root_serial, public_serial, *tokens):
                     remaining_tokens.remove(token)
                     break
         else:
-            return validated_serials.get(public_serial)
+            return validated_serials.get(public_serial) or set()
+
+def check_min_role(min_roles, roles):
+    for min_role in min_roles:
+        for role in roles:
+
+            role_path = ('/' if role[0].strip('/') else '') + role[0].strip('/') + '/'
+            min_role_path = ('/' if min_role[0].strip('/*') else '') + min_role[0].strip('/*') + '/'
+
+            if min_role and min_role[0][-1] == '*':
+                nchars = min(len(min_role_path), len(role_path))
+            else:
+                nchars = len(role_path)
+
+            if min_role_path[:nchars] == role_path[:nchars]:
+                if role[1] <= min_role[1]:
+                    return True
+    return False
+
+def decode_message(raw_message, threads):
+    thread_id = raw_message[:32]
+    if threads is not None and thread_id not in threads:
+        threads[thread_id] = {
+            'thread_id': thread_id,
+            'chunks': {},
+            'services': set(),
+            'calls': {}}
+    if raw_message[32] != '.':
+        message_in = json.loads(raw_message[32:])
+    else:
+        chunk_id = raw_message[33:65]
+        chunk_x = int(raw_message[65:68])
+        chunk_n = int(raw_message[68:71])
+
+        chunk = raw_message[72:]
+
+        chunks = threads[thread_id]['chunks']
+
+        if chunk_id not in chunks:
+            chunks[chunk_id] = {}
+        
+        chunks[chunk_id][chunk_x] = chunk
+
+        if len(chunks[chunk_id]) < chunk_n:
+            return thread_id, None
+        
+        d = chunks.pop(chunk_id)
+        message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
+
+    return thread_id, message_in
+
+async def encode_message(thread_id, message, websocket):
+    dump = json.dumps(message)
+    if len(dump) >= (2**20-32):
+        n = (len(dump)-1)//(2**20-72) + 1
+        chunk_id = uuid4().hex
+        for i in range(n):
+            await websocket.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
+                            dump[(i*(2**20-72)):((i+1)*(2**20-72))])
+    else:
+        await websocket.send(thread_id+dump)

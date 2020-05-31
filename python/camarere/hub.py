@@ -5,15 +5,12 @@ from uuid import uuid4
 from collections import deque
 import time
 import http
-from .common import verify
+from .common import verify, list_roles, check_min_role, decode_message, encode_message
 
 class Hub():
-    def __init__(self, master_pubkeys=None, parent=None, peers=None, path_privkey=None, unautheticated_message='OK', allow_origins=None):
-        self.master_pubkeys = master_pubkeys if (isinstance(master_pubkeys, list) 
-                                                 or master_pubkeys is None ) \
-                                             else [master_pubkeys]
+    def __init__(self, root_pubkey=None, parent=None, peers=None, allow_origins=None):
+        self.root_pubkey = root_pubkey
 
-        self.unautheticated_message = unautheticated_message
         self.static = {}
         self.connections = {}
         self.services = {}
@@ -48,55 +45,37 @@ class Hub():
 
     async def handle_client(self, websocket, path):
 
-        conn_id = self._str_uuid(5, self.connections) 
-        self.connections[conn_id] = {'websocket': websocket,
-                               'threads': {},
-                               'pubkey': None}
+        thread_id, message_in = decode_message(await websocket.recv(), None)
+        
+        pubkey, roles = self.authenticate(message_in)
+
+        print('new connection', pubkey[100:105])
+
+        self.connections[pubkey] = {'websocket': websocket,
+                                    'threads': {},
+                                    'roles': roles}
+        
         try:
+            await self._send(pubkey, thread_id, list(roles))
+
             async for raw_message in websocket:
-                thread_id = raw_message[:32]
-                if thread_id not in self.connections[conn_id]['threads']:
-                    self.connections[conn_id]['threads'][thread_id] = {
-                        'thread_id': thread_id,
-                        'chunks': {},
-                        'services': set(),
-                        'calls': {}}
-                if raw_message[32] != '.':
-                    message_in = json.loads(raw_message[32:])
-                else:
-                    chunk_id = raw_message[33:65]
-                    chunk_x = int(raw_message[65:68])
-                    chunk_n = int(raw_message[68:71])
-
-                    chunk = raw_message[72:]
-
-                    chunks = self.connections[conn_id]['threads'][thread_id]['chunks']
-
-                    if chunk_id not in chunks:
-                        chunks[chunk_id] = {}
-                    
-                    chunks[chunk_id][chunk_x] = chunk
-
-                    if len(chunks[chunk_id]) < chunk_n:
-                        continue
-                    
-                    d = chunks.pop(chunk_id)
-                    message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
-
-                message_out = await self.handle_message(conn_id, thread_id, message_in)
+                thread_id, message_in = decode_message(raw_message, self.connections[pubkey]['threads'])
+                if message_in is None:
+                    continue
+                message_out = await self.handle_message(pubkey, thread_id, message_in)
 
                 if message_out is not None:
-                    await self._send(conn_id, thread_id, message_out)
+                    await self._send(pubkey, thread_id, message_out)
         finally:
-            connection = self.connections.pop(conn_id)
-            print(conn_id, 'disconnected')
+            connection = self.connections.pop(pubkey)
+            print('connection disconnected', pubkey[100:105])
             for thread_id in connection['threads']:
-                await self.close_thread(conn_id, connection['threads'][thread_id])
+                await self.close_thread(pubkey, connection['threads'][thread_id])
 
-    async def close_thread(self, conn_id, thread):
+    async def close_thread(self, pubkey, thread):
         if thread is not None:
             for service in thread['services']:
-                self.services[service]['workers'].remove((conn_id, thread['thread_id']))
+                self.services[service]['workers'].remove((pubkey, thread['thread_id']))
             for call_id in thread['calls']:
                 await self.assign_call(**thread['calls'][call_id])
 
@@ -126,32 +105,40 @@ class Hub():
             self.services[call['function']]['backlog'].appendleft(call)
         return call_id
     
-    async def handle_message(self, conn_id, thread_id, m):
+    def authenticate(self, m):
+        if 'pubkey' not in m or 'timestamp' not in m or 'signature' not in m:
+            raise Exception('MALFORMED MESSAGE: `pubkey` or `timestamp` or `signature` not found in `AUTHENTICATE` message')
+
+        if verify(m['signature'], m['timestamp'], m['pubkey']) is None and (int(m['timestamp']) > time.time()-15):
+            pubkey = m['pubkey']
+
+            roles = list_roles(self.root_pubkey, m['pubkey'], *m['role_certificates']) if 'role_certificates' in m else set()
+            return pubkey, roles
+        raise Exception('Bad Authentication')
+
+    async def handle_message(self, pubkey, thread_id, m):
 
         if 'method' not in m:
             return 'MALFORMED MESSAGE: `method` not found in message'
 
         if m['method'] == 'AUTHENTICATE':
-            if 'pubkey' not in m or 'timestamp' not in m or 'signature' not in m:
-                return 'MALFORMED MESSAGE: `pubkey` or `timestamp` or `signature` not found in `AUTHENTICATE` message'
-    
-            if verify(m['signature'], m['timestamp'], m['pubkey']) is None and (int(m['timestamp']) > time.time()-15):
-                self.connections[conn_id]['pubkey'] = m['pubkey']
-                return 'OK'
-            return 'Error: Bad Authentication'
-
-        if m['method'] == 'SKIP_AUTH':
-            return self.unautheticated_message
+            pubkey, roles = self.authenticate(m)
+            self.connections[pubkey]['roles'] = roles
+            return list(roles)
 
         if m['method'] == 'PUBLISH':
-            if self.master_pubkeys is not None:
-                if self.connections[conn_id]['pubkey'] not in self.master_pubkeys:
-                    return 'UNAUTHORIZED'
-
             if 'function' not in m:
                 return 'MALFORMED MESSAGE: `function` not found in `PUBLISH` message'
+            
+            if self.root_pubkey is not None:
+                if not check_min_role([(m['function'], 0)], self.connections[pubkey]['roles']):
+                    return 'UNAUTHORIZED'
+
             self.services[m['function']] = {'workers': set(),
-                                            'backlog': deque()}
+                                            'backlog': deque(),
+                                            'can_call': m.get('can_call') or [],
+                                            'can_serve': m.get('can_serve') or [],
+                                            'cannot_list': m.get('cannot_list') or []}
 
             if 'static' in m:
                 static = m['static'] if isinstance(m['static'], dict) else {'content': m['static']}
@@ -164,15 +151,19 @@ class Hub():
                 return 'MALFORMED MESSAGE: `function` not found in `OFFER` message'
             if m['function'] not in self.services:
                 return 'SERVICE NOT FOUND'
-            self.connections[conn_id]['threads'][thread_id]['services'].add(m['function'])
+            if self.root_pubkey is not None:
+                if not check_min_role([(m['function'], 1)] + self.services[m['function']]['can_serve'], 
+                                      self.connections[pubkey]['roles']):
+                    return 'UNAUTHORIZED'
+            self.connections[pubkey]['threads'][thread_id]['services'].add(m['function'])
 
             if self.services[m['function']]['backlog']:
-                await self._send(conn_id, thread_id, -1)
+                await self._send(pubkey, thread_id, -1)
                 new_call = self.services[m['function']]['backlog'].pop()
-                self.connections[conn_id]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
+                self.connections[pubkey]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
                 return {'args': new_call['args'], 'kwargs': new_call['kwargs'], 'call_id': new_call['call_id']}
 
-            self.services[m['function']]['workers'].add((conn_id, thread_id))
+            self.services[m['function']]['workers'].add((pubkey, thread_id))
             
             return len(self.services[m['function']]['workers'])
 
@@ -181,13 +172,17 @@ class Hub():
                 return 'MALFORMED MESSAGE: `function` not found in `CALL` message'
             if m['function'] not in self.services:
                 return 'SERVICE NOT FOUND'
-            
-            return await self.assign_call(m['function'], m.get('args'), m.get('kwargs'), conn_id, thread_id)
+            if self.root_pubkey is not None:
+                if not check_min_role([(m['function'], 2)] + self.services[m['function']]['can_serve'], 
+                                      self.connections[pubkey]['roles']):
+                    return 'UNAUTHORIZED'
+               
+            return await self.assign_call(m['function'], m.get('args'), m.get('kwargs'), pubkey, thread_id)
 
         if m['method'] == 'RETURN':
             if 'call_id' not in m:
                 return 'MALFORMED MESSAGE: `call_id` not found in `RETURN` message'
-            call = self.connections[conn_id]['threads'][thread_id]['calls'].pop(m['call_id'], None)
+            call = self.connections[pubkey]['threads'][thread_id]['calls'].pop(m['call_id'], None)
 
             if 'return' in m:
                 if call['caller_id'] in self.connections:
@@ -195,11 +190,11 @@ class Hub():
 
             if self.services[call['function']]['backlog']:
                 new_call = self.services[call['function']]['backlog'].pop()
-                self.connections[conn_id]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
+                self.connections[pubkey]['threads'][thread_id]['calls'][new_call['call_id']] = new_call
                 return {'args': new_call['args'], 'kwargs': new_call['kwargs'], 'call_id': new_call['call_id']}
 
             else:
-                self.services[call['function']]['workers'].add((conn_id, thread_id))
+                self.services[call['function']]['workers'].add((pubkey, thread_id))
 
             return len(self.services[call['function']]['backlog'])
 
@@ -207,8 +202,9 @@ class Hub():
             return list(self.services.keys())
 
         if m['method'] == 'REMOVE':
-            if self.master_pubkeys is not None:
-                if self.connections[conn_id]['pubkey'] not in self.master_pubkeys:
+            if self.root_pubkey is not None:
+                if not check_min_role([(m['function'], 0)], 
+                                      self.connections[pubkey]['roles']):
                     return 'UNAUTHORIZED'
 
             if 'function' not in m:
@@ -230,8 +226,8 @@ class Hub():
             return m['function'] + ' removed'
 
         if m['method'] == 'CLOSE_THREAD':
-            thread = self.connections[conn_id]['threads'].pop(thread_id, None)
-            await self.close_thread(conn_id, thread)
+            thread = self.connections[pubkey]['threads'].pop(thread_id, None)
+            await self.close_thread(pubkey, thread)
             return None
 
         if m['method'] == 'ECHO':
@@ -239,18 +235,8 @@ class Hub():
 
         return 'Error: method not found ' + m['method']
     
-    async def _send(self, conn_id, thread_id, message):
-        dump = json.dumps(message)
-        ws = self.connections[conn_id]['websocket']
-
-        if len(dump) >= (2**20-32):
-            n = (len(dump)-1)//(2**20-72) + 1
-            chunk_id = uuid4().hex
-            for i in range(n):
-                await ws.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
-                              dump[(i*(2**20-72)):((i+1)*(2**20-72))])
-        else:
-            await ws.send(thread_id+dump)
+    async def _send(self, pubkey, thread_id, message):
+        await encode_message(thread_id, message, self.connections[pubkey]['websocket'])
 
     async def start(self, host='localhost', port=3388, **kwargs):
         self.server = await websockets.serve(self.handle_client, host, port, 
