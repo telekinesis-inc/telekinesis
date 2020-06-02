@@ -73,11 +73,10 @@ def verify(signature, message, public_serial):
     return deserialize_public_key(public_serial)\
              .verify(decode(signature, base64.b32decode), bytes(message, 'utf-8'), PAD_SIGN, hashes.SHA3_256())
 
-def extend_role(from_private_key, from_role, recipient, sub_role, recipient_is_role=False):
+def extend_role(from_private_key, from_role, recipient, sub_role):
     payload = json.dumps({
         'from_role': from_role,
         'recipient': recipient,
-        'recipient_is_role': recipient_is_role,
         'sub_role': sub_role,
     })
     return Token(generate_public_serial(from_private_key),
@@ -117,7 +116,8 @@ def list_roles(root_serial, public_serial, *tokens):
                         sep = '' if '' in [payload['from_role'][0], payload['sub_role'][0]] else '/'
                         new_role = (payload['from_role'][0] + sep + payload['sub_role'][0],
                                     max(payload['from_role'][1], payload['sub_role'][1]))
-                        if payload['recipient_is_role']:
+
+                        if len(payload['recipient']) < len(public_serial): # Recipient is role
                             add_sub(validated_roles, payload['recipient'], new_role)
                             for serial in validated_serials:
                                 if payload['recipient'] in validated_serials[serial]:
@@ -133,6 +133,9 @@ def list_roles(root_serial, public_serial, *tokens):
             return validated_serials.get(public_serial) or set()
 
 def check_min_role(min_roles, roles):
+    if '*' in [m[0] for m in min_roles]:
+        return True
+
     for min_role in min_roles:
         for role in roles:
 
@@ -156,7 +159,9 @@ def decode_message(raw_message, threads):
             'thread_id': thread_id,
             'chunks': {},
             'services': set(),
-            'calls': {}}
+            'call_requests': {},
+            'calls_processing': {}}
+
     if raw_message[32] != '.':
         message_in = json.loads(raw_message[32:])
     else:
