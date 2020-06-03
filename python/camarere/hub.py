@@ -8,7 +8,10 @@ import http
 from .common import verify, list_roles, check_min_role, decode_message, encode_message
 
 class Hub():
-    def __init__(self, root_pubkey=None, parent=None, peers=None, allow_origins=None):
+    def __init__(self, host='localhost', port=3388, root_pubkey=None, parent=None, peers=None, allow_origins=None):
+        self.host = host
+        self.port = port
+
         self.root_pubkey = root_pubkey
 
         self.static = {}
@@ -33,7 +36,7 @@ class Hub():
         if route in self.static:
             page = self.static[route]
             if 'function' in page:
-                await self._call(page['function'], 
+                await self._call(page['function'], args=[],
                         kwargs={kv.split('=')[0]: '='.join(kv.split('=')[1:]) for kv in query.split('&')})
 
             return http.HTTPStatus(page['code'] if 'code' in page else 200), \
@@ -201,8 +204,9 @@ class Hub():
                     return {'error': 'UNAUTHORIZED'}
                
             return {'signature': self.services[m['function']]['signature'], 
-                    'can_serve': check_min_role([(m['function'], 2)] + self.services[m['function']]['can_serve'], 
-                                                self.connections[pubkey]['roles'])}
+                    'can_serve': self.root_pubkey is None or check_min_role([(m['function'], 1)] + \
+                                                             self.services[m['function']]['can_serve'], \
+                                                             self.connections[pubkey]['roles'])}
 
         if m['method'] == 'CALL':
             if 'function' not in m:
@@ -267,13 +271,13 @@ class Hub():
                 for worker_id, worker_thread in service['workers']:
                     if worker_id in self.connections and m['function'] in self.connections[worker_id]['threads'][worker_thread]['services']:
                         self.connections[worker_id]['threads'][worker_thread]['services'].remove(m['function'])
-                        await self._send(worker_id, worker_thread, m['function'] + ' removed')
+                        await self._send(worker_id, worker_thread, {'service_removed': m['function'] + ' removed'})
 
                 for call in service['backlog']:
                     if call['caller_id'] in self.connections:
-                        await self._send(call['caller_id'], call['caller_thread'], m['function'] + ' removed')
+                        await self._send(call['caller_id'], call['caller_thread'], {'error': m['function'] + ' removed'})
 
-            return m['function'] + ' removed'
+            return 'Done' #m['function'] + ' removed'
 
         if m['method'] == 'CLOSE_THREAD':
             thread = self.connections[pubkey]['threads'].pop(thread_id, None)
@@ -288,8 +292,8 @@ class Hub():
     async def _send(self, pubkey, thread_id, message):
         await encode_message(thread_id, message, self.connections[pubkey]['websocket'])
 
-    async def start(self, host='localhost', port=3388, **kwargs):
-        self.server = await websockets.serve(self.handle_client, host, port, 
+    async def start(self, **kwargs):
+        self.server = await websockets.serve(self.handle_client, self.host, self.port, 
                                              process_request=self.handle_incoming,
                                              **kwargs)
         return self

@@ -142,7 +142,7 @@ def check_min_role(min_roles, roles):
             role_path = ('/' if role[0].strip('/') else '') + role[0].strip('/') + '/'
             min_role_path = ('/' if min_role[0].strip('/*') else '') + min_role[0].strip('/*') + '/'
 
-            if min_role and min_role[0][-1] == '*':
+            if min_role and min_role[0] and min_role[0][-1] == '*':
                 nchars = min(len(min_role_path), len(role_path))
             else:
                 nchars = len(role_path)

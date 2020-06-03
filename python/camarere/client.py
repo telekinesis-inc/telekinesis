@@ -16,10 +16,10 @@ from makefun import create_function
 from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
                     serialize_private_key, deserialize_private_key, extend_role
 
-class Client:
-    def __init__(self, url='ws://localhost:3388', private_key_path=None, key_password=None, connection=None):
+class Node:
+    def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
         if connection is None:
-            self.connection = Connection(url, private_key_path, key_password)
+            self.connection = Connection(url, auth_file_path, key_password)
         else:
             self.connection = connection
 
@@ -40,7 +40,7 @@ class Client:
 
         return self._create_service_instance(message['signature'], function_name, can_serve=message['can_serve'])
 
-    async def define_service(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
+    async def publish_service(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
         signature = str(inspect.signature(function_impl))
         if inject_first_arg:
             signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
@@ -52,7 +52,7 @@ class Client:
         async with Thread(self.connection) as thread:
             await thread.send(message)
             message = await thread.recv()
-            print(message)
+            # print(message)
 
         return self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg)
 
@@ -220,14 +220,16 @@ class Connection:
         self.update_auth_file_params(auth_file, key_password)
 
         if self.auth_file is not None:
-            json.dump({'private_key': serialize_private_key(self.private_key, self.hashed_key_password),
-                    'role_certificates': self.role_certificates}, self.auth_file)
+            with open(self.auth_file, 'w') as fp:
+                json.dump({'private_key': serialize_private_key(self.private_key, self.hashed_key_password),
+                           'role_certificates': self.role_certificates}, fp)
 
     def load_auth_file(self, auth_file=None, key_password=None):
         self.update_auth_file_params(auth_file, key_password)
 
         if self.auth_file is not None:
-            auth_data = json.load(self.auth_file) 
+            with open(self.auth_file, 'r') as fp:
+                auth_data = json.load(fp) 
 
             self.private_key = deserialize_private_key(auth_data['private_key'], self.hashed_key_password)
             self.role_certificates = auth_data['role_certificates']
@@ -239,7 +241,7 @@ class Connection:
         if key_password is not None:
             if key_password == True:
                 key_password = getpass('Private Key Password: ')
-            self.hashed_key_password = hashlib.sha256(key_password).digest
+            self.hashed_key_password = hashlib.sha256(bytes(key_password, 'utf-8')).hexdigest()
 
     async def _listen(self):
         while True:
@@ -304,6 +306,9 @@ class Request:
                 self.caller_pubkey = call['caller_pubkey']
 
                 return self
+            elif 'service_removed' in message:
+                print(message['service_removed'])
+                return None
             else:
                 print('Unexpected message:', message)
 

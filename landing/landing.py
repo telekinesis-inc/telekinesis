@@ -1,4 +1,4 @@
-from camarere import Server
+from camarere import Node
 from datetime import datetime
 import asyncio
 
@@ -11,18 +11,18 @@ async def main():
 
     with open('landing.html', 'r') as f:
         LANDING = f.read()
-    
-    c = []
+    client = Node(auth_file_path='root.pem', key_password=True)
     while True:
         try:
-            c = await Server(private_key_path='PRIVATE.pem').connect()
-            await c.publish('', LANDING)
-            await c.serve(log_enter, '')
+            await client.connect()
+            
+            service = await client.publish_service('', log_enter, LANDING)
+            
+            await service.run()
         except Exception as e:
             print(e)
             await asyncio.sleep(1)
         finally:
-            if c:
-                await c.close()
+            await client.close()
 
 asyncio.run(main())
