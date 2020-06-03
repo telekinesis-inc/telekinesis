@@ -253,7 +253,8 @@ class Hub():
             return
 
         if m['method'] == 'LIST':
-            return list(self.services.keys())
+            return [x for x in self.services.keys() if self.root_pubkey is None or \
+                          check_min_role([(x, 2)] + self.services[x]['can_call'], self.connections[pubkey]['roles'])]
 
         if m['method'] == 'REMOVE':
             if self.root_pubkey is not None:

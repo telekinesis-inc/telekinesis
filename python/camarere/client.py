@@ -190,7 +190,7 @@ class Connection:
         self.hub = await websockets.connect(self.url+'/ws/')
         self.is_connected = lambda: not self.hub.closed
 
-        self.listener = asyncio.create_task(self._listen())
+        self.listener = asyncio.get_event_loop().create_task(self._listen())
 
         await self.authenticate()
         return self
