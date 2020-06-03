@@ -72,7 +72,7 @@ class Client:
                     if inject_first_arg:
                         output = function_impl(req, *req['args'], **req['kwargs'])
                     else:
-                        output = function_impl(*req['args'], **req['kwargs'])
+                        output = function_impl(*req.args, **req.kwargs)
 
                     if asyncio.iscoroutinefunction(function_impl):
                         output = await output
