@@ -1,5 +1,6 @@
 import os
 import inspect
+import re
 
 import json
 import asyncio
@@ -39,8 +40,11 @@ class Client:
 
         return self._create_service_instance(message['signature'], function_name, can_serve=message['can_serve'])
 
-    async def define_service(self, function_name, function_impl, static_page=None, can_call=None):
+    async def define_service(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
         signature = str(inspect.signature(function_impl))
+        if inject_first_arg:
+            signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
+                          .replace('(,','(',1).replace('( ','(',1)
         message = {'method': 'PUBLISH', 'function': function_name, 'signature': signature, 'can_call': can_call} 
         if static_page is not None:
             message['static'] = static_page
@@ -50,9 +54,9 @@ class Client:
             message = await thread.recv()
             print(message)
 
-        return self._create_service_instance(signature, function_name, function_impl, True)
+        return self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg)
 
-    def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False):
+    def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False):
         def create_call():
             return Call(self.connection, function_name)
 
@@ -63,14 +67,14 @@ class Client:
             call = create_call()
             return await call.call(*args, **kwargs)
 
-        async def run_service(function_impl=function_impl, inject_first_arg=False):
+        async def run_service(function_impl=function_impl, inject_first_arg=inject_first_arg):
             if function_impl is None:
                 raise Exception('Function to be served has to be specified somewhere.')
 
             async with Request(self.connection, function_name) as req:
                 while True:
                     if inject_first_arg:
-                        output = function_impl(req, *req['args'], **req['kwargs'])
+                        output = function_impl(req, *req.args, **req.kwargs)
                     else:
                         output = function_impl(*req.args, **req.kwargs)
 
@@ -374,7 +378,6 @@ class Call:
                     else:
                         await self.on_input_request(message['input_request'])
                 if 'role_extension' in message:
-                    print(message)
                     if self.accept_role_extensions:
                         await self.connection.add_role_certificate(message['role_extension'])
                 if 'print' in message:
