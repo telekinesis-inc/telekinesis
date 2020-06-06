@@ -1,7 +1,9 @@
 from collections import namedtuple
 import base64
 import json
+import asyncio
 from uuid import uuid4
+import time
 
 import cryptography
 from cryptography.hazmat.backends import default_backend
@@ -152,47 +154,100 @@ def check_min_role(min_roles, roles):
                     return True
     return False
 
-def decode_message(raw_message, threads):
-    thread_id = raw_message[:32]
-    if threads is not None and thread_id not in threads:
-        threads[thread_id] = {
-            'thread_id': thread_id,
-            'chunks': {},
-            'services': set(),
-            'call_requests': {},
-            'calls_processing': {}}
+async def decode_message(raw_message, get_chunks, connection):
 
-    if raw_message[32] != '.':
-        message_in = json.loads(raw_message[32:])
-    else:
-        chunk_id = raw_message[33:65]
-        chunk_x = int(raw_message[65:68])
-        chunk_n = int(raw_message[68:71])
+    thread_id, message_id = raw_message[:32], raw_message[32:64]
+    chunk_i = None if (len(raw_message) == 64) or (raw_message[64] != '.') else int(raw_message[65:68])
 
-        chunk = raw_message[72:]
-
-        chunks = threads[thread_id]['chunks']
-
-        if chunk_id not in chunks:
-            chunks[chunk_id] = {}
-        
-        chunks[chunk_id][chunk_x] = chunk
-
-        if len(chunks[chunk_id]) < chunk_n:
+    if (len(raw_message) == 64) or ((len(raw_message) == 72) and raw_message[64] == '.'):
+        # print('ack recieved', thread_id, message_id, chunk_i)
+        event = connection.pending_messages.get((thread_id, message_id, chunk_i))
+        if event is not None:
+            event.set()
             return thread_id, None
-        
-        d = chunks.pop(chunk_id)
-        message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
+        raise Exception('there should be an event here', thread_id, message_id, chunk_i)
 
+    # print('sending ack', raw_message[:(64 if chunk_i is None else 72)])
+    await connection.websocket.send(raw_message[:(64 if chunk_i is None else 72)])
+    
+    connection.seen_messages = (set(), set())
+
+    tid = int(time.time()/30)
+    if tid not in connection.seen_messages[tid%2]:
+        connection.seen_messages[tid%2].clear()
+        connection.seen_messages[tid%2].add(tid)
+    mid = (thread_id, message_id)
+
+    if mid not in connection.seen_messages[0] and mid not in connection.seen_messages[1]:
+        if raw_message[64] != '.':
+            message_in = json.loads(raw_message[64:])
+        else:
+            chunk_n = int(raw_message[68:71])
+
+            chunk = raw_message[72:]
+            chunks = get_chunks(thread_id)
+
+            if message_id not in chunks:
+                chunks[message_id] = {}
+            
+            chunks[message_id][chunk_i] = chunk
+
+            if len(chunks[message_id]) < chunk_n:
+                return thread_id, None
+            
+            d = chunks.pop(message_id)
+            message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
+    else:
+        # print('duplicate message', thread_id, message_id)
+        message_in = None
+    
+    connection.seen_messages[tid%2].add(mid)
     return thread_id, message_in
 
-async def encode_message(thread_id, message, websocket):
+async def encode_message(thread_id, message, connection):
     dump = json.dumps(message)
+    message_id = uuid4().hex
+
+    # print('SEND>', thread_id, message_id, message.get('method') if 'get' in dir(message) else None)
+
     if len(dump) >= (2**20-32):
         n = (len(dump)-1)//(2**20-72) + 1
-        chunk_id = uuid4().hex
         for i in range(n):
-            await websocket.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
-                            dump[(i*(2**20-72)):((i+1)*(2**20-72))])
+            asyncio.get_event_loop().create_task(
+                ensure_delivery(connection, thread_id+'.'+message_id+'%03d'%i+'%03d'%n+'.'+\
+                dump[(i*(2**20-72)):((i+1)*(2**20-72))]))
     else:
-        await websocket.send(thread_id+dump)
+        asyncio.get_event_loop().create_task(ensure_delivery(connection, thread_id + message_id + dump))
+
+async def ensure_delivery(connection, raw_message):
+    async def event_wait(event):
+        await event.wait()
+        return
+
+    thread_id, message_id = raw_message[:32], raw_message[32:64]
+    if raw_message[64] != '.':
+        chunk_i = None
+    else:
+        chunk_i = int(raw_message[65:68])
+    
+    # print('START', thread_id, message_id, chunk_i)
+
+    
+    event = asyncio.Event()
+    connection.pending_messages[(thread_id, message_id, chunk_i)] = event
+
+    for i in range(10):
+        try:
+            await connection.websocket.send(raw_message)
+            await asyncio.wait_for(event_wait(event), 3)
+            connection.pending_messages.pop((thread_id, message_id, chunk_i))
+
+            # print('<ACK>', thread_id, message_id, chunk_i)
+            return
+        except asyncio.TimeoutError:
+            await asyncio.sleep(3)
+            # print('RET%02d'%i, thread_id, message_id, chunk_i)
+        except Exception as e:
+            print('retrying message delivery', thread_id, message_id, chunk_i, e)
+    raise Exception('Max retries sending message exceeded', thread_id, message_id, chunk_i)
+

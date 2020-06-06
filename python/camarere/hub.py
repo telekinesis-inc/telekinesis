@@ -1,5 +1,5 @@
 import websockets
-# import asyncio
+import asyncio
 import json
 from uuid import uuid4
 from collections import deque
@@ -48,41 +48,121 @@ class Hub():
 
     async def handle_client(self, websocket, path):
 
-        thread_id, message_in = decode_message(await websocket.recv(), None)
+        client = ConnectionWithClient(websocket)
+        thread_id, message_in = await decode_message(await websocket.recv(), None, client)
+        if message_in is None:
+            print('Invalid authentication')
+            return
         
         pubkey, roles = self._authenticate(message_in)
+        print(pubkey[102:107], thread_id, 'INITIAL AUTHENTICATE')
 
-        print('new connection', pubkey[102:107])
+        if pubkey not in self.connections:
+            self.connections[pubkey] = {'threads': {},
+                                        'roles': roles}
 
-        self.connections[pubkey] = {'websocket': websocket,
-                                    'threads': {},
-                                    'roles': roles}
-        
+        if thread_id not in self.connections[pubkey]['threads']:
+            await self.create_thread(pubkey, thread_id, client)
+        else:
+            old_client = self.connections[pubkey]['threads'][thread_id]['client']
+            old_client.threads.remove(thread_id)
+            for pending_message_key in old_client.pending_messages:
+                if pending_message_key[0] == thread_id:
+                    pending_message = old_client.pop(pending_message_key)
+                    client.pending_messages[pending_message_key] = pending_message
+            client.seen_messages[0].update(old_client.seen_messages[0])
+            client.seen_messages[1].update(old_client.seen_messages[1])
+            client.threads.add(thread_id)
+
         try:
             await self._send(pubkey, thread_id, list(roles))
 
             async for raw_message in websocket:
-                thread_id, message_in = decode_message(raw_message, self.connections[pubkey]['threads'])
+                thread_id, message_in = await decode_message(
+                    raw_message,
+                    lambda tid: self.connections[pubkey]['threads'][tid]['chunks'],
+                    client)
+
+                if thread_id not in self.connections[pubkey]['threads']:
+                    await self.create_thread(pubkey, thread_id, client)
+                client.threads.add(thread_id)
+
                 if message_in is None:
                     continue
                 message_out = await self.handle_message(pubkey, thread_id, message_in)
 
                 if message_out is not None:
                     await self._send(pubkey, thread_id, message_out)
+        except websockets.exceptions.ConnectionClosedOK:
+            print('connection disconnected OK', pubkey[102:107], len(self.connections.get(pubkey)['threads']), 'threads running')
+        except Exception as e:
+            print(pubkey[102:107], 'connection disconnected with errors', len(self.connections.get(pubkey)['threads']), 'threads running', e)
         finally:
-            connection = self.connections.pop(pubkey)
-            print('connection disconnected', pubkey[102:107])
-            for thread_id in connection['threads']:
-                await self.close_thread(pubkey, connection['threads'][thread_id])
+            connection = self.connections.get(pubkey)
 
-    async def close_thread(self, pubkey, thread):
+            for thread_id in client.threads:
+                await self.pause_thread(pubkey, thread_id)
+
+                connection['threads'][thread_id]['client'].websocket = None
+                asyncio.get_event_loop().create_task(self.thread_timeout(pubkey, thread_id))
+
+    async def create_thread(self, pubkey, thread_id, client):
+        # print(pubkey[102:107], thread_id, 'create thread')
+        self.connections[pubkey]['threads'][thread_id] = {
+            'thread_id': thread_id,
+            'chunks': {},
+            'services': set(),
+            'paused_services': [],
+            'call_requests': {},
+            'calls_processing': {},
+            'message_buffer': [],
+            'client': client}
+
+    async def pause_thread(self, pubkey, thread_id):
+        # print(pubkey[102:107], thread_id, 'pause thread')
+
+        thread = self.connections[pubkey]['threads'].get(thread_id)
         if thread is not None:
             for service in thread['services']:
                 x = (pubkey, thread['thread_id'])
-                if x in self.services[service]['workers']: self.services[service]['workers'].remove(x)
+                if x in self.services[service]['workers']: 
+                    thread['paused_services'].append(service)
+                    self.services[service]['workers'].remove(x)
+
+    async def resume_thread(self, pubkey, thread_id):
+        # print(pubkey[102:107], thread_id, 'resume thread')
+
+        thread = self.connections[pubkey]['threads'].get(thread_id)
+        if thread is not None:
+            for old_message in thread['message_buffer']:
+                await self._send(pubkey, thread_id, old_message)
+            for service in thread['paused_services']:
+                self._serve(pubkey, thread_id, {'function': service})
+            thread['paused_services'] = []
+
+    async def close_thread(self, pubkey, thread_id):
+        # print(pubkey[102:107], thread_id, 'close thread')
+        thread = self.connections[pubkey]['threads'].pop(thread_id, None)
+        if thread is not None:
+            if thread['client'] is not None:
+                thread['client'].threads.remove(thread_id)
             for call in thread['calls_processing'].items():
                 if 'caller_id' in call and 'caller_thread' in call:
                     await self._send(call['caller_id'], call['caller_thread'], {'error': 'Service Disconnected'})
+                    if call['caller_id'] in self.connections and call['caller_thread'] in self.connections[call['caller_id']]['threads']:
+                        self.connections[call['caller_id']]['threads'][call['caller_thread']]['call_requests'].pop(call['call_id'])
+                    # print('cancelling', call)
+
+    async def thread_timeout(self, pubkey, thread_id, timeout=90):
+        await asyncio.sleep(timeout)
+        # print(pubkey[102:107], thread_id, 'thread timeout over')
+
+        if pubkey in self.connections and thread_id in self.connections[pubkey]['threads']:
+            if self.connections[pubkey]['threads'][thread_id]['client'].websocket is None:
+                await self.close_thread(pubkey, thread_id)
+
+                if not self.connections[pubkey]['threads']:
+                    self.connections.pop(pubkey)
 
     async def _call(self, function, args=None, kwargs=None, caller_id=None, caller_thread=None, call_id=None):
         if call_id is None:
@@ -161,6 +241,8 @@ class Hub():
 
         if 'method' not in m:
             return 'MALFORMED MESSAGE: `method` not found in message'
+
+        print(pubkey[102:107], thread_id, m['method'])
 
         if m['method'] == 'AUTHENTICATE':
             pubkey, roles = self._authenticate(m)
@@ -241,6 +323,9 @@ class Hub():
                 if call['caller_id'] in self.connections:
                     await self._send(call['caller_id'], call['caller_thread'], {'return': m['return']})
 
+                    if call['caller_id'] in self.connections and call['caller_thread'] in self.connections[call['caller_id']]['threads']:
+                        self.connections[call['caller_id']]['threads'][call['caller_thread']]['call_requests'].pop(call['call_id'])
+
                 if 'get_next_call' in m and m['get_next_call']:
                     m['function'] = call['function']
 
@@ -280,9 +365,18 @@ class Hub():
 
             return 'Done' #m['function'] + ' removed'
 
+        if m['method'] == 'RECOVER_THREADS':
+            lst = []
+            for rec_thread_id in m['threads']:
+                if rec_thread_id in self.connections[pubkey]['threads']:
+                    lst.append(rec_thread_id)
+                    rec_thread = self.connections[pubkey]['threads'][rec_thread_id]
+                    rec_thread['client'] = self.connections[pubkey]['threads'][thread_id]['client']
+                    await self.resume_thread(pubkey, rec_thread_id)
+            return {'recovered_threads': lst}
+
         if m['method'] == 'CLOSE_THREAD':
-            thread = self.connections[pubkey]['threads'].pop(thread_id, None)
-            await self.close_thread(pubkey, thread)
+            await self.close_thread(pubkey, thread_id)
             return None
 
         if m['method'] == 'ECHO':
@@ -291,7 +385,12 @@ class Hub():
         return {'error': 'method not found ' + m['method']}
     
     async def _send(self, pubkey, thread_id, message):
-        await encode_message(thread_id, message, self.connections[pubkey]['websocket'])
+        # print(pubkey[102:107], thread_id, '>>>>>')
+        thread = self.connections[pubkey]['threads'][thread_id]
+        if thread['client'].websocket is None:
+            thread['message_buffer'].append(message)
+        else:
+            await encode_message(thread_id, message, thread['client'])
 
     async def start(self, **kwargs):
         self.server = await websockets.serve(self.handle_client, self.host, self.port, 
@@ -301,3 +400,10 @@ class Hub():
     
     async def close(self):
         return self.server.close()
+
+class ConnectionWithClient:
+    def __init__(self, websocket):
+        self.websocket = websocket
+        self.pending_messages = {}
+        self.seen_messages = (set(), set())
+        self.threads = set()

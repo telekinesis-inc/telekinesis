@@ -23,8 +23,8 @@ class Node:
         else:
             self.connection = connection
 
-    async def connect(self):
-        await self.connection.connect()
+    async def connect(self, **kwargs):
+        await self.connection.connect(**kwargs)
         return self
     
     async def close(self):
@@ -124,18 +124,8 @@ class Thread:
     async def send(self, message):
         if not self.connection.is_connected():
             await self.connection.connect()
-        dump = json.dumps(message)
-        ws = self.connection.hub
-        thread_id = self.thread_id
-
-        if len(dump) >= (2**20-32):
-            chunk_id = uuid4().hex
-            n = (len(dump)-1)//(2**20-72) + 1
-            for i in range(n):
-                await ws.send(thread_id+'.'+chunk_id+'%03d'%i+'%03d'%n+'.'+\
-                              dump[(i*(2**20-72)):((i+1)*(2**20-72))])
-        else:
-            await ws.send(thread_id+dump)
+        
+        await encode_message(self.thread_id, message, self.connection)
 
     async def recv(self):
         await self.event.wait()
@@ -155,8 +145,8 @@ class Thread:
         self.connection.threads.pop(self.thread_id)
     
     async def __aenter__(self):
-        if not self.connection.is_connected():
-            await self.connection.connect()
+        # if not self.connection.is_connected():
+        #     await self.connection.connect()
         return self
     
     async def __aexit__(self, _, __, ___):
@@ -171,6 +161,10 @@ class Connection:
         self.roles = []
         self.auth_file = None
         self.hashed_key_password = None
+        self._retry_connect = False
+
+        self.pending_messages = {}
+        self.seen_messages = (set(), set())
 
         self.update_auth_file_params(auth_file, key_password)
 
@@ -183,16 +177,35 @@ class Connection:
 
         self.public_key = generate_public_serial(self.private_key)
 
-        self.hub = None
+        self.websocket = None
         self.listener = None
 
-    async def connect(self):
-        self.hub = await websockets.connect(self.url+'/ws/')
-        self.is_connected = lambda: not self.hub.closed
+    async def connect(self, **kwargs):
+        for i_retry in range(3):
+            try:
+                # if self.is_connected():
+                    # await self.websocket.close()
+                self.websocket = await websockets.connect(self.url+'/ws/', **kwargs)
+                self.is_connected = lambda: not self.websocket.closed
+                self._retry_connect = True
+                break
+            except Exception as e:
+                await asyncio.sleep(2)
+        else:
+            raise Exception('Max connection retries reached')
 
         self.listener = asyncio.get_event_loop().create_task(self._listen())
 
         await self.authenticate()
+
+        if self.threads:
+            async with Thread(self) as thread:
+                await thread.send({
+                    'method': 'RECOVER_THREADS',
+                    'threads': list(self.threads.keys())
+                })
+                print(await thread.recv())
+            # TODO close non recovered threads
         return self
     
     async def authenticate(self):
@@ -244,41 +257,33 @@ class Connection:
             self.hashed_key_password = hashlib.sha256(bytes(key_password, 'utf-8')).hexdigest()
 
     async def _listen(self):
-        while True:
-            raw_message = await self.hub.recv()
-            thread_id = raw_message[:32]
+        i = 0
+        try:
+            while True:
+                raw_message = await self.websocket.recv()
+                i += 1
 
-            if raw_message[32] != '.':
-                message = json.loads(raw_message[32:])
-            else:
-                chunk_id = raw_message[33:65]
-                chunk_x = int(raw_message[65:68])
-                chunk_n = int(raw_message[68:71])
+                thread_id, message = await decode_message(raw_message, lambda tid: self.threads[tid].chunks, self)
 
-                chunk = raw_message[72:]
-
-                chunks = self.threads[thread_id].chunks
-
-                if chunk_id not in chunks:
-                    chunks[chunk_id] = {}
-                
-                chunks[chunk_id][chunk_x] = chunk
-
-                if len(chunks[chunk_id]) < chunk_n:
+                if message is None:
                     continue
-                
-                d = chunks.pop(chunk_id)
-                message = json.loads(''.join([d[i] for i in range(chunk_n)]))
 
-            if thread_id in self.threads:
-                self.threads[thread_id].queue.appendleft(message)
-                self.threads[thread_id].event.set()
-            else:
-                print(thread_id, message)
+                if thread_id in self.threads:
+                    self.threads[thread_id].queue.appendleft(message)
+                    self.threads[thread_id].event.set()
+                else:
+                    print(self.public_key[102:107], thread_id, message)
+        except Exception as e:
+            print(self.public_key[102:107], 'connection listen error:', e)
+            if self._retry_connect:
+                await asyncio.sleep(5)
+                asyncio.get_event_loop().create_task(self.connect())
     
     def close(self):
+        # TODO close threads
+        self._retry_connect = False
         self.listener.cancel()
-        return self.hub.close()
+        return self.websocket.close()
 
 class Request:
     def __init__(self, connection, function_name):
@@ -322,6 +327,7 @@ class Request:
     async def send_return(self, output, get_next_call=False):
         await self.send_update(output, 'return', get_next_call=get_next_call)
         if get_next_call:
+            await self._thread.send({'method': 'SERVE', 'function': self._function_name})
             self._reset()
             return await self._expect_call()
     
