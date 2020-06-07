@@ -214,7 +214,7 @@ async def encode_message(thread_id, message, connection):
         n = (len(dump)-1)//(2**20-72) + 1
         for i in range(n):
             asyncio.get_event_loop().create_task(
-                ensure_delivery(connection, thread_id+'.'+message_id+'%03d'%i+'%03d'%n+'.'+\
+                ensure_delivery(connection, thread_id+message_id+'.%03d'%i+'%03d'%n+'.'+\
                 dump[(i*(2**20-72)):((i+1)*(2**20-72))]))
     else:
         asyncio.get_event_loop().create_task(ensure_delivery(connection, thread_id + message_id + dump))

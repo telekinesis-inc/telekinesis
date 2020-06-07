@@ -137,7 +137,7 @@ class Hub():
             for old_message in thread['message_buffer']:
                 await self._send(pubkey, thread_id, old_message)
             for service in thread['paused_services']:
-                self._serve(pubkey, thread_id, {'function': service})
+                await self._serve(pubkey, thread_id, {'function': service})
             thread['paused_services'] = []
 
     async def close_thread(self, pubkey, thread_id):
