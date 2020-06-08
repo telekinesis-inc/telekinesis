@@ -250,4 +250,3 @@ async def ensure_delivery(connection, raw_message):
         except Exception as e:
             print('retrying message delivery', thread_id, message_id, chunk_i, e)
     raise Exception('Max retries sending message exceeded', thread_id, message_id, chunk_i)
-

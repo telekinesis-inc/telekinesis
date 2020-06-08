@@ -1,6 +1,7 @@
 import os
 import inspect
 import re
+import types
 
 import json
 import asyncio
@@ -38,25 +39,43 @@ class Node:
             
             message = await thread.recv()
 
-        return self._create_service_instance(message['signature'], function_name, can_serve=message['can_serve'])
+        return self._create_service_instance(message['signature'],
+                                             function_name,
+                                             can_serve=message['can_serve'],
+                                             docstring=message['docstring'],
+                                             service_type=message['type'])
 
     async def publish_service(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
+
         signature = str(inspect.signature(function_impl))
+
         if inject_first_arg:
             signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
                           .replace('(,','(',1).replace('( ','(',1)
-        message = {'method': 'PUBLISH', 'function': function_name, 'signature': signature, 'can_call': can_call} 
+
+
+        message = {
+            'method': 'PUBLISH', 
+            'function': function_name,
+            'type': 'function' if isinstance(function_impl, types.FunctionType) else 'object',
+            'signature': signature, 
+            'docstring': function_impl.__doc__,
+            'can_call': can_call
+        }
+
         if static_page is not None:
             message['static'] = static_page
 
         async with Thread(self.connection) as thread:
             await thread.send(message)
-            message = await thread.recv()
+            ret_message = await thread.recv()
             # print(message)
 
-        return self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg)
+        return self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
+                                             message['type'])
 
-    def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False):
+    def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
+                                       docstring=None, service_type='function'):
         def create_call():
             return Call(self.connection, function_name)
 
@@ -64,24 +83,59 @@ class Node:
             return await Request(self.connection, function_name)._await_request()
 
         async def call_service(*args, **kwargs):
-            call = create_call()
-            return await call.call(*args, **kwargs)
+            if service_type == 'function':
+                call = create_call()
+                return await call.call(*args, **kwargs)
+            else:
+                ro = RemoteObject(self.connection, function_name, args, kwargs)
+                return await ro._start()
 
         async def run_service(function_impl=function_impl, inject_first_arg=inject_first_arg):
+            def get_object_state(function_impl):
+                props = {}
+                meths = {}
+
+                for d in dir(function_impl):
+                    if d[0] != '_':
+                        sub = function_impl.__getattribute__(d)
+                        if isinstance(sub, types.MethodType):
+                            meths[d] = {'signature': str(inspect.signature(sub)),
+                                        'docstring': sub.__doc__}
+                        else:
+                            props[d] = sub
+                return props, meths
+
             if function_impl is None:
                 raise Exception('Function to be served has to be specified somewhere.')
 
-            async with Request(self.connection, function_name) as req:
-                while True:
-                    if inject_first_arg:
-                        output = function_impl(req, *req.args, **req.kwargs)
-                    else:
-                        output = function_impl(*req.args, **req.kwargs)
+            while True:
+                async with Request(self.connection, function_name) as req:
+                    try:
+                        if service_type == 'function':
+                                if inject_first_arg:
+                                    output = function_impl(req, *req.args, **req.kwargs)
+                                else:
+                                    output = function_impl(*req.args, **req.kwargs)
 
-                    if asyncio.iscoroutinefunction(function_impl):
-                        output = await output
-
-                    await req.send_return(output, True)
+                                if asyncio.iscoroutinefunction(function_impl):
+                                    output = await output
+                                await req.send_return(output)
+                        else:
+                            obj = function_impl(*req.args, **req.kwargs)
+                            res = None
+                            while True:
+                                props, meths = get_object_state(obj)
+                                await req.send_update(props=props, meths=meths, response=res)
+                                m = await req._thread.recv()
+                                if 'obj_method' in m:
+                                    args = m.get('args') or []
+                                    kwargs = m.get('kwargs') or {}
+                                    res = obj.__getattribute__(m['obj_method'])(*args, **kwargs)
+                                if '_close' in m:
+                                    # await req.send_update(props=props, meths=meths, response=res, call_return=None)
+                                    break
+                    except Exception as e:
+                        await req.send_update(error=str(e))
 
         async def remove():
             async with Thread(self.connection) as thread:
@@ -91,8 +145,10 @@ class Node:
 
                 return await thread.recv()
         
-        service = makefun.create_function(signature, call_service)
-        service.create_call = create_call
+        service = makefun.create_function(signature, call_service, doc=docstring)
+
+        if service_type == 'function':
+            service.create_call = create_call
 
         if can_serve:
             service.run = run_service
@@ -287,18 +343,16 @@ class Connection:
 
 class Request:
     def __init__(self, connection, function_name):
-        self._connection = connection
         self._function_name = function_name
-        self._thread = None
-        self._reset()
-    
-    def _reset(self):
+        self._thread = Thread(connection)
         self.call_id = None
         self.args = None
-        self.caller_pubkey = None
         self.kwargs = None
+        self.caller_pubkey = None
+    
 
-    async def _expect_call(self):
+    async def _await_request(self):
+        await self._thread.send({'method': 'SERVE', 'function': self._function_name})
         while True:
             message = await self._thread.recv()
 
@@ -317,38 +371,25 @@ class Request:
             else:
                 print('Unexpected message:', message)
 
-    async def _await_request(self):
-        self._thread = Thread(self._connection)
-
-        await self._thread.send({'method': 'SERVE', 'function': self._function_name})
-
-        return await self._expect_call()
-
-    async def send_return(self, output, get_next_call=False):
-        await self.send_update(output, 'return', get_next_call=get_next_call)
-        if get_next_call:
-            await self._thread.send({'method': 'SERVE', 'function': self._function_name})
-            self._reset()
-            return await self._expect_call()
+    async def send_return(self, output):
+        await self.send_update(call_return=output)
     
-    async def send_update(self, content, update_type='print', **kwargs):
+    async def send_update(self, **kwargs):
         message = kwargs
 
         message.update({
             'method': 'RETURN',
             'call_id': self.call_id,
-            update_type: content,
         })
         return await self._thread.send(message)
 
     async def send_role_extension(self, from_role, sub_role, recipient=None):
         if recipient is None:
             recipient = self.caller_pubkey
-        await self.send_update(extend_role(self._connection.private_key, from_role, recipient, sub_role),
-                                     'role_extension')
+        await self.send_update(role_extension=extend_role(self._thread.connection.private_key, from_role, recipient, sub_role))
 
     async def send_input_request(self, prompt=None, hashed=False, salt=None):
-        await self.send_update(prompt, 'input_request', hashed=hashed, salt=salt)
+        await self.send_update(input_request=prompt, hashed=hashed, salt=salt)
 
         return (await self._thread.recv())['input_response']
 
@@ -360,6 +401,78 @@ class Request:
 
     async def __aexit__(self, _, __, ___):
         await self.close()
+
+class RemoteObject:
+    def __init__(self, connection, function_name, args, kwargs):
+        self._connection = connection
+        self._function_name = function_name
+        self._args = args
+        self._kwargs = kwargs
+        self._thread = None
+        self._call_id = None
+
+    async def _start(self):
+        self._thread = Thread(self._connection)
+        await self._thread.send({
+            'method': 'CALL', 
+            'function': self._function_name, 
+            'args': self._args, 
+            'kwargs': self._kwargs})
+
+        self._call_id = (await self._thread.recv())['call_id']
+
+        await self._await_state_update()
+        
+        return self
+    
+    async def _call_method(self, method, *args, **kwargs):
+        await self._thread.send({
+            'method': 'SEND',
+            'call_id': self._call_id,
+            'obj_method': method,
+            'args': args,
+            'kwargs': kwargs
+        })
+
+        await self._await_state_update()
+
+    async def _await_state_update(self):
+        message = await self._thread.recv()
+
+        if 'call_return' in message:
+            await self._close(False)
+        
+        for d in dir(self):
+            if d[0] != '_':
+                self.__delattr__(d)
+
+        for p in message['props']:
+            self.__setattr__(p, message['props'][p])
+        
+        for m in message['meths']:
+            method = message['meths'][m]
+
+            func = makefun.create_function(method['signature'], 
+                                           lambda *args, **kwargs: self._call_method(m, *args, **kwargs), m, 
+                                           doc=method['docstring'])
+            self.__setattr__(m, func)
+
+        return message['response']
+    
+    async def __aenter__(self):
+        return await self._start()
+    
+    async def __aexit__(self, _, __, ___):
+        return await self._close()
+
+    async def _close(self, send_close_signal=True):
+        if send_close_signal:
+            await self._thread.send({
+                'method': 'SEND',
+                'call_id': self._call_id,
+                '_close': True
+            })
+        await self._thread.close()
 
 class Call:
     def __init__(self, connection, function_name, accept_role_extensions=True):
@@ -379,22 +492,26 @@ class Call:
                 'kwargs': kwargs})
         
             while True:
-                message = await thread.recv()
-                if 'call_id' in message:
-                    self.call_id = message['call_id']
+                try:
+                    message = await thread.recv()
+                    if 'call_id' in message:
+                        self.call_id = message['call_id']
+                    if 'input_request' in message:
+                        if message['hashed']:
+                            await self.on_secret_request(message['input_request'], message['salt'])
+                        else:
+                            await self.on_input_request(message['input_request'])
+                    if 'role_extension' in message:
+                        if self.accept_role_extensions:
+                            await self.connection.add_role_certificate(message['role_extension'])
+                    if 'print' in message:
+                        await self.on_update(message['print'])
+                    if 'call_return' in message:
+                        return message['call_return']
+                except asyncio.CancelledError as e:
+                    await self._send(error=str(e))
+                    raise e
 
-                if 'input_request' in message:
-                    if message['hashed']:
-                        await self.on_secret_request(message['input_request'], message['salt'])
-                    else:
-                        await self.on_input_request(message['input_request'])
-                if 'role_extension' in message:
-                    if self.accept_role_extensions:
-                        await self.connection.add_role_certificate(message['role_extension'])
-                if 'print' in message:
-                    await self.on_update(message['print'])
-                if 'return' in message:
-                    return message['return']
 
     async def _send(self, **kwargs):
         kwargs.update({'method': 'SEND', 'call_id': self.call_id})

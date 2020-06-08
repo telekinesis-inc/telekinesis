@@ -260,6 +260,8 @@ class Hub():
                     return {'error': 'UNAUTHORIZED'}
 
             self.services[m['function']] = {'signature': m['signature'],
+                                            'docstring': m['docstring'],
+                                            'type': m['type'],
                                             'workers': set(),
                                             'backlog': deque(),
                                             'can_call': m.get('can_call') or [],
@@ -286,6 +288,8 @@ class Hub():
                     return {'error': 'UNAUTHORIZED'}
                
             return {'signature': self.services[m['function']]['signature'], 
+                    'docstring': self.services[m['function']]['docstring'],
+                    'type': self.services[m['function']]['type'],
                     'can_serve': self.root_pubkey is None or check_min_role([(m['function'], 1)] + \
                                                              self.services[m['function']]['can_serve'], \
                                                              self.connections[pubkey]['roles'])}
@@ -318,19 +322,14 @@ class Hub():
             if 'call_id' not in m:
                 return {'error': 'MALFORMED MESSAGE: `call_id` not found in `RETURN` message'}
 
-            if 'return' in m:
+            if 'call_return' in m or 'error' in m:
                 call = self.connections[pubkey]['threads'][thread_id]['calls_processing'].pop(m['call_id'], None)
                 if call['caller_id'] in self.connections:
-                    await self._send(call['caller_id'], call['caller_thread'], {'return': m['return']})
+                    await self._send(call['caller_id'], call['caller_thread'], m)
 
                     if call['caller_id'] in self.connections and call['caller_thread'] in self.connections[call['caller_id']]['threads']:
                         self.connections[call['caller_id']]['threads'][call['caller_thread']]['call_requests'].pop(call['call_id'])
 
-                if 'get_next_call' in m and m['get_next_call']:
-                    m['function'] = call['function']
-
-                    return await self._serve(pubkey, thread_id, m)
-            
             else:
                 call = self.connections[pubkey]['threads'][thread_id]['calls_processing'][m['call_id']]
                 await self._send(call['caller_id'], call['caller_thread'], m)
