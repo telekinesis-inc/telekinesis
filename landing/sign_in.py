@@ -7,8 +7,8 @@ with open('users.pem', 'r') as f:
     users = json.load(f)
 
 async def sign_in(request):
-    u = await asyncio.wait_for(request.send_input_request('Username: '), 5)
-    p = await asyncio.wait_for(request.send_input_request('Password', True, u), 5)
+    u = await asyncio.wait_for(request.send_input_request('Username: '), 30)
+    p = await asyncio.wait_for(request.send_input_request('Password', True, u), 30)
 
     if u in users and p == users[u]:
         await request.send_role_extension(('', 0), (u, 0))
