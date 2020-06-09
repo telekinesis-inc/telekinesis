@@ -108,17 +108,10 @@ def list_roles(root_serial, public_serial, *tokens):
     while True:
         for token in remaining_tokens:
             if token.created_by in validated_serials:
-                payload = json.loads(token.payload)
-                for k in payload:
-                    if isinstance(payload[k], list):
-                        payload[k] = tuple(payload[k])
-
+                payload = get_token_payload(token)
                 if payload['from_role'] in validated_serials[token.created_by]:
                     if check_extension(token):
-                        sep = '' if '' in [payload['from_role'][0], payload['sub_role'][0]] else '/'
-                        new_role = (payload['from_role'][0] + sep + payload['sub_role'][0],
-                                    max(payload['from_role'][1], payload['sub_role'][1]))
-
+                        new_role = get_payload_role(payload)
                         if len(payload['recipient']) < len(public_serial): # Recipient is role
                             add_sub(validated_roles, payload['recipient'], new_role)
                             for serial in validated_serials:
@@ -153,6 +146,40 @@ def check_min_role(min_roles, roles):
                 if role[1] <= min_role[1]:
                     return True
     return False
+
+def get_payload_role(payload):
+    sep = '' if '' in [payload['from_role'][0], payload['sub_role'][0]] else '/'
+    new_role = (payload['from_role'][0] + sep + payload['sub_role'][0],
+                max(payload['from_role'][1], payload['sub_role'][1]))
+
+    return new_role
+
+def get_token_payload(token):
+    payload = json.loads(token.payload)
+    for k in payload:
+        if isinstance(payload[k], list):
+            payload[k] = tuple(payload[k])
+
+    return payload
+
+def get_certificate_dependencies(role_certificates, final_role):
+    remaining_roles = set([tuple(final_role)])
+    seen_roles = set()
+    certificate_dependencies = set()
+    while remaining_roles:
+        role = remaining_roles.pop()
+        seen_roles.add(role)
+        for cert in role_certificates:
+            if check_extension(cert):
+                payload = get_token_payload(cert)
+                if get_payload_role(payload) == role:
+                    certificate_dependencies.add(cert)
+                    if len(payload['recipient']) < len(cert.created_by):
+                        if payload['recipient'] not in seen_roles:
+                            remaining_roles.add(payload['recipient'])
+                    if payload['from_role'] not in seen_roles:
+                        remaining_roles.add(payload['from_role'])
+    return list(certificate_dependencies)
 
 async def decode_message(raw_message, get_chunks, connection):
 

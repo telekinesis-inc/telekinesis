@@ -15,7 +15,7 @@ from uuid import uuid4
 from collections import deque
 from makefun import create_function
 from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
-                    serialize_private_key, deserialize_private_key, extend_role
+                    serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies
 
 class Node:
     def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
@@ -60,7 +60,7 @@ class Node:
             'type': 'function' if isinstance(function_impl, types.FunctionType) else 'object',
             'signature': signature, 
             'docstring': function_impl.__doc__,
-            'can_call': can_call
+            'can_call': can_call if isinstance(can_call[0], list) or isinstance(can_call[0], tuple) else [can_call]
         }
 
         if static_page is not None:
@@ -279,8 +279,8 @@ class Connection:
             })
             self.roles = await thread.recv()
 
-    async def add_role_certificate(self, role_certificate):
-        self.role_certificates.append(role_certificate)
+    async def add_role_certificate(self, *role_certificates):
+        [self.role_certificates.append(rc) for rc in role_certificates]
         await self.authenticate()        
 
         self.save_auth_file()
@@ -349,7 +349,6 @@ class Request:
         self.args = None
         self.kwargs = None
         self.caller_pubkey = None
-    
 
     async def _await_request(self):
         await self._thread.send({'method': 'SERVE', 'function': self._function_name})
@@ -386,7 +385,10 @@ class Request:
     async def send_role_extension(self, from_role, sub_role, recipient=None):
         if recipient is None:
             recipient = self.caller_pubkey
-        await self.send_update(role_extension=extend_role(self._thread.connection.private_key, from_role, recipient, sub_role))
+        await self.send_update(role_extension=[
+            *get_certificate_dependencies(self._thread.connection.role_certificates, from_role),
+            extend_role(self._thread.connection.private_key, from_role, recipient, sub_role)
+        ])
 
     async def send_input_request(self, prompt=None, hashed=False, salt=None):
         await self.send_update(input_request=prompt, hashed=hashed, salt=salt)
@@ -503,7 +505,7 @@ class Call:
                             await self.on_input_request(message['input_request'])
                     if 'role_extension' in message:
                         if self.accept_role_extensions:
-                            await self.connection.add_role_certificate(message['role_extension'])
+                            await self.connection.add_role_certificate(*message['role_extension'])
                     if 'print' in message:
                         await self.on_update(message['print'])
                     if 'call_return' in message:
@@ -511,7 +513,6 @@ class Call:
                 except asyncio.CancelledError as e:
                     await self._send(error=str(e))
                     raise e
-
 
     async def _send(self, **kwargs):
         kwargs.update({'method': 'SEND', 'call_id': self.call_id})
