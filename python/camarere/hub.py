@@ -152,6 +152,13 @@ class Hub():
                     if call['caller_id'] in self.connections and call['caller_thread'] in self.connections[call['caller_id']]['threads']:
                         self.connections[call['caller_id']]['threads'][call['caller_thread']]['call_requests'].pop(call['call_id'])
                     # print('cancelling', call)
+            for call in thread['call_requests']:
+                if call['call_id'] in self.services[call['function']]['backlog']:
+                    self.services[call['function']]['backlog'].remove(call['call_id'])
+                if 'worker_id' in call and 'worker_thread' in call:
+                    if call['worker_id'] in self.connections and call['worker_thread'] in self.connections[call['worker_id']]['threads']:
+                        if call['call_id'] in self.connections[call['worker_id']]['threads'][call['worker_thread']]['calls_processing']:
+                            self._send(call['worker_id'], call['worker_thread'], {'call_id': call['call_id'], '_close': True})
 
     async def thread_timeout(self, pubkey, thread_id, timeout=90):
         await asyncio.sleep(timeout)

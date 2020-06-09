@@ -393,7 +393,14 @@ class Request:
     async def send_input_request(self, prompt=None, hashed=False, salt=None):
         await self.send_update(input_request=prompt, hashed=hashed, salt=salt)
 
-        return (await self._thread.recv())['input_response']
+        response = await self._thread.recv()
+
+        if '_close' in response:
+            await self.close()
+            raise Exception('Client closed call')
+
+        if 'input_response' in response:
+            return response['input_response']
 
     async def close(self):
         return await self._thread.close()
@@ -475,6 +482,7 @@ class RemoteObject:
                 '_close': True
             })
         await self._thread.close()
+
 
 class Call:
     def __init__(self, connection, function_name, accept_role_extensions=True):
