@@ -60,7 +60,7 @@ class Node:
             'type': 'function' if isinstance(function_impl, types.FunctionType) else 'object',
             'signature': signature, 
             'docstring': function_impl.__doc__,
-            'can_call': can_call if isinstance(can_call[0], list) or isinstance(can_call[0], tuple) else [can_call]
+            'can_call': can_call if can_call is None or isinstance(can_call[0], list) or isinstance(can_call[0], tuple) else [can_call]
         }
 
         if static_page is not None:

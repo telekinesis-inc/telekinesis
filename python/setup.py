@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="camarere", 
-    version="0.0.5",
+    version="0.0.7",
     author="Elias J Neuman",
     author_email="elias.j.neuman@gmail.com.com",
     description="A websockets based RPC to easily deploy and call services online.",
