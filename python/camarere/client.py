@@ -436,7 +436,7 @@ class RemoteObject:
             'kwargs': kwargs
         })
 
-        await self._await_state_update()
+        return await self._await_state_update()
 
     async def _await_state_update(self):
         message = await self._thread.recv()
