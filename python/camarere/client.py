@@ -1,5 +1,6 @@
 import os
 import inspect
+from functools import partial
 import re
 import types
 
@@ -462,8 +463,10 @@ class RemoteObject:
             method = message['meths'][m]
 
             func = makefun.create_function(method['signature'], 
-                                           lambda *args, **kwargs: self._call_method(m, *args, **kwargs), m, 
-                                           doc=method['docstring'])
+                                           partial(self._call_method, m),
+                                           func_name=m,
+                                           module_name='camarere.client.RemoteObject',
+                                           doc=method['docstring'] if method['docstring'] is not None else "")
             self.__setattr__(m, func)
 
         return message['response']
@@ -482,7 +485,6 @@ class RemoteObject:
                 '_close': True
             })
         await self._thread.close()
-
 
 class Call:
     def __init__(self, connection, function_name, accept_role_extensions=True):

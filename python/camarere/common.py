@@ -169,7 +169,8 @@ def get_certificate_dependencies(role_certificates, final_role):
     while remaining_roles:
         role = remaining_roles.pop()
         seen_roles.add(role)
-        for cert in role_certificates:
+        for rc in role_certificates:
+            cert = Token(*rc)
             if check_extension(cert):
                 payload = get_token_payload(cert)
                 if get_payload_role(payload) == role:
