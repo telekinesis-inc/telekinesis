@@ -182,7 +182,7 @@ def get_certificate_dependencies(role_certificates, final_role):
                         remaining_roles.add(payload['from_role'])
     return list(certificate_dependencies)
 
-async def decode_message(raw_message, get_chunks, connection):
+async def decode_message(raw_message, connection):
 
     thread_id, message_id = raw_message[:32], raw_message[32:64]
     chunk_i = None if (len(raw_message) == 64) or (raw_message[64] != '.') else int(raw_message[65:68])
@@ -213,17 +213,17 @@ async def decode_message(raw_message, get_chunks, connection):
             chunk_n = int(raw_message[68:71])
 
             chunk = raw_message[72:]
-            chunks = get_chunks(thread_id)
+            chunks = connection._chunks
 
-            if message_id not in chunks:
-                chunks[message_id] = {}
+            if (thread_id, message_id) not in chunks:
+                chunks[(thread_id, message_id)] = {}
             
-            chunks[message_id][chunk_i] = chunk
+            chunks[(thread_id, message_id)][chunk_i] = chunk
 
-            if len(chunks[message_id]) < chunk_n:
+            if len(chunks[(thread_id, message_id)]) < chunk_n:
                 return thread_id, None
             
-            d = chunks.pop(message_id)
+            d = chunks.pop((thread_id, message_id))
             message_in = json.loads(''.join([d[i] for i in range(chunk_n)]))
     else:
         # print('duplicate message', thread_id, message_id)
@@ -247,11 +247,11 @@ async def encode_message(thread_id, message, connection):
     else:
         asyncio.get_event_loop().create_task(ensure_delivery(connection, thread_id + message_id + dump))
 
-async def ensure_delivery(connection, raw_message):
-    async def event_wait(event):
-        await event.wait()
-        return
+async def event_wait(event):
+    await event.wait()
+    return
 
+async def ensure_delivery(connection, raw_message):
     thread_id, message_id = raw_message[:32], raw_message[32:64]
     if raw_message[64] != '.':
         chunk_i = None

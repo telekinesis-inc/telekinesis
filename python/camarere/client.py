@@ -16,7 +16,8 @@ from uuid import uuid4
 from collections import deque
 from makefun import create_function
 from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
-                    serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies
+                    serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies, \
+                    event_wait 
 
 class Node:
     def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
@@ -164,6 +165,12 @@ class Node:
 
             return await thread.recv()
 
+    async def __aenter__(self):
+        return await self.connect()
+
+    async def __aexit__(self, _, __, ___):
+        return await self.close()
+
 class Thread:
     def __init__(self, connection):
         while True:
@@ -214,6 +221,7 @@ class Connection:
         self.url = url
         self.is_connected = lambda: False
         self.threads = {}
+        self._chunks = {}
         self.role_certificates = []
         self.roles = []
         self.auth_file = None
@@ -320,7 +328,7 @@ class Connection:
                 raw_message = await self.websocket.recv()
                 i += 1
 
-                thread_id, message = await decode_message(raw_message, lambda tid: self.threads[tid].chunks, self)
+                thread_id, message = await decode_message(raw_message, self)
 
                 if message is None:
                     continue
@@ -336,11 +344,19 @@ class Connection:
                 await asyncio.sleep(5)
                 asyncio.get_event_loop().create_task(self.connect())
     
-    def close(self):
-        # TODO close threads
+    async def close(self):
+        for t in self.threads.copy():
+            await self.threads[t].close()
+            await asyncio.sleep(0.001)
+
         self._retry_connect = False
         self.listener.cancel()
-        return self.websocket.close()
+
+        # for m in self.pending_messages.copy():
+        #     await asyncio.wait_for(self.pending_messages[m].wait(), 3)
+        #     # await asyncio.sleep(0.001)
+
+        await self.websocket.close()
 
 class Request:
     def __init__(self, connection, function_name):
