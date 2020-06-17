@@ -6,14 +6,14 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="camarere", 
-    version="0.0.8",
+    name="telekinesis", 
+    version="0.0.9",
     author="Elias J Neuman",
     author_email="elias.j.neuman@gmail.com.com",
-    description="A websockets based RPC to easily deploy and call services online.",
+    description="A websockets based RPC to easily develop, deploy and call services online.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/e-neuman/camarere",
+    url="https://github.com/e-neuman/telekinesis",
     packages=setuptools.find_packages(),
     install_requires=[
         'websockets',

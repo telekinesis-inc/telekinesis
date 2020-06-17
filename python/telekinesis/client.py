@@ -33,7 +33,7 @@ class Node:
     async def close(self):
         return await self.connection.close()
     
-    async def get_service(self, function_name):
+    async def get(self, function_name):
         async with Thread(self.connection) as thread:
             await thread.send({
                 'method': 'GET_SERVICE', 
@@ -47,7 +47,7 @@ class Node:
                                              docstring=message['docstring'],
                                              service_type=message['type'])
 
-    async def publish_service(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
+    async def publish(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
 
         signature = str(inspect.signature(function_impl))
 
@@ -159,7 +159,7 @@ class Node:
 
         return service
 
-    async def list_services(self):
+    async def list(self):
         async with Thread(self.connection) as thread:
             await thread.send({'method': 'LIST'})
 

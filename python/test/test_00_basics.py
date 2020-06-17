@@ -1,4 +1,4 @@
-from camarere import Hub, Node
+from telekinesis import Hub, Node
 import asyncio
 import time
 import pytest
@@ -22,12 +22,12 @@ async def test_node_connect_disconnect():
 async def test_serve_list_call_function():
     async with Hub() as hub:
         async with Node() as node:
-            service = await node.publish_service('echo', lambda x: x)
+            service = await node.publish('echo', lambda x: x)
             background_task = asyncio.create_task(service.run())
             assert 'echo' in hub.services
-            assert 'echo' in await node.list_services()
+            assert 'echo' in await node.list()
 
-            caller = await node.get_service('echo')
+            caller = await node.get('echo')
 
             assert 'x' == (await caller('x'))
             background_task.cancel()
@@ -39,14 +39,14 @@ async def test_serve_call_function_parallel():
                 await asyncio.sleep(0.5)
                 return x
 
-            service = await node.publish_service('slow_echo', slow_echo)
+            service = await node.publish('slow_echo', slow_echo)
             background_task_0 = asyncio.create_task(service.run())
             background_task_1 = asyncio.create_task(service.run())
             assert 'slow_echo' in hub.services
             await asyncio.sleep(.01) 
             assert len(hub.services['slow_echo']['workers']) == 2
 
-            caller = await node.get_service('slow_echo')
+            caller = await node.get('slow_echo')
 
             call_0 = asyncio.create_task(caller('x'))
             call_1 = asyncio.create_task(caller('x'))
@@ -68,13 +68,13 @@ async def test_serve_call_function_series():
                 await asyncio.sleep(0.5)
                 return x
 
-            service = await node.publish_service('slow_echo', slow_echo)
+            service = await node.publish('slow_echo', slow_echo)
             background_task_0 = asyncio.create_task(service.run())
             assert 'slow_echo' in hub.services
             await asyncio.sleep(.01) 
             assert len(hub.services['slow_echo']['workers']) == 1
 
-            caller = await node.get_service('slow_echo')
+            caller = await node.get('slow_echo')
 
             call_0 = asyncio.create_task(caller('x'))
             call_1 = asyncio.create_task(caller('x'))
@@ -91,12 +91,12 @@ async def test_serve_call_function_series():
 async def test_serve_call_function_large_args():
     async with Hub() as hub:
         async with Node() as node:
-            service = await node.publish_service('echo', lambda x: x)
+            service = await node.publish('echo', lambda x: x)
             background_task = asyncio.create_task(service.run())
             await asyncio.sleep(0.01)
             assert len(hub.services['echo']['workers']) == 1
 
-            caller = await node.get_service('echo')
+            caller = await node.get('echo')
 
             assert 'x'*2**21 == (await caller('x'*2**21))
             background_task.cancel()
@@ -110,10 +110,10 @@ async def test_serve_object_call():
                 def increment(self, amount=1):
                     self.value += amount
 
-            service = await node.publish_service('TestCounter', TestCounter)
+            service = await node.publish('TestCounter', TestCounter)
             background_task = asyncio.create_task(service.run())
 
-            TestCounterClass = await node.get_service('TestCounter')
+            TestCounterClass = await node.get('TestCounter')
 
             counter = await TestCounterClass()
 
