@@ -22,7 +22,7 @@ async def test_auth_publish():
                     assert 'UNAUTHORIZED' in str(e)
                 
                 assert 'test' not in hub.services
-                await admin_node.publish('test', lambda: None)
+                await admin_node.publish('test', lambda: None, n_workers=0)
                 assert 'test' in hub.services
                 
 
@@ -37,11 +37,9 @@ async def test_auth_publish():
                 service = await admin_node.publish('test', lambda: None, can_call=[['*', 2]])
                 assert 'test' in await node.list()
 
-                background_task = asyncio.create_task(service.run())
-
                 assert None == await (await node.get('test'))()
                 
-                background_task.cancel()
+                service.stop_all()
 
 async def test_auth_delegate():
     admin_node = Node()
@@ -55,7 +53,6 @@ async def test_auth_delegate():
                     return
 
                 service = await admin_node.publish('get_role', delegate_role, can_call=[['*', 2]], inject_first_arg=True)
-                background_task = asyncio.create_task(service.run())
                 
                 await (await node.get('get_role'))()
                 assert ['sub_role', 0] in node.connection.roles
@@ -72,15 +69,15 @@ async def test_auth_delegate():
                 
                 assert 'sub_role' not in hub.services
 
-                await node.publish('sub_role', lambda: None)
+                await node.publish('sub_role', lambda: None, n_workers=0)
                 assert 'sub_role' in await admin_node.list()
                 assert 'sub_role' in await node.list()
 
-                await node.publish('sub_role/sub', lambda: None)
+                await node.publish('sub_role/sub', lambda: None, n_workers=0)
                 assert 'sub_role/sub' in await admin_node.list()
                 assert 'sub_role/sub' in await node.list()
 
-                background_task.cancel()
+                service.stop_all()
 
 async def test_auth_persist():
     admin_node = Node()
@@ -94,7 +91,6 @@ async def test_auth_persist():
                 return
 
             service = await admin_node.publish('get_role', delegate_role, can_call=[['*', 2]], inject_first_arg=True)
-            background_task = asyncio.create_task(service.run())
             
             async with node_0:
                 await (await node_0.get('get_role'))()
@@ -103,8 +99,8 @@ async def test_auth_persist():
             async with node_1:
                 assert 'sub_role' not in hub.services
 
-                await node_1.publish('sub_role', lambda: None)
+                await node_1.publish('sub_role', lambda: None, n_workers=0)
                 assert 'sub_role' in await admin_node.list()
 
-            background_task.cancel()    
+            service.stop_all()
     os.remove('tmp.pem')

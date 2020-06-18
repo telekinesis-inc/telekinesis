@@ -3,6 +3,7 @@ import inspect
 from functools import partial
 import re
 import types
+import warnings
 
 import json
 import asyncio
@@ -47,7 +48,7 @@ class Node:
                                              docstring=message['docstring'],
                                              service_type=message['type'])
 
-    async def publish(self, function_name, function_impl, static_page=None, can_call=None, inject_first_arg=False):
+    async def publish(self, function_name, function_impl, n_workers=5, static_page=None, can_call=None, inject_first_arg=False):
 
         signature = str(inspect.signature(function_impl))
 
@@ -73,8 +74,10 @@ class Node:
             ret_message = await thread.recv()
             # print(message)
 
-        return self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
+        service = self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
                                              message['type'])
+        service.start(n_workers)
+        return service
 
     def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
                                        docstring=None, service_type='function'):
@@ -136,8 +139,14 @@ class Node:
                                 if '_close' in m:
                                     # await req.send_update(props=props, meths=meths, response=res, call_return=None)
                                     break
+                    except asyncio.exceptions.CancelledError:
+                        break
                     except Exception as e:
                         await req.send_update(error=str(e))
+
+        def start(tasks, n_workers=1, function_impl=function_impl, inject_first_arg=inject_first_arg):
+            for _ in range(n_workers):
+                tasks.append(asyncio.get_event_loop().create_task(run_service(function_impl, inject_first_arg)))
 
         async def remove():
             async with Thread(self.connection) as thread:
@@ -154,6 +163,9 @@ class Node:
 
         if can_serve:
             service.run = run_service
+            service.tasks = []
+            service.start = partial(start, service.tasks)
+            service.stop_all = lambda: [t.cancel() for t in service.tasks] and None
             service.remove = remove
             service.await_request = await_request
 
@@ -201,12 +213,15 @@ class Thread:
 
         if 'error' in message:
             raise Exception(message['error'])
+
+        if 'warning' in message:
+            warnings.warm(message['warning'])
         
         return message
     
     async def close(self):
         await self.send({'method': 'CLOSE_THREAD'})
-        self.connection.threads.pop(self.thread_id)
+        self.connection.threads.pop(self.thread_id, None)
     
     async def __aenter__(self):
         # if not self.connection.is_connected():
