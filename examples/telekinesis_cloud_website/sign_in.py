@@ -1,4 +1,4 @@
-from camarere import Node
+from telekinesis import Node
 from datetime import datetime
 import asyncio
 import json
@@ -17,9 +17,6 @@ async def sign_in(request):
 
 async def main():
     client = await Node(auth_file_path='root.pem', key_password=True).connect()
-    service = await client.publish_service('sign_in', sign_in, can_call=[['*', 0]], inject_first_arg=True)
-
-    lst = [asyncio.create_task(service.run()) for _ in range(30)]
-    await asyncio.gather(*lst)
+    await client.publish('sign_in', sign_in, 30, True, True, can_call=[['*', 0]], inject_first_arg=True)
 
 asyncio.run(main())

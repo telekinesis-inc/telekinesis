@@ -1,4 +1,4 @@
-from camarere import Node
+from telekinesis import Node
 from datetime import datetime
 import asyncio
 
@@ -12,6 +12,6 @@ def log_enter(*args, **kwargs):
 
 async def main():
     client = await Node(auth_file_path='root.pem', key_password=True).connect()
-    await (await client.publish_service('', log_enter, LANDING)).run()
+    await client.publish('', log_enter, 1, True, True, LANDING)
 
 asyncio.run(main())

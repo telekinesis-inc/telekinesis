@@ -1,4 +1,4 @@
-from camarere import Hub, Node
+from telekinesis import Hub, Node
 import asyncio
 import json
 

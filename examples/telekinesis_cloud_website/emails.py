@@ -1,4 +1,4 @@
-from camarere import Node
+from telekinesis import Node
 from datetime import datetime
 import asyncio
 
@@ -10,8 +10,6 @@ def log_email(*args, **kwargs):
 async def main():
     client = await Node(auth_file_path='root.pem', key_password=True).connect()
             
-    service = await client.publish_service('register_email', log_email, 'Thank you for registering!')
-            
-    await service.run()
+    await client.publish('register_email', log_email, 1, True, True, 'Thank you for registering!')
 
 asyncio.run(main())

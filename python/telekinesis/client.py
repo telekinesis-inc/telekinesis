@@ -48,7 +48,7 @@ class Node:
                                              docstring=message['docstring'],
                                              service_type=message['type'])
 
-    async def publish(self, function_name, function_impl, n_workers=1, replace=False, static_page=None, can_call=None, inject_first_arg=False):
+    async def publish(self, function_name, function_impl, n_workers=1, foreground=False, replace=False, static_page=None, can_call=None, inject_first_arg=False):
 
         signature = str(inspect.signature(function_impl))
 
@@ -77,6 +77,10 @@ class Node:
         service = self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
                                              message['type'])
         service.start(n_workers)
+
+        if foreground:
+            await asyncio.gather(*service.workers)
+
         return service
 
     def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
@@ -144,9 +148,9 @@ class Node:
                     except Exception as e:
                         await req.send_update(error=str(e))
 
-        def start(tasks, n_workers=1, function_impl=function_impl, inject_first_arg=inject_first_arg):
+        def start(workers, n_workers=1, function_impl=function_impl, inject_first_arg=inject_first_arg):
             for _ in range(n_workers):
-                tasks.append(asyncio.get_event_loop().create_task(run_service(function_impl, inject_first_arg)))
+                workers.append(asyncio.get_event_loop().create_task(run_service(function_impl, inject_first_arg)))
 
         async def remove():
             async with Thread(self.connection) as thread:
@@ -165,9 +169,9 @@ class Node:
 
         if can_serve:
             service.run = run_service
-            service.tasks = []
-            service.start = partial(start, service.tasks)
-            service.stop_all = lambda: [t.cancel() for t in service.tasks] and None
+            service.workers = []
+            service.start = partial(start, service.workers)
+            service.stop_all = lambda: [t.cancel() for t in service.workers] and None
             service.remove = remove
             service.await_request = await_request
 
