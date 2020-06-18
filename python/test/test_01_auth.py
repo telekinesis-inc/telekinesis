@@ -34,7 +34,7 @@ async def test_auth_publish():
                 except Exception as e:
                     assert 'UNAUTHORIZED' in str(e)
 
-                service = await admin_node.publish('test', lambda: None, can_call=[['*', 2]])
+                service = await admin_node.publish('test', lambda: None, can_call=[['*', 2]], replace=True)
                 assert 'test' in await node.list()
 
                 assert None == await (await node.get('test'))()
@@ -104,3 +104,74 @@ async def test_auth_persist():
 
             service.stop_all()
     os.remove('tmp.pem')
+
+async def test_auth_can_serve():
+    admin_node = Node()
+    node = Node()
+
+    async with Hub(root_pubkey=admin_node.connection.public_key) as hub:
+        async with admin_node:
+            async with node:
+                async def delegate_serve_role(request):
+                    await request.send_role_extension(('', 0), ('echo', 1)) # role level 1 allows to provide a service without modifying it
+                    return
+
+                service = await admin_node.publish('get_role', delegate_serve_role, can_call=[['*', 2]], inject_first_arg=True)
+
+                await (await node.get('get_role'))()
+                try: # node can't create the service
+                    await node.publish('echo', lambda x: x)
+                except Exception as e:
+                    assert 'UNAUTHORIZED' in str(e)
+                
+                assert 'echo' not in hub.services
+                await admin_node.publish('echo', lambda x: x, n_workers=0)
+                assert 'echo' in hub.services
+                
+
+                assert 'echo' in await admin_node.list()
+                assert 'echo' in await node.list()
+
+                try: # node can't replace the service
+                    await node.publish('echo', lambda x: x, replace=True)
+                except Exception as e:
+                    assert 'UNAUTHORIZED' in str(e)
+
+                try: # node can't change the function signature
+                    await node.publish('echo', lambda x=0: x)
+                except Exception as e:
+                    assert 'UNAUTHORIZED' in str(e)
+
+                class Dummy:
+                    def __init__(self, x):
+                        pass
+
+                try: # node can't change the service type
+                    await node.publish('echo', Dummy)
+                except Exception as e:
+                    assert 'UNAUTHORIZED' in str(e)
+                
+                # But node can serve
+                echo_service = await node.publish('echo', lambda x: x, n_workers=1)
+
+                assert 'x' == await echo_service('x')
+
+                # Admin should be able to change authorizations
+                await admin_node.publish('echo', lambda x: x, n_workers=0, can_call=[['x', 0]])
+
+                assert hub.services['echo']['can_call'] == [['x', 0]]
+                
+                # node shouldn't be able to change authorizations and a warning should be emitted
+                with pytest.warns(UserWarning) as record:
+                    await node.publish('echo', lambda x: x, n_workers=0, can_call=[['y', 0]])
+
+                assert len(record) == 1
+                assert 'UNAUTHORIZED' in record[0].message.args[0]
+
+                assert hub.services['echo']['can_call'] == [['x', 0]]
+
+                # Service should still be running
+                assert 'x' == await asyncio.wait_for(echo_service('x'), 5)
+                
+                echo_service.stop_all()
+                service.stop_all()

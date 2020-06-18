@@ -18,7 +18,7 @@ from collections import deque
 from makefun import create_function
 from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
                     serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies, \
-                    event_wait 
+                    event_wait, check_function_signature
 
 class Node:
     def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
@@ -48,7 +48,7 @@ class Node:
                                              docstring=message['docstring'],
                                              service_type=message['type'])
 
-    async def publish(self, function_name, function_impl, n_workers=5, static_page=None, can_call=None, inject_first_arg=False):
+    async def publish(self, function_name, function_impl, n_workers=1, replace=False, static_page=None, can_call=None, inject_first_arg=False):
 
         signature = str(inspect.signature(function_impl))
 
@@ -56,11 +56,11 @@ class Node:
             signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
                           .replace('(,','(',1).replace('( ','(',1)
 
-
         message = {
             'method': 'PUBLISH', 
             'function': function_name,
             'type': 'function' if isinstance(function_impl, types.FunctionType) else 'object',
+            'replace': replace,
             'signature': signature, 
             'docstring': function_impl.__doc__,
             'can_call': can_call if can_call is None or isinstance(can_call[0], list) or isinstance(can_call[0], tuple) else [can_call]
@@ -72,7 +72,7 @@ class Node:
         async with Thread(self.connection) as thread:
             await thread.send(message)
             ret_message = await thread.recv()
-            # print(message)
+            # print(ret_message)
 
         service = self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
                                              message['type'])
@@ -156,6 +156,8 @@ class Node:
 
                 return await thread.recv()
         
+        if check_function_signature(signature):
+            raise check_function_signature(signature)
         service = makefun.create_function(signature, call_service, doc=docstring)
 
         if service_type == 'function':
@@ -215,7 +217,7 @@ class Thread:
             raise Exception(message['error'])
 
         if 'warning' in message:
-            warnings.warm(message['warning'])
+            warnings.warn(message['warning'])
         
         return message
     

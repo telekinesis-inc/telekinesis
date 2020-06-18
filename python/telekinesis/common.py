@@ -4,6 +4,7 @@ import json
 import asyncio
 from uuid import uuid4
 import time
+import re
 
 import cryptography
 from cryptography.hazmat.backends import default_backend
@@ -278,3 +279,9 @@ async def ensure_delivery(connection, raw_message):
         except Exception as e:
             print('retrying message delivery', thread_id, message_id, chunk_i, e)
     raise Exception('Max retries sending message exceeded', thread_id, message_id, chunk_i)
+
+def check_function_signature(signature):
+    if '\n' in signature or (signature != re.sub(r'(?:[^A-Za-z0-9_])lambda(?=[\)\s\:])', '', signature)):
+        return 'Unsafe signature'
+
+    
