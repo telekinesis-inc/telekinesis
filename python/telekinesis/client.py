@@ -121,14 +121,14 @@ class Node:
                 async with Request(self.connection, function_name) as req:
                     try:
                         if service_type == 'function':
-                                if inject_first_arg:
-                                    output = function_impl(req, *req.args, **req.kwargs)
-                                else:
-                                    output = function_impl(*req.args, **req.kwargs)
+                            if inject_first_arg:
+                                output = function_impl(req, *req.args, **req.kwargs)
+                            else:
+                                output = function_impl(*req.args, **req.kwargs)
 
-                                if asyncio.iscoroutinefunction(function_impl):
-                                    output = await output
-                                await req.send_return(output)
+                            if asyncio.iscoroutinefunction(function_impl):
+                                output = await output
+                            await req.send_return(output)
                         else:
                             obj = function_impl(*req.args, **req.kwargs)
                             res = None

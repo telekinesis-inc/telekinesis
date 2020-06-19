@@ -3,7 +3,7 @@ from datetime import datetime
 import asyncio
 
 LANDING = ''
-with open('landing.html', 'r') as f:
+with open('services/landing.html', 'r') as f:
     LANDING = f.read()
 
 def log_enter(*args, **kwargs):
@@ -11,7 +11,7 @@ def log_enter(*args, **kwargs):
         f.write(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S\n'))
 
 async def main():
-    client = await Node(auth_file_path='root.pem', key_password=True).connect()
+    client = await Node(auth_file_path='root.pem').connect()
     await client.publish('', log_enter, 1, True, True, LANDING)
 
 asyncio.run(main())

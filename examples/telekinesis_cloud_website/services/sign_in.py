@@ -16,7 +16,7 @@ async def sign_in(request):
     return False
 
 async def main():
-    client = await Node(auth_file_path='root.pem', key_password=True).connect()
+    client = await Node(auth_file_path='root.pem').connect()
     await client.publish('sign_in', sign_in, 30, True, True, can_call=[['*', 0]], inject_first_arg=True)
 
 asyncio.run(main())
