@@ -116,7 +116,9 @@ Telekinesis is still in early development, so the API is likely to change, and t
 
 The best reference (for now) to check the functionality are the tests at `python/test`. 
 
-Each test is self contained and demonstrates one key functionality (i.e. having multiple workers for a service, delegating roles, etc.)
+Each test is self contained and demonstrates one key functionality (i.e. having multiple workers for a service, delegating roles, etc).
+
+Also, make sure to check the `examples` directory.
 
 ## Contribute
 
