@@ -16,23 +16,33 @@ async def connect():
         processes.append(await asyncio.create_subprocess_exec('python', service))
 
 def disconnect():
-    [p.kill() for p in processes]
+    for p in processes:
+        try:
+            p.kill()
+        except Exception:
+            continue
     processes.clear()
 
 async def main():
     if branch:
-        endpoint = uuid.uuid4().hex+uuid.uuid4().hex
+        endpoint = uuid.uuid4().hex
+        secret = uuid.uuid4().hex
         while True:
-            print('upgrade endpoint', endpoint)
+            print('upgrade endpoint', 'https://telekinesis.cloud/'+endpoint+'?secret='+secret)
             await connect()
 
             node = await telekinesis.Node(auth_file_path='root.pem').connect()
 
-            await (await node.publish(endpoint, lambda: None, 0, static_page='restarting...')).await_request()
+            while True:
+                req = await (await node.publish(endpoint, lambda secret: None, 0, static_page='requesting restart...')).await_request()
+                print(req.kwargs)
+                if req.kwargs.get('secret') == secret:
+                    break
             await node.close()
 
             print('restarting!!')
             await (await asyncio.create_subprocess_exec('git', 'pull', 'origin', branch)).wait()
+            await (await asyncio.create_subprocess_exec('pip', 'install', '-e', '../../python')).wait()
             
             disconnect()
             importlib.reload(telekinesis)
