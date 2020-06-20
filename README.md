@@ -132,4 +132,4 @@ If you are interested in this concept, you can contribute by:
 
 Any help is very appreciated!
 
-You can also register your email at 'https://telekinesis.cloud" to be notified for updates (this also helps me gauge interest)
+You can also register your email at https://telekinesis.cloud to be notified for updates (this also helps me gauge interest)
