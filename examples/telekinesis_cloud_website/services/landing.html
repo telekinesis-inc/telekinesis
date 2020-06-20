@@ -2,6 +2,7 @@
 <head>
   <meta charset="UTF-8"/>
    <link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css"> 
+   <link rel="stylesheet" href="/landing.css"> 
 </head>
 <body style="color: #222;">
   <div class='w3-container' style="max-width: 100vh;margin: auto;">
@@ -20,12 +21,13 @@
             action="/register_email" method="GET">
         <label class="w3-label">Email</label>
         <input class="w3-input" type="email" name="email"> 
-        <input class="w3-btn w3-blue w3-margin-top" type="submit" value="Request early access">
+        <input class="w3-btn w3-blue w3-margin-top" type="submit" value="Register">
       </form>
+
+      <div style="padding: 2vh; margin: 10vh 0 5vh 0;">
+        %s
+      </div>
     <!-- </div> -->
-    <img alt="Serve API endpoints in 3 lines-of-code" 
-         src="https://s3.amazonaws.com/cmrr.es/cmrr_demo.png" 
-         style="width: 100%; margin-bottom: 10vh;"/>
   </div>
   
 </body>

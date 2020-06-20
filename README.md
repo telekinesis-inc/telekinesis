@@ -6,7 +6,7 @@
 
 Telekinesis is built on the premise that developing, publishing and calling services across the internet shouldn't be fundamentally different to writing local code. 
 
-Therefore, to create a new service, write a function or class and *publishe* it to a *hub* (more on this later):
+Therefore, to create a new service, write a function or class and *publish* it to a *hub*:
 
 ```python
 # Example: stateless service (function):
@@ -18,6 +18,8 @@ def hello(name='world'):
 service_hello = await node.publish('<your-username>/hello', hello)
 ```
 
+
+
 To call this new service (on a separate computer), just *get* it from the *hub* and call it:
 ```python
 hello = await node.get('<your-username>/hello')
@@ -25,6 +27,9 @@ hello = await node.get('<your-username>/hello')
 # This should print 'Hello Awesome':
 print(await hello('Awesome'))
 ```
+
+
+
 
 Moreover, if you want to create a more complex service (i.e. with state and multiple methods), use classes:
 
