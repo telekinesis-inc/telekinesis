@@ -29,7 +29,7 @@ print(await hello('Awesome'))
 Moreover, if you want to create a more complex service (i.e. with state and multiple methods), use classes:
 
 ```python
-# define a statefull service (object):
+# define a stateful service (object):
 class Counter:
     def __init__(self, initial_value=0):
         self.value = initial_value
