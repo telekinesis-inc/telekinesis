@@ -6,7 +6,7 @@
 
 Telekinesis is built on the premise that developing, publishing and calling services across the internet shouldn't be fundamentally different to writing local code. 
 
-Therefore, to create a new service, the sevice developer just writes a function or class and *publishes* it in a *hub* (more on this later):
+Therefore, to create a new service, write a function or class and *publishe* it to a *hub* (more on this later):
 
 ```python
 # Example: stateless service (function):
@@ -18,7 +18,7 @@ def hello(name='world'):
 service_hello = await node.publish('<your-username>/hello', hello)
 ```
 
-To call this new service (on a separate computer), the client just *gets* it from the *hub* and calls it:
+To call this new service (on a separate computer), just *get* it from the *hub* and call it:
 ```python
 hello = await node.get('<your-username>/hello')
 
@@ -26,7 +26,7 @@ hello = await node.get('<your-username>/hello')
 print(await hello('Awesome'))
 ```
 
-Moreover, if the developer wants to create a more complex service (i.e. with state and multiple methods), she can use classes:
+Moreover, if you want to create a more complex service (i.e. with state and multiple methods), use classes:
 
 ```python
 # define a statefull service (object):
@@ -70,12 +70,12 @@ This is a **PROTOTYPE**, nobody has AUDITED this code yet, so:
 
 ## Getting Started
 
-### Installation:
+#### Installation:
 ```bash
 pip install telekinesis
 ```
 
-### Connect to the telekinesis.cloud hub:
+#### Connect to the telekinesis.cloud hub:
 ```python
 from telekinesis import Node
 
@@ -98,7 +98,7 @@ hello = await node.get('<your-username>/hello')
 print(await hello('Awesome'))
 ```
 
-### Run a simple Telekinesis hub:
+#### Run a simple Telekinesis hub:
 ```python
 from telekinesis import Hub
 
@@ -116,7 +116,7 @@ Telekinesis is still in early development, so the API is likely to change, and t
 
 The best reference (for now) to check the functionality are the tests at `python/test`. 
 
-Each test is self contained and demonstrates one key functionality (i.e. having multiple workers for a service, delegating roles, etc.) 
+Each test is self contained and demonstrates one key functionality (i.e. having multiple workers for a service, delegating roles, etc.)
 
 ## Contribute
 
@@ -131,4 +131,3 @@ If you are interested in this concept, you can contribute by:
 Any help is very appreciated!
 
 You can also register your email at 'https://telekinesis.cloud" to be notified for updates (this also helps me gauge interest)
-
