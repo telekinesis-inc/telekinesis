@@ -55,6 +55,7 @@ print(await counter.increment(100))
 ```
 ## Main Features
 
+- **Open Source**: You can use it anywhere you like, look under the hood, find security issues (please do!), suggest changes, fork it... do anything you want. I just hope you find this useful!
 - **Low latency**: Telekinesis is based on websocket communication, so SSL and authorization verification occurs at the connection initialization stage; service requests and responses send a single network package - no back and forth.
 - **Role based authorization**: Telekinesis has a hierarchical, role-based, authorization system, which limits who can call and serve each service, making the services themselves simpler. **DO NOT TRUST YET!**
 - **Limited surface area**: The client doesn't have to trust the code of the service provider and viceversa. The computation runs entirely on the service provider side, so the only the service signature and the arguments passed are shared. Moreover, the service can have any dependencies and secrets the developer needs.
@@ -66,7 +67,7 @@ print(await counter.increment(100))
 This is a **PROTOTYPE**, nobody has AUDITED this code yet, so:
 - DO NOT TRUST with critical/confidential data.
 - DO NOT TRUST with personal passwords.
-- API will likely change.
+- API will likely change and break your code!
 
 ## Getting Started
 
