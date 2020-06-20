@@ -110,6 +110,9 @@ hello = await node.get('<your-username>/hello')
 
 # This should print 'Hello Awesome':
 print(await hello('Awesome'))
+
+# To remove a service just call its remove method:
+await service_hello.remove()
 ```
 
 #### Run a simple Telekinesis hub:
