@@ -6,7 +6,7 @@
 
 Telekinesis is built on the premise that developing, publishing and calling services across the internet shouldn't be fundamentally different to writing local code. 
 
-Therefore, to create a new service, write a function or class and *publish* it to a *hub*:
+With Telekinesis, to create a new service, just write a function or class and *publish* it to a *hub*:
 
 ```python
 # Example: stateless service (function):
