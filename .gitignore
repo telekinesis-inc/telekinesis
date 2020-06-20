@@ -1,5 +1,6 @@
 *.tmp
 *.ipynb
+*.pem
 .vscode
 
 # Byte-compiled / optimized / DLL files
