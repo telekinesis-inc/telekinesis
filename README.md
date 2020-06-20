@@ -83,7 +83,15 @@ from telekinesis import Node
 # Connect to a Telekinesis `hub`
 node = await Node('wss://telekinesis.cloud').connect()
 
-# Telekinesis.cloud has `sign_up` and `sign_in` services to authenticate 
+# telekinesis.cloud has `sign_up` and `sign_in` services to authenticate 
+
+# If you've never signed up, get and call the sign_up service:
+sign_up = await node.get('sign_up')
+
+# This prompts you for username and password to create your user:
+await sign_up()
+
+# Get the sign_in service:
 sign_in = await node.get('sign_in')
 
 # This prompts you for username and password and checks it matches with the one you signed up with:
