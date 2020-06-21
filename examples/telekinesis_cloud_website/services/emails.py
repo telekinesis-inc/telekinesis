@@ -4,7 +4,7 @@ import asyncio
 
 def log_email(*args, **kwargs):
     print('email', args, kwargs)
-    with open('../../email.log', 'a') as f:
+    with open('email.log', 'a') as f:
         f.write(' '.join(str(x) for x in (datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S\n'), args, kwargs)))
 
 async def main():

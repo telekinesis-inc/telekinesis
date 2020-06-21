@@ -1,13 +1,15 @@
 import setuptools
 import warnings
 
-
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+with open("../README.md", "r") as fh:
+    long_description += '\n'.join(fh.read().split('\n')[2:])
+
 setuptools.setup(
     name="telekinesis", 
-    version="0.0.9",
+    version="0.0.10",
     author="Elias J Neuman",
     author_email="elias.j.neuman@gmail.com.com",
     description="A websockets based RPC to easily develop, deploy and call services online.",

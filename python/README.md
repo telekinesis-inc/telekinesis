@@ -1,3 +1,3 @@
-# camarere
+# Telekinesis - Python Package
 
-Python cmrr.es package
+See [telekinesis github repo](https://github.com/e-neuman/telekinesis)
