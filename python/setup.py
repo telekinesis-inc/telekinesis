@@ -4,10 +4,9 @@ import warnings
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-
 setuptools.setup(
     name="telekinesis", 
-    version="0.0.10",
+    version="0.0.11",
     author="Elias J Neuman",
     author_email="elias.j.neuman@gmail.com.com",
     description="A websockets based RPC to easily develop, deploy and call services online.",
