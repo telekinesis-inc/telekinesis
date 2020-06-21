@@ -4,8 +4,6 @@ import warnings
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-with open("../README.md", "r") as fh:
-    long_description += '\n'.join(fh.read().split('\n')[2:])
 
 setuptools.setup(
     name="telekinesis", 
