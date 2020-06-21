@@ -11,7 +11,7 @@ on:
 
 jobs:
   build:
-
+    
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -37,8 +37,3 @@ jobs:
     - name: Test with pytest
       run: |
         pytest
-    - name: Upgrade telekinesis.cloud Hub
-      env:
-        telekinesis_cloud_upgrade: ${{ secrets.TELEKINESIS_CLOUD_UPGRADE }}
-      run: |
-        curl "$telekinesis_cloud_upgrade"
