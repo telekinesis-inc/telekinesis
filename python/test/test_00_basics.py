@@ -2,7 +2,6 @@ from telekinesis import Hub, Node
 import asyncio
 import time
 import pytest
-import numpy as np
 
 pytestmark = pytest.mark.asyncio
 
@@ -111,9 +110,9 @@ async def test_serve_call_function_numpy_args():
 
             caller = await node.get('echo')
 
-            content = np.random.rand(100,100)
+            content = set('asdf')
 
-            assert (content == (await caller(content))).all()
+            assert content == (await caller(content))
             service.stop_all()
 
 async def test_serve_object_call():
