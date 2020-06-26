@@ -2,6 +2,7 @@ from telekinesis import Hub, Node
 import asyncio
 import time
 import pytest
+import numpy as np
 
 pytestmark = pytest.mark.asyncio
 
@@ -98,6 +99,21 @@ async def test_serve_call_function_large_args():
             caller = await node.get('echo')
 
             assert 'x'*2**21 == (await caller('x'*2**21))
+            service.stop_all()
+
+async def test_serve_call_function_numpy_args():
+    async with Hub() as hub:
+        async with Node() as node:
+            service = await node.publish('echo', lambda x: x)
+
+            await asyncio.sleep(0.01)
+            assert len(hub.services['echo']['workers']) >= 1
+
+            caller = await node.get('echo')
+
+            content = np.random.rand(100,100)
+
+            assert (content == (await caller(content))).all()
             service.stop_all()
 
 async def test_serve_object_call():

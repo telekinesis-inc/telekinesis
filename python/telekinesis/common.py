@@ -1,6 +1,8 @@
 from collections import namedtuple
 import base64
 import json
+import pickle
+import zlib
 import asyncio
 from uuid import uuid4
 import time
@@ -20,6 +22,7 @@ PAD_SIGN = padding.PSS(
     mgf=padding.MGF1(hashes.SHA256()),
     salt_length=padding.PSS.MAX_LENGTH
 )
+MARKER_NONJSON_SERIALIZATION = 'TELEKINESIS_BASE85_ZLIB_PICKLE_DUMP.'
 
 Token = namedtuple('Token', ['created_by', 'signature', 'payload'])
 
@@ -184,6 +187,20 @@ def get_certificate_dependencies(role_certificates, final_role):
     return list(certificate_dependencies)
 
 async def decode_message(raw_message, connection):
+    def postprocess(data):
+        if data is None:
+            return data
+        elif isinstance(data, (bool, int, float)):
+            return data
+        elif isinstance(data, (tuple, list)):
+            return [postprocess(x) for x in data]
+        elif isinstance(data, dict):
+            return {postprocess(k): postprocess(v) for k, v in data.items()}
+        elif isinstance(data, str):
+            if data[:len(MARKER_NONJSON_SERIALIZATION)] == MARKER_NONJSON_SERIALIZATION:
+                return pickle.loads(zlib.decompress(base64.b85decode(bytes(data[len(MARKER_NONJSON_SERIALIZATION):], 'utf-8'))))
+            return data
+        raise Exception('Telekinesis: message decode error')
 
     thread_id, message_id = raw_message[:32], raw_message[32:64]
     chunk_i = None if (len(raw_message) == 64) or (raw_message[64] != '.') else int(raw_message[65:68])
@@ -231,10 +248,21 @@ async def decode_message(raw_message, connection):
         message_in = None
     
     connection.seen_messages[tid%2].add(mid)
-    return thread_id, message_in
+    return thread_id, postprocess(message_in)
 
 async def encode_message(thread_id, message, connection):
-    dump = json.dumps(message)
+    def prepare(data):
+        if data is None:
+            return data
+        elif isinstance(data, (bool, int, float, str)):
+            return data
+        elif isinstance(data, (tuple, list)):
+            return [prepare(x) for x in data]
+        elif isinstance(data, dict):
+            return {prepare(k): prepare(v) for k, v in data.items()}
+        return MARKER_NONJSON_SERIALIZATION+str(base64.b85encode(zlib.compress(pickle.dumps(data, 4))), 'utf-8')
+
+    dump = json.dumps(prepare(message))
     message_id = uuid4().hex
 
     # print('SEND>', thread_id, message_id, message.get('method') if 'get' in dir(message) else None)
