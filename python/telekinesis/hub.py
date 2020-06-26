@@ -43,7 +43,7 @@ class Hub():
     async def handle_client(self, websocket, path):
 
         client = ConnectionWithClient(websocket)
-        thread_id, message_in = await decode_message(await websocket.recv(), client)
+        thread_id, message_in = await decode_message(await websocket.recv(), client, False)
         if message_in is None:
             print('Invalid authentication')
             return
@@ -74,7 +74,8 @@ class Hub():
         async for raw_message in websocket:
             thread_id, message_in = await decode_message(
                 raw_message,
-                client)
+                client,
+                False)
 
             if thread_id not in self.connections[pubkey]['threads']:
                 await self._create_thread(pubkey, thread_id, client)

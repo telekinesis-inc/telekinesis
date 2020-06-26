@@ -186,7 +186,7 @@ def get_certificate_dependencies(role_certificates, final_role):
                         remaining_roles.add(payload['from_role'])
     return list(certificate_dependencies)
 
-async def decode_message(raw_message, connection):
+async def decode_message(raw_message, connection, deserialize_pickle=True):
     def postprocess(data):
         if data is None:
             return data
@@ -197,7 +197,7 @@ async def decode_message(raw_message, connection):
         elif isinstance(data, dict):
             return {postprocess(k): postprocess(v) for k, v in data.items()}
         elif isinstance(data, str):
-            if data[:len(MARKER_NONJSON_SERIALIZATION)] == MARKER_NONJSON_SERIALIZATION:
+            if deserialize_pickle and (data[:len(MARKER_NONJSON_SERIALIZATION)] == MARKER_NONJSON_SERIALIZATION):
                 return pickle.loads(zlib.decompress(base64.b85decode(bytes(data[len(MARKER_NONJSON_SERIALIZATION):], 'utf-8'))))
             return data
         raise Exception('Telekinesis: message decode error')
