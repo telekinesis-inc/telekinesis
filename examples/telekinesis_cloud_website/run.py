@@ -28,7 +28,8 @@ async def main():
         endpoint = uuid.uuid4().hex
         secret = uuid.uuid4().hex
         while True:
-            print('upgrade endpoint', 'https://telekinesis.cloud/'+endpoint+'?secret='+secret)
+            with open('endpoints.log', 'a') as f:
+                f.write('https://telekinesis.cloud/'+endpoint+'?secret='+secret)
             await connect()
 
             node = await telekinesis.Node(auth_file_path='root.pem').connect()
