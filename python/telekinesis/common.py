@@ -10,18 +10,11 @@ import re
 
 import cryptography
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import ec#rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-PAD_ENCRYPT = padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-)
-PAD_SIGN = padding.PSS(
-    mgf=padding.MGF1(hashes.SHA256()),
-    salt_length=padding.PSS.MAX_LENGTH
-)
 MARKER_NONJSON_SERIALIZATION = 'TELEKINESIS_BASE85_ZLIB_PICKLE_DUMP.'
 
 Token = namedtuple('Token', ['created_by', 'signature', 'payload'])
@@ -29,17 +22,9 @@ Token = namedtuple('Token', ['created_by', 'signature', 'payload'])
 encode = lambda x, enc=base64.b64encode: str(enc(x), 'utf-8')
 decode = lambda y, enc=base64.b64decode: enc(bytes(y, 'utf-8'))
 
-def deserialize_private_key(private_key_serial, password=None):
-    return serialization.load_pem_private_key(
-        bytes(private_key_serial, 'utf-8'),
-        password=None if password is None else bytes(password, 'utf-8'),
-        backend=default_backend()
-    )
-
 def create_private_key():
-    return rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=3072,
+    return ec.generate_private_key(
+        curve=ec.SECP256K1,
         backend=default_backend()
     )
 
@@ -52,32 +37,60 @@ def serialize_private_key(private_key, password=None):
     )
     return str(serial_private, 'utf-8')
 
+def deserialize_private_key(private_key_serial, password=None):
+    return serialization.load_pem_private_key(
+        bytes(private_key_serial, 'utf-8'),
+        password=None if password is None else bytes(password, 'utf-8'),
+        backend=default_backend()
+    )
 def generate_public_serial(private_key):
     serial_pub = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.CompressedPoint
     )
     return encode(serial_pub)
 
 def deserialize_public_key(public_serial):
-    public_key = serialization.load_pem_public_key(
-        decode(public_serial),
-        backend=default_backend()
+    public_key = ec.EllipticCurvePublicKey.from_encoded_point(
+        ec.SECP256K1(),
+        decode(public_serial)
     )
     return public_key
 
-def encrypt(message, public_serial):
-    return encode(deserialize_public_key(public_serial).encrypt(bytes(message, 'utf-8'), PAD_ENCRYPT))
+def derive_shared_key(private_key, public_serial, salt):
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=bytes(salt, 'utf-8'),
+        info=b'telekinesis shared secret',
+        backend=default_backend()
+    ).derive(private_key.exchange(
+            ec.ECDH(), deserialize_public_key(public_serial)))
 
-def decrypt(encrypted, private_key):
-    return str(private_key.decrypt(decode(encrypted), PAD_ENCRYPT), 'utf-8')
+def encrypt(message, shared_key, iv):
+    # Note: this only protects against evesdropping, not against forged ciphertext attacks.
+    encryptor = Cipher(algorithms.AES(shared_key), 
+                       modes.CBC(iv), 
+                       default_backend()).encryptor()
+    encryptor.update(bytes(message, 'utf-8')) 
+
+    return encode(encryptor.finalize())
+
+def decrypt(ciphertext, shared_key, iv):
+    decryptor = Cipher(algorithms.AES(shared_key),
+                       modes.CBC(iv),
+                       default_backend()).decryptor()
+    decryptor.update(decode(ciphertext))
+
+    return str(decryptor.finalize(), 'utf-8')
 
 def sign(message, private_key):
-    return encode(private_key.sign(bytes(message, 'utf-8'), PAD_SIGN, hashes.SHA3_256()), base64.b32encode)
+    return encode(private_key.sign(bytes(message, 'utf-8'), 
+                                   ec.ECDSA(hashes.SHA3_256())))
 
 def verify(signature, message, public_serial):
     return deserialize_public_key(public_serial)\
-             .verify(decode(signature, base64.b32decode), bytes(message, 'utf-8'), PAD_SIGN, hashes.SHA3_256())
+             .verify(decode(signature), bytes(message, 'utf-8'), ec.ECDSA(hashes.SHA3_256()))
 
 def extend_role(from_private_key, from_role, recipient, sub_role):
     payload = json.dumps({

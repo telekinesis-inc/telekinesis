@@ -383,7 +383,9 @@ class Hub():
         await self._send(worker_id, worker_thread, {'call': {'args': call['args'], 
                                                                 'kwargs': call['kwargs'], 
                                                                 'call_id': call['call_id'], 
+                                                                'caller_thread': call['caller_thread'],
                                                                 'caller_pubkey': call['caller_id']}})
+        await self._send(call['caller_id'], call['caller_thread'], {'worker_id': worker_id})
 
     async def _serve(self, pubkey, thread_id, m):
         if 'function' not in m:

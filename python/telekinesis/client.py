@@ -18,7 +18,7 @@ from collections import deque
 from makefun import create_function
 from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
                     serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies, \
-                    event_wait, check_function_signature
+                    event_wait, check_function_signature, encrypt, decrypt, derive_shared_key
 
 class Node:
     def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
@@ -383,6 +383,7 @@ class Request:
     def __init__(self, connection, function_name):
         self._function_name = function_name
         self._thread = Thread(connection)
+        self._private_key = connection.private_key
         self.call_id = None
         self.args = None
         self.kwargs = None
@@ -400,6 +401,10 @@ class Request:
                 self.args = call['args']
                 self.kwargs = call['kwargs']
                 self.caller_pubkey = call['caller_pubkey']
+
+                self.shared_secret = derive_shared_key(self._private_key, 
+                                                       call['caller_pubkey'],
+                                                       call['caller_thread'])
 
                 return self
             elif 'service_removed' in message:
@@ -467,6 +472,7 @@ class RemoteObject:
             'kwargs': self._kwargs})
 
         self._call_id = (await self._thread.recv())['call_id']
+        self._worker_id = (await self._thread.recv())['worker_id']
 
         await self._await_state_update()
         
@@ -530,6 +536,8 @@ class Call:
         self.accept_role_extensions = accept_role_extensions
         self.thread = None
         self.call_id = None
+        self.worker_id = None
+        self.shared_secret = None
 
     async def call(self, *args, **kwargs):
         async with Thread(self.connection) as thread:
@@ -545,6 +553,11 @@ class Call:
                     message = await thread.recv()
                     if 'call_id' in message:
                         self.call_id = message['call_id']
+                    if 'worker_id' in message:
+                        self.worker_id = message['worker_id']
+                        self.shared_secret = derive_shared_key(self.connection.private_key, 
+                                                       self.worker_id,
+                                                       self.thread.thread_id)
                     if 'input_request' in message:
                         if message['hashed']:
                             await self.on_secret_request(message['input_request'], message['salt'])
