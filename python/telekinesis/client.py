@@ -130,7 +130,10 @@ class Node:
                                 output = await output
                             await req.send_return(output)
                         else:
-                            obj = function_impl(*req.args, **req.kwargs)
+                            if inject_first_arg:
+                                obj = function_impl(req, *req.args, **req.kwargs)
+                            else:
+                                obj = function_impl(*req.args, **req.kwargs)
                             res = None
                             while True:
                                 props, meths = get_object_state(obj)
@@ -140,6 +143,9 @@ class Node:
                                     args = m.get('args') or []
                                     kwargs = m.get('kwargs') or {}
                                     res = obj.__getattribute__(m['obj_method'])(*args, **kwargs)
+
+                                    if asyncio.iscoroutinefunction(obj.__getattribute__(m['obj_method'])):
+                                        res = await res
                                 if '_close' in m:
                                     # await req.send_update(props=props, meths=meths, response=res, call_return=None)
                                     break
@@ -490,29 +496,42 @@ class RemoteObject:
         return await self._await_state_update()
 
     async def _await_state_update(self):
-        message = await self._thread.recv()
+        while True:
+            message = await self._thread.recv()
 
-        if 'call_return' in message:
-            await self._close(False)
-        
-        for d in dir(self):
-            if d[0] != '_':
-                self.__delattr__(d)
+            if 'call_return' in message:
+                await self._close(False)
 
-        for p in message['props']:
-            self.__setattr__(p, message['props'][p])
-        
-        for m in message['meths']:
-            method = message['meths'][m]
+            if 'print' in message:
+                print(message['print'])
 
-            func = makefun.create_function(method['signature'], 
-                                           partial(self._call_method, m),
-                                           func_name=m,
-                                           module_name='camarere.client.RemoteObject',
-                                           doc=method['docstring'] if method['docstring'] is not None else "")
-            self.__setattr__(m, func)
+            if 'props' in message or 'meths' in message:
+                for d in dir(self):
+                    if d[0] != '_':
+                        self.__delattr__(d)
 
-        return message['response']
+                for p in message['props']:
+                    self.__setattr__(p, message['props'][p])
+                
+                for m in message['meths']:
+                    method = message['meths'][m]
+
+                    func = makefun.create_function(method['signature'], 
+                                                partial(self._call_method, m),
+                                                func_name=m,
+                                                module_name='camarere.client.RemoteObject',
+                                                doc=method['docstring'] if method['docstring'] is not None else "")
+                    self.__setattr__(m, func)
+
+            if 'response' in message:
+                return message['response']
+            
+            if 'call_return' in message:
+                break
+
+            if 'reset' in message:
+                await self._start()
+                break
     
     async def __aenter__(self):
         return await self._start()
