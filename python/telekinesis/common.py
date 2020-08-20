@@ -1,3 +1,4 @@
+import os
 from collections import namedtuple
 import base64
 import json
@@ -67,22 +68,21 @@ def derive_shared_key(private_key, public_serial, salt):
     ).derive(private_key.exchange(
             ec.ECDH(), deserialize_public_key(public_serial)))
 
-def encrypt(message, shared_key, iv):
+def encrypt(message_bytes, shared_key):
     # Note: this only protects against evesdropping, not against forged ciphertext attacks.
+    nonce = os.urandom(16)
     encryptor = Cipher(algorithms.AES(shared_key), 
-                       modes.CBC(iv), 
+                       modes.CTR(nonce), 
                        default_backend()).encryptor()
-    encryptor.update(bytes(message, 'utf-8')) 
+    
+    return encode(encryptor.update(message_bytes) + encryptor.finalize()), nonce
 
-    return encode(encryptor.finalize())
-
-def decrypt(ciphertext, shared_key, iv):
+def decrypt(ciphertext, shared_key, nonce):
     decryptor = Cipher(algorithms.AES(shared_key),
-                       modes.CBC(iv),
+                       modes.CTR(nonce),
                        default_backend()).decryptor()
-    decryptor.update(decode(ciphertext))
-
-    return str(decryptor.finalize(), 'utf-8')
+    
+    return decryptor.update(decode(ciphertext)) + decryptor.finalize()
 
 def sign(message, private_key):
     return encode(private_key.sign(bytes(message, 'utf-8'), 

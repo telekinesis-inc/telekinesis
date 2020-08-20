@@ -10,6 +10,8 @@ import asyncio
 import websockets
 import time
 import hashlib
+import zlib
+import pickle
 
 from getpass import getpass
 import makefun
@@ -85,19 +87,12 @@ class Node:
 
     def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
                                        docstring=None, service_type='function'):
-        def create_call():
-            return Call(self.connection, function_name)
-
         async def await_request():
             return await Request(self.connection, function_name)._await_request()
 
         async def call_service(*args, **kwargs):
-            if service_type == 'function':
-                call = create_call()
-                return await call.call(*args, **kwargs)
-            else:
-                ro = RemoteObject(self.connection, function_name, args, kwargs)
-                return await ro._start()
+            ro = RemoteObject(self.connection, function_name, args, kwargs)
+            return await ro._start()
 
         async def run_service(function_impl=function_impl, inject_first_arg=inject_first_arg):
             def get_object_state(function_impl):
@@ -120,24 +115,46 @@ class Node:
             while True:
                 async with Request(self.connection, function_name) as req:
                     try:
-                        if service_type == 'function':
-                            if inject_first_arg:
-                                output = function_impl(req, *req.args, **req.kwargs)
-                            else:
-                                output = function_impl(*req.args, **req.kwargs)
+                        if inject_first_arg:
+                            obj = function_impl(req, *req.args, **req.kwargs)
+                        else:
+                            obj = function_impl(*req.args, **req.kwargs)
 
-                            if asyncio.iscoroutinefunction(function_impl):
-                                output = await output
-                            await req.send_return(output)
+                        if asyncio.iscoroutinefunction(function_impl):
+                            obj = await obj
+
+                        if service_type == 'function':
+                            await req.send_return(obj)
                         else:
                             if inject_first_arg:
                                 obj = function_impl(req, *req.args, **req.kwargs)
                             else:
                                 obj = function_impl(*req.args, **req.kwargs)
                             res = None
+
                             while True:
                                 props, meths = get_object_state(obj)
-                                await req.send_update(props=props, meths=meths, response=res)
+                                # payload_unencrypted = zlib.compress(bytes(json.dumps({
+                                #     'props': props, 'meths': meths, 'response': res}), 'utf-8'))
+                                payload_unencrypted = pickle.dumps({'props': props, 'meths': meths, 'response': res})
+
+                                if len(payload_unencrypted) > req.MAX_LEN:
+                                    chunk_id = os.urandom(8)
+                                    chunk_count = (len(payload_unencrypted) - 1) // req.MAX_LEN + 1
+                                    tasks = []
+                                    for chunk_number in range(chunk_count):
+                                        chunk = payload_unencrypted[chunk_number*req.MAX_LEN:(chunk_number+1)*req.MAX_LEN]
+
+                                        payload, nonce = encrypt(chunk, req.shared_key)
+                                        tasks.append(asyncio.create_task(req.send_update(payload=payload,
+                                                                                         nonce=nonce,
+                                                                                         chunk_count=chunk_count,
+                                                                                         chunk_number=chunk_number,
+                                                                                         chunk_id=chunk_id)))
+                                    asyncio.gather(*tasks)
+                                else:
+                                    payload, nonce = encrypt(payload_unencrypted, req.shared_key)
+                                    await req.send_update(payload=payload, nonce=nonce)
                                 m = await req._thread.recv()
                                 if 'obj_method' in m:
                                     args = m.get('args') or []
@@ -169,9 +186,6 @@ class Node:
         if check_function_signature(signature):
             raise check_function_signature(signature)
         service = makefun.create_function(signature, call_service, doc=docstring)
-
-        if service_type == 'function':
-            service.create_call = create_call
 
         if can_serve:
             service.run = run_service
@@ -394,6 +408,7 @@ class Request:
         self.args = None
         self.kwargs = None
         self.caller_pubkey = None
+        self.MAX_LEN = 2**20 - 2**10
 
     async def _await_request(self):
         await self._thread.send({'method': 'SERVE', 'function': self._function_name})
@@ -408,7 +423,7 @@ class Request:
                 self.kwargs = call['kwargs']
                 self.caller_pubkey = call['caller_pubkey']
 
-                self.shared_secret = derive_shared_key(self._private_key, 
+                self.shared_key = derive_shared_key(self._private_key, 
                                                        call['caller_pubkey'],
                                                        call['caller_thread'])
 
@@ -432,6 +447,7 @@ class Request:
         return await self._thread.send(message)
 
     async def send_role_extension(self, from_role, sub_role, recipient=None):
+        print('sending role extension')
         if recipient is None:
             recipient = self.caller_pubkey
         await self.send_update(role_extension=[
@@ -461,13 +477,14 @@ class Request:
         await self.close()
 
 class RemoteObject:
-    def __init__(self, connection, function_name, args, kwargs):
+    def __init__(self, connection, function_name, args, kwargs, accept_role_extensions=True):
         self._connection = connection
         self._function_name = function_name
         self._args = args
         self._kwargs = kwargs
         self._thread = None
         self._call_id = None
+        self._accept_role_extensions = accept_role_extensions
 
     async def _start(self):
         self._thread = Thread(self._connection)
@@ -480,9 +497,15 @@ class RemoteObject:
         self._call_id = (await self._thread.recv())['call_id']
         self._worker_id = (await self._thread.recv())['worker_id']
 
-        await self._await_state_update()
-        
-        return self
+        self._shared_key = derive_shared_key(self._connection.private_key, 
+                                             self._worker_id,
+                                             self._thread.thread_id)
+
+        ret = await self._await_state_update()
+
+        if ret is None:
+            return self
+        return ret[1]
     
     async def _call_method(self, method, *args, **kwargs):
         await self._thread.send({
@@ -499,40 +522,84 @@ class RemoteObject:
         while True:
             message = await self._thread.recv()
 
+            print(message)
+
             if 'call_return' in message:
                 await self._close(False)
 
-            if 'print' in message:
-                print(message['print'])
+            if 'input_request' in message:
+                if message['hashed']:
+                    await self._on_secret_request(message['input_request'], message['salt'])
+                else:
+                    await self._on_input_request(message['input_request'])
+            if 'role_extension' in message:
+                if self._accept_role_extensions:
+                    await self._connection.add_role_certificate(*message['role_extension'])
+            
+            if 'payload' in message:
+                if 'chunk_count' in message:
+                    dumps = {}
+                    while True:
+                        dumps[message['chunk_number']] = decrypt(message['payload'], 
+                                                                 self._shared_key, 
+                                                                 message['nonce'])
+                        if len(dumps) == message['chunk_count']:
+                            break
+                        message = await self._thread.recv()
 
-            if 'props' in message or 'meths' in message:
-                for d in dir(self):
-                    if d[0] != '_':
-                        self.__delattr__(d)
+                    dump = b''.join([dumps[i] for i in range(message['chunk_count'])])
+                else:
+                    dump = decrypt(message['payload'], self._shared_key, message['nonce'])
+                # payload = json.loads(str(zlib.decompress(dump), 'utf-8'))
+                payload = pickle.loads(dump)
 
-                for p in message['props']:
-                    self.__setattr__(p, message['props'][p])
-                
-                for m in message['meths']:
-                    method = message['meths'][m]
+                if 'print' in payload:
+                    print(payload['print'])
 
-                    func = makefun.create_function(method['signature'], 
-                                                partial(self._call_method, m),
-                                                func_name=m,
-                                                module_name='camarere.client.RemoteObject',
-                                                doc=method['docstring'] if method['docstring'] is not None else "")
-                    self.__setattr__(m, func)
+                if 'props' in payload or 'meths' in payload:
+                    for d in dir(self):
+                        if d[0] != '_':
+                            self.__delattr__(d)
 
-            if 'response' in message:
-                return message['response']
+                    for p in payload['props']:
+                        self.__setattr__(p, payload['props'][p])
+                    
+                    for m in payload['meths']:
+                        method = payload['meths'][m]
+
+                        func = makefun.create_function(method['signature'], 
+                                                    partial(self._call_method, m),
+                                                    func_name=m,
+                                                    module_name='telekinesis.client.RemoteObject',
+                                                    doc=method['docstring'] if method['docstring'] is not None else "")
+                        self.__setattr__(m, func)
+
+                if 'response' in payload:
+                    return payload['response']
             
             if 'call_return' in message:
-                break
+                return True, message['call_return']
 
             if 'reset' in message:
                 await self._start()
                 break
     
+    async def _on_input_request(self, prompt):
+        x = input(prompt)
+        await self._send(input_response=x)
+
+    async def _on_secret_request(self, prompt, salt=None):
+        secret = getpass(prompt)
+
+        x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
+        
+        await self._send(input_response=x)
+    
+    async def _send(self, **kwargs):
+        kwargs.update({'method': 'SEND', 'call_id': self._call_id})
+
+        return await self._thread.send(kwargs)
+
     async def __aenter__(self):
         return await self._start()
     
@@ -548,66 +615,58 @@ class RemoteObject:
             })
         await self._thread.close()
 
-class Call:
-    def __init__(self, connection, function_name, accept_role_extensions=True):
-        self.connection = connection
-        self.function_name = function_name
-        self.accept_role_extensions = accept_role_extensions
-        self.thread = None
-        self.call_id = None
-        self.worker_id = None
-        self.shared_secret = None
+# class Call:
+#     def __init__(self, connection, function_name, accept_role_extensions=True):
+#         self.connection = connection
+#         self.function_name = function_name
+#         self.accept_role_extensions = accept_role_extensions
+#         self.thread = None
+#         self.call_id = None
+#         self.worker_id = None
+#         self.shared_secret = None
 
-    async def call(self, *args, **kwargs):
-        async with Thread(self.connection) as thread:
-            self.thread = thread
-            await thread.send({
-                'method': 'CALL', 
-                'function': self.function_name, 
-                'args': args, 
-                'kwargs': kwargs})
+#     async def call(self, *args, **kwargs):
+#         async with Thread(self.connection) as thread:
+#             self.thread = thread
+#             await thread.send({
+#                 'method': 'CALL', 
+#                 'function': self.function_name, 
+#                 'args': args, 
+#                 'kwargs': kwargs})
         
-            while True:
-                try:
-                    message = await thread.recv()
-                    if 'call_id' in message:
-                        self.call_id = message['call_id']
-                    if 'worker_id' in message:
-                        self.worker_id = message['worker_id']
-                        self.shared_secret = derive_shared_key(self.connection.private_key, 
-                                                       self.worker_id,
-                                                       self.thread.thread_id)
-                    if 'input_request' in message:
-                        if message['hashed']:
-                            await self.on_secret_request(message['input_request'], message['salt'])
-                        else:
-                            await self.on_input_request(message['input_request'])
-                    if 'role_extension' in message:
-                        if self.accept_role_extensions:
-                            await self.connection.add_role_certificate(*message['role_extension'])
-                    if 'print' in message:
-                        await self.on_update(message['print'])
-                    if 'call_return' in message:
-                        return message['call_return']
-                except asyncio.CancelledError as e:
-                    await self._send(error=str(e))
-                    raise e
+#             while True:
+#                 try:
+#                     message = await thread.recv()
+#                     if 'call_id' in message:
+#                         self.call_id = message['call_id']
+#                     if 'worker_id' in message:
+#                         self.worker_id = message['worker_id']
+#                         self.shared_secret = derive_shared_key(self.connection.private_key, 
+#                                                        self.worker_id,
+#                                                        self.thread.thread_id)
+#                     if 'print' in message:
+#                         await self.on_update(message['print'])
+#                     if 'call_return' in message:
+#                         return message['call_return']
+#                 except asyncio.CancelledError as e:
+#                     await self._send(error=str(e))
+#                     raise e
 
-    async def _send(self, **kwargs):
-        kwargs.update({'method': 'SEND', 'call_id': self.call_id})
+#     async def _send(self, **kwargs):
+#         kwargs.update({'method': 'SEND', 'call_id': self.call_id})
 
-        return await self.thread.send(kwargs)
+#         return await self.thread.send(kwargs)
 
-    async def on_input_request(self, prompt):
-        x = input(prompt)
-        await self._send(input_response=x)
+#     async def on_input_request(self, prompt):
+#         x = input(prompt)
+#         await self._send(input_response=x)
 
-    async def on_secret_request(self, prompt, salt=None):
-        secret = getpass(prompt)
+#     async def on_secret_request(self, prompt, salt=None):
+#         secret = getpass(prompt)
 
-        x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
+#         x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
         
-        await self._send(input_response=x)
+#         await self._send(input_response=x)
 
-    async def on_update(self, content):
-        print(content)
+#     async def on_update(self, content):
+#         print(content)
