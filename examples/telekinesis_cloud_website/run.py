@@ -32,7 +32,7 @@ async def main():
                 f.write('https://telekinesis.cloud/'+endpoint+'?secret='+secret)
             await connect()
 
-            node = await telekinesis.Node(auth_file_path='root.pem').connect()
+            node = await telekinesis.Portal(auth_file_path='root.pem').connect()
 
             while True:
                 req = await (await node.publish(endpoint, lambda secret: None, 0, static_page='requesting restart...')).await_request()

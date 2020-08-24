@@ -1,10 +1,10 @@
-from telekinesis import Hub, Node
+from telekinesis import Hub, Portal
 import asyncio
 import json
 
-client = Node(auth_file_path='root.pem')
+client = Portal(auth_file_path='root.pem')
 
-server = Hub('0.0.0.0', root_pubkey=client.connection.public_key).start()
+server = Hub('0.0.0.0', root_pubkey=client.session.public_key).start()
 
 print('Telekinesis Hub started at', 'ws://0.0.0.0:3388')
 

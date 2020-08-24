@@ -1,4 +1,4 @@
-from telekinesis import Node
+from telekinesis import Portal
 from datetime import datetime
 from markdown2 import Markdown
 import asyncio
@@ -23,7 +23,7 @@ def log_enter(*args, **kwargs):
         f.write(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S\n'))
 
 async def main():
-    client = await Node(auth_file_path='root.pem').connect()
+    client = await Portal(auth_file_path='root.pem').connect()
     await client.publish('landing.css', lambda: None, 0, False, True, CSS)
     await client.publish('', log_enter, 1, True, True, LANDING)
 

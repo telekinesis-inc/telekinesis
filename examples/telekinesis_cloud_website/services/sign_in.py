@@ -1,4 +1,4 @@
-from telekinesis import Node
+from telekinesis import Portal
 from datetime import datetime
 import asyncio
 import json
@@ -47,7 +47,7 @@ async def sign_in(request):
     return False
 
 async def main():
-    client = await Node(auth_file_path='root.pem').connect()
+    client = await Portal(auth_file_path='root.pem').connect()
     await client.publish('sign_up', sign_up, 20, False, True, can_call=[['*', 0]], inject_first_arg=True)
     await client.publish('sign_in', sign_in, 20, True, True, can_call=[['*', 0]], inject_first_arg=True)
 

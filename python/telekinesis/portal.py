@@ -10,7 +10,7 @@ import asyncio
 import websockets
 import time
 import hashlib
-import zlib
+# import zlib
 import pickle
 
 from getpass import getpass
@@ -22,33 +22,182 @@ from .common import sign, generate_public_serial, encode_message, decode_message
                     serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies, \
                     event_wait, check_function_signature, encrypt, decrypt, derive_shared_key
 
-class Node:
-    def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
-        if connection is None:
-            self.connection = Connection(url, auth_file_path, key_password)
+class RemoteObjectBase:
+    def __init__(self, session, function_name, thread=None):
+        async def _on_input_request(prompt):
+            return input(prompt)
+
+        async def _on_secret_request(prompt, salt=None):
+            secret = getpass(prompt)
+            return hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
+
+        self._session = session
+        self._function_name = function_name
+        self._thread = thread
+        self._call_id = None
+        self._on_input_request = _on_input_request
+        self._on_secret_request = _on_secret_request
+
+    async def _start(self, *args, **kwargs):
+
+        thread = Thread(self._session)
+        obj = RemoteObjectBase(self._session, self._function_name, thread)
+        obj._on_input_request = self._on_input_request
+        obj._on_secret_request = self._on_secret_request
+
+        await thread.send({
+            'method': 'CALL', 
+            'function': self._function_name, 
+            'args': args, 
+            'kwargs': kwargs})
+
+        ret = await obj._await_state_update()
+
+        if ret is None:
+            return obj
+        return ret[1]
+    
+    async def _call_method(self, method, *args, **kwargs):
+        await self._send(obj_method=method, args=args, kwargs=kwargs)
+
+        return await self._await_state_update()
+
+    async def _await_state_update(self):
+        while True:
+            message = await self._thread.recv()
+
+            print(self._thread.thread_id, message)
+
+            if 'call_return' in message:
+                await self._close(False)
+
+            if 'call_id' in message: 
+                self._call_id = message['call_id']
+
+            if 'worker_id' in message:
+                self._worker_id = message['worker_id']
+                self._shared_key = derive_shared_key(self._session.private_key, 
+                                                    self._worker_id,
+                                                    self._thread.thread_id)
+            if 'input_request' in message:
+                if message['hashed']:
+                    x = self._on_secret_request(message['input_request'], message['salt'])
+
+                    if asyncio.iscoroutinefunction(self._on_secret_request):
+                        x = await x
+                    await self._send(input_response=x)
+                else:
+                    x = self._on_input_request(message['input_request'])
+                    if asyncio.iscoroutinefunction(self._on_input_request):
+                        x = await x
+                    await self._send(input_response=x)
+            if 'role_extension' in message:
+                await self._session.add_role_certificate(*message['role_extension'])
+            
+            if 'payload' in message:
+                if 'chunk_count' in message:
+                    dumps = {}
+                    while True:
+                        dumps[message['chunk_number']] = decrypt(message['payload'], 
+                                                                 self._shared_key, 
+                                                                 message['nonce'])
+                        if len(dumps) == message['chunk_count']:
+                            break
+                        message = await self._thread.recv()
+
+                    dump = b''.join([dumps[i] for i in range(message['chunk_count'])])
+                else:
+                    dump = decrypt(message['payload'], self._shared_key, message['nonce'])
+                # payload = json.loads(str(zlib.decompress(dump), 'utf-8'))
+                payload = pickle.loads(dump)
+
+                if 'print' in payload:
+                    print(payload['print'])
+
+                if 'props' in payload or 'meths' in payload:
+                    for d in dir(self):
+                        if d[0] != '_':
+                            self.__delattr__(d)
+
+                    for p in payload['props']:
+                        self.__setattr__(p, payload['props'][p])
+                    
+                    for m in payload['meths']:
+                        method = payload['meths'][m]
+
+                        func = makefun.create_function(method['signature'], 
+                                                    partial(self._call_method, m),
+                                                    func_name=m,
+                                                    module_name='telekinesis.client.RemoteObject',
+                                                    doc=method['docstring'] if method['docstring'] is not None else "")
+                        self.__setattr__(m, func)
+
+                if 'response' in payload:
+                    return payload['response']
+            
+            if 'call_return' in message:
+                return True, message['call_return']
+
+            if 'reset' in message:
+                await self._start()
+                break
+    
+    
+    async def _send(self, **kwargs):
+        kwargs.update({'method': 'SEND', 'call_id': self._call_id})
+
+        return await self._thread.send(kwargs)
+
+    async def __aenter__(self):
+        return await self._start()
+    
+    async def __aexit__(self, _, __, ___):
+        return await self._close()
+
+    async def _close(self, send_close_signal=True):
+        if send_close_signal:
+            await self._thread.send({
+                'method': 'SEND',
+                'call_id': self._call_id,
+                '_close': True
+            })
+        await self._thread.close()
+
+class Portal:
+    def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, session=None):
+        if session is None:
+            self.session = Session(url, auth_file_path, key_password)
         else:
-            self.connection = connection
+            self.session = session
 
     async def connect(self, **kwargs):
-        await self.connection.connect(**kwargs)
+        await self.session.connect(**kwargs)
         return self
     
     async def close(self):
-        return await self.connection.close()
+        return await self.session.close()
     
     async def get(self, function_name):
-        async with Thread(self.connection) as thread:
+        async with Thread(self.session) as thread:
             await thread.send({
                 'method': 'GET_SERVICE', 
                 'function': function_name})
             
             message = await thread.recv()
 
-        return self._create_service_instance(message['signature'],
-                                             function_name,
-                                             can_serve=message['can_serve'],
-                                             docstring=message['docstring'],
-                                             service_type=message['type'])
+        signature = message['signature'].replace('(', '(self, ', 1)
+
+        if check_function_signature(signature):
+            raise check_function_signature(signature)
+        class RemoteObject(RemoteObjectBase):
+            @makefun.with_signature(signature, doc=message.get('docstring'))
+            async def __call__(self, *args, **kwargs):
+                return await self._start(*args, **kwargs)
+
+        if message['can_serve']:
+            print('Not implemented yet')        
+
+        return RemoteObject(self.session, function_name)
 
     async def publish(self, function_name, function_impl, n_workers=1, foreground=False, replace=False, static_page=None, can_call=None, inject_first_arg=False):
 
@@ -71,7 +220,7 @@ class Node:
         if static_page is not None:
             message['static'] = static_page
 
-        async with Thread(self.connection) as thread:
+        async with Thread(self.session) as thread:
             await thread.send(message)
             ret_message = await thread.recv()
             # print(ret_message)
@@ -88,11 +237,7 @@ class Node:
     def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
                                        docstring=None, service_type='function'):
         async def await_request():
-            return await Request(self.connection, function_name)._await_request()
-
-        async def call_service(*args, **kwargs):
-            ro = RemoteObject(self.connection, function_name, args, kwargs)
-            return await ro._start()
+            return await RemoteController(self.session, function_name)._await_request()
 
         async def run_service(function_impl=function_impl, inject_first_arg=inject_first_arg):
             def get_object_state(function_impl):
@@ -113,7 +258,7 @@ class Node:
                 raise Exception('Function to be served has to be specified somewhere.')
 
             while True:
-                async with Request(self.connection, function_name) as req:
+                async with RemoteController(self.session, function_name) as req:
                     try:
                         if inject_first_arg:
                             obj = function_impl(req, *req.args, **req.kwargs)
@@ -176,17 +321,14 @@ class Node:
                 workers.append(asyncio.get_event_loop().create_task(run_service(function_impl, inject_first_arg)))
 
         async def remove():
-            async with Thread(self.connection) as thread:
+            async with Thread(self.session) as thread:
                 await thread.send({'method': 'REMOVE', 'function': function_name})
 
                 await asyncio.sleep(2)
 
                 return await thread.recv()
         
-        if check_function_signature(signature):
-            raise check_function_signature(signature)
-        service = makefun.create_function(signature, call_service, doc=docstring)
-
+        service = lambda: None
         if can_serve:
             service.run = run_service
             service.workers = []
@@ -198,7 +340,7 @@ class Node:
         return service
 
     async def list(self):
-        async with Thread(self.connection) as thread:
+        async with Thread(self.session) as thread:
             await thread.send({'method': 'LIST'})
 
             return await thread.recv()
@@ -257,7 +399,7 @@ class Thread:
     async def __aexit__(self, _, __, ___):
         await self.close()
 
-class Connection:
+class Session:
     def __init__(self, url='ws://localhost:3388', auth_file=None, key_password=None):
         self.url = url
         self.is_connected = lambda: False
@@ -399,12 +541,12 @@ class Connection:
 
         await self.websocket.close()
 
-class Request:
+class RemoteController:
     def __init__(self, connection, function_name):
         self._function_name = function_name
         self._thread = Thread(connection)
         self._private_key = connection.private_key
-        self.call_id = None
+        self._call_id = None
         self.args = None
         self.kwargs = None
         self.caller_pubkey = None
@@ -418,7 +560,7 @@ class Request:
             if 'call' in message:
                 call = message['call']
 
-                self.call_id = call['call_id']
+                self._call_id = call['call_id']
                 self.args = call['args']
                 self.kwargs = call['kwargs']
                 self.caller_pubkey = call['caller_pubkey']
@@ -442,7 +584,7 @@ class Request:
 
         message.update({
             'method': 'RETURN',
-            'call_id': self.call_id,
+            'call_id': self._call_id,
         })
         return await self._thread.send(message)
 
@@ -475,198 +617,3 @@ class Request:
 
     async def __aexit__(self, _, __, ___):
         await self.close()
-
-class RemoteObject:
-    def __init__(self, connection, function_name, args, kwargs, accept_role_extensions=True):
-        self._connection = connection
-        self._function_name = function_name
-        self._args = args
-        self._kwargs = kwargs
-        self._thread = None
-        self._call_id = None
-        self._accept_role_extensions = accept_role_extensions
-
-    async def _start(self):
-        self._thread = Thread(self._connection)
-        await self._thread.send({
-            'method': 'CALL', 
-            'function': self._function_name, 
-            'args': self._args, 
-            'kwargs': self._kwargs})
-
-        self._call_id = (await self._thread.recv())['call_id']
-        self._worker_id = (await self._thread.recv())['worker_id']
-
-        self._shared_key = derive_shared_key(self._connection.private_key, 
-                                             self._worker_id,
-                                             self._thread.thread_id)
-
-        ret = await self._await_state_update()
-
-        if ret is None:
-            return self
-        return ret[1]
-    
-    async def _call_method(self, method, *args, **kwargs):
-        await self._thread.send({
-            'method': 'SEND',
-            'call_id': self._call_id,
-            'obj_method': method,
-            'args': args,
-            'kwargs': kwargs
-        })
-
-        return await self._await_state_update()
-
-    async def _await_state_update(self):
-        while True:
-            message = await self._thread.recv()
-
-            print(message)
-
-            if 'call_return' in message:
-                await self._close(False)
-
-            if 'input_request' in message:
-                if message['hashed']:
-                    await self._on_secret_request(message['input_request'], message['salt'])
-                else:
-                    await self._on_input_request(message['input_request'])
-            if 'role_extension' in message:
-                if self._accept_role_extensions:
-                    await self._connection.add_role_certificate(*message['role_extension'])
-            
-            if 'payload' in message:
-                if 'chunk_count' in message:
-                    dumps = {}
-                    while True:
-                        dumps[message['chunk_number']] = decrypt(message['payload'], 
-                                                                 self._shared_key, 
-                                                                 message['nonce'])
-                        if len(dumps) == message['chunk_count']:
-                            break
-                        message = await self._thread.recv()
-
-                    dump = b''.join([dumps[i] for i in range(message['chunk_count'])])
-                else:
-                    dump = decrypt(message['payload'], self._shared_key, message['nonce'])
-                # payload = json.loads(str(zlib.decompress(dump), 'utf-8'))
-                payload = pickle.loads(dump)
-
-                if 'print' in payload:
-                    print(payload['print'])
-
-                if 'props' in payload or 'meths' in payload:
-                    for d in dir(self):
-                        if d[0] != '_':
-                            self.__delattr__(d)
-
-                    for p in payload['props']:
-                        self.__setattr__(p, payload['props'][p])
-                    
-                    for m in payload['meths']:
-                        method = payload['meths'][m]
-
-                        func = makefun.create_function(method['signature'], 
-                                                    partial(self._call_method, m),
-                                                    func_name=m,
-                                                    module_name='telekinesis.client.RemoteObject',
-                                                    doc=method['docstring'] if method['docstring'] is not None else "")
-                        self.__setattr__(m, func)
-
-                if 'response' in payload:
-                    return payload['response']
-            
-            if 'call_return' in message:
-                return True, message['call_return']
-
-            if 'reset' in message:
-                await self._start()
-                break
-    
-    async def _on_input_request(self, prompt):
-        x = input(prompt)
-        await self._send(input_response=x)
-
-    async def _on_secret_request(self, prompt, salt=None):
-        secret = getpass(prompt)
-
-        x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
-        
-        await self._send(input_response=x)
-    
-    async def _send(self, **kwargs):
-        kwargs.update({'method': 'SEND', 'call_id': self._call_id})
-
-        return await self._thread.send(kwargs)
-
-    async def __aenter__(self):
-        return await self._start()
-    
-    async def __aexit__(self, _, __, ___):
-        return await self._close()
-
-    async def _close(self, send_close_signal=True):
-        if send_close_signal:
-            await self._thread.send({
-                'method': 'SEND',
-                'call_id': self._call_id,
-                '_close': True
-            })
-        await self._thread.close()
-
-# class Call:
-#     def __init__(self, connection, function_name, accept_role_extensions=True):
-#         self.connection = connection
-#         self.function_name = function_name
-#         self.accept_role_extensions = accept_role_extensions
-#         self.thread = None
-#         self.call_id = None
-#         self.worker_id = None
-#         self.shared_secret = None
-
-#     async def call(self, *args, **kwargs):
-#         async with Thread(self.connection) as thread:
-#             self.thread = thread
-#             await thread.send({
-#                 'method': 'CALL', 
-#                 'function': self.function_name, 
-#                 'args': args, 
-#                 'kwargs': kwargs})
-        
-#             while True:
-#                 try:
-#                     message = await thread.recv()
-#                     if 'call_id' in message:
-#                         self.call_id = message['call_id']
-#                     if 'worker_id' in message:
-#                         self.worker_id = message['worker_id']
-#                         self.shared_secret = derive_shared_key(self.connection.private_key, 
-#                                                        self.worker_id,
-#                                                        self.thread.thread_id)
-#                     if 'print' in message:
-#                         await self.on_update(message['print'])
-#                     if 'call_return' in message:
-#                         return message['call_return']
-#                 except asyncio.CancelledError as e:
-#                     await self._send(error=str(e))
-#                     raise e
-
-#     async def _send(self, **kwargs):
-#         kwargs.update({'method': 'SEND', 'call_id': self.call_id})
-
-#         return await self.thread.send(kwargs)
-
-#     async def on_input_request(self, prompt):
-#         x = input(prompt)
-#         await self._send(input_response=x)
-
-#     async def on_secret_request(self, prompt, salt=None):
-#         secret = getpass(prompt)
-
-#         x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
-        
-#         await self._send(input_response=x)
-
-#     async def on_update(self, content):
-#         print(content)
