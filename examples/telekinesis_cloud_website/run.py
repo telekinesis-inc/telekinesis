@@ -12,7 +12,7 @@ branch = sys.argv[1] if len(sys.argv) > 1 else False
 
 processes = []
 async def connect():
-    for service in ['server.py'] + glob.glob('services/*.py'):
+    for service in ['hub.py'] + glob.glob('services/*.py'):
         processes.append(await asyncio.create_subprocess_exec('python', service))
 
 def disconnect():
