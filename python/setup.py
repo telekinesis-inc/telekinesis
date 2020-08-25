@@ -6,8 +6,8 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="telekinesis", 
-    version="0.1.0-alpha.1",
-    author="Elias J Neuman",
+    version="0.1.0-alpha.2",
+    author="Elias Neuman",
     author_email="elias.j.neuman@gmail.com.com",
     description="A websockets based RPC to easily develop, deploy and call services online.",
     long_description=long_description,

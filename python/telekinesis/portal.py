@@ -66,7 +66,7 @@ class RemoteObjectBase:
         while True:
             message = await self._thread.recv()
 
-            print(self._thread.thread_id, message)
+            # print(self._thread.thread_id, message)
 
             if 'call_return' in message:
                 await self._close(False)
@@ -94,6 +94,9 @@ class RemoteObjectBase:
             if 'role_extension' in message:
                 await self._session.add_role_certificate(*message['role_extension'])
             
+            if 'print' in message:
+                print(message['print'])
+
             if 'payload' in message:
                 if 'chunk_count' in message:
                     dumps = {}
@@ -111,8 +114,6 @@ class RemoteObjectBase:
                 # payload = json.loads(str(zlib.decompress(dump), 'utf-8'))
                 payload = pickle.loads(dump)
 
-                if 'print' in message:
-                    print(message['print'])
 
                 if 'props' in payload or 'meths' in payload:
                     for d in dir(self):
