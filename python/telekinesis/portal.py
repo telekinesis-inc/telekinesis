@@ -111,8 +111,8 @@ class RemoteObjectBase:
                 # payload = json.loads(str(zlib.decompress(dump), 'utf-8'))
                 payload = pickle.loads(dump)
 
-                if 'print' in payload:
-                    print(payload['print'])
+                if 'print' in message:
+                    print(message['print'])
 
                 if 'props' in payload or 'meths' in payload:
                     for d in dir(self):
