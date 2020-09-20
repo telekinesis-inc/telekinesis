@@ -1,11 +1,10 @@
+import os
+import inspect
+import types
+import asyncio
+from functools import partial
 
 import makefun
-import os
-
-import asyncio
-import types
-from functools import partial
-import inspect
 import bson
 
 from .client import Channel
@@ -129,7 +128,6 @@ class RemoteController:
                                                         'attributes': self._state}))
         except Exception as e:
             self._logger(e, type(e))
-
 
 async def spawn(session, destination):
     new_channel = Channel(session)

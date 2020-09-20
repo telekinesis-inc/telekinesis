@@ -7,7 +7,7 @@ import traceback
 import os
 import asyncio
 
-from .common import PrivateKey, PublicKey, SharedKey, Token
+from .cryptography import PrivateKey, PublicKey, SharedKey, Token
 
 class Connection:
     def __init__(self, session, url='ws://localhost:2020', logger=None):
@@ -18,6 +18,7 @@ class Connection:
         self.t_offset = 0
         self.listener = None
         self.MAX_PAYLOAD_LEN = 2**19
+        self.broker_id = None
         session.connections.add(self)
 
     async def connect(self):
@@ -33,11 +34,16 @@ class Connection:
         signature = self.session.session_key.sign(challenge)
 
         pk = self.session.session_key.public_serial().encode()
-        await self.websocket.send(signature + pk)
 
-        expected_return = pk
-        assert expected_return == (await asyncio.wait_for(self.websocket.recv(), 15))
-        
+        sent_challenge = os.urandom(32)
+        await self.websocket.send(signature + pk + sent_challenge)
+
+        m = await asyncio.wait_for(self.websocket.recv(), 15)
+
+        broker_signature, broker_id = m[:64], m[64:152].decode()
+        PublicKey(broker_id).verify(broker_signature, sent_challenge)
+
+        self.broker_id = broker_id
         self.listener = asyncio.create_task(self.listen())
         
         return self
@@ -139,6 +145,7 @@ class Channel:
     
     def route_dict(self):
         return {
+            'brokers': list(set(c.broker_id for c in self.session.connections)),
             'session': self.session.session_key.public_serial(),
             'channel': self.channel_key.public_serial()}
 

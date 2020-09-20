@@ -21,7 +21,6 @@ class PrivateKey:
         return base64.b64encode(b''.join([x.to_bytes(32, 'big') 
                                           for x in (Q.x, Q.y)])).decode()
 
-
 class PublicKey:
     def __init__(self, public_serial):
         self.key = ec.EllipticCurvePublicKey\
