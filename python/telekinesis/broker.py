@@ -67,7 +67,8 @@ class Channel:
         max_depth = None
         
         for depth, token_tuple in enumerate(tokens):
-            if token := active_tokens.get(token_tuple[0]):
+            if active_tokens.get(token_tuple[0]):
+                token = active_tokens.get(token_tuple[0])
                 if (token.asset == asset) and (token.issuer == last_receiver):
                     if token.max_depth:
                         if not max_depth or (token.max_depth + depth) < max_depth:
@@ -122,20 +123,22 @@ class Broker:
 
     async def handle_message(self, connection, message):
         headers = self.decode_header(message)
-        if listen := headers.get('listen'):
-            self.handle_listen(connection, **listen)
-        if tokens := headers.get('tokens'):
-            await self.handle_tokens(connection, tokens)
-        if broker := headers.get('broker'):
-            self.handle_broker_action(connection, broker)
-        if send := headers.get('send'):
-            await self.handle_send(connection, message, **send)
-        if close := headers.get('close'):
-            self.handle_close(connection, **close)
+        if headers.get('listen'):
+            self.handle_listen(connection, **headers.get('listen'))
+        if headers.get('tokens'):
+            await self.handle_tokens(connection, headers.get('tokens'))
+        if headers.get('broker'):
+            self.handle_broker_action(connection, headers.get('broker'))
+        if headers.get('send'):
+            await self.handle_send(connection, message, **headers.get('send'))
+        if headers.get('close'):
+            self.handle_close(connection, **headers.get('close'))
 
     async def handle_send(self, connection, message, source, destination):
-        if dest_session := self.sessions.get(destination['session']):
-            if dest_channel := dest_session.channels.get(destination['channel']):
+        if self.sessions.get(destination['session']):
+            dest_session = self.sessions.get(destination['session'])
+            if dest_session.channels.get(destination['channel']):
+                dest_channel = dest_session.channels.get(destination['channel'])
                 if await dest_channel.validate_token_chain(source['session'], destination.get('tokens'), self.tokens):
                     self.logger(source['session'][:4], source['channel'][:4],
                         '>>>', len(message)//2**10, '>>>',
@@ -149,7 +152,8 @@ class Broker:
                             '|||', len(message)//2**10, '|||',
                             destination['session'][:4], destination['channel'][:4])
 
-        if brokers := destination.get('brokers'):
+        if destination.get('brokers'):
+            brokers = destination.get('brokers')
             for broker_id in brokers:
                 if broker_id in self.sessions:
                     for broker_connection in self.sessions[broker_id].broker_connections:
@@ -170,7 +174,8 @@ class Broker:
         if session == connection.session.session_id:
             self.logger('close', connection.session.session_id[:4], channel[:4])
 
-            if channel_obj := connection.session.channels.get(channel):
+            if connection.session.channels.get(channel):
+                channel_obj = connection.session.channels.get(channel)
                 connection.channels.remove(channel_obj)
                 channel_obj.connections.remove(connection)
                 if not channel_obj.connections:
@@ -187,7 +192,8 @@ class Broker:
                             connection.session.active_tokens.add(token_tuple[0])
                             self.tokens[token_tuple[0]] = token
                         elif token.token_type == 'extension':
-                            if prev_token := self.tokens.get(token.asset):
+                            if self.tokens.get(token.asset):
+                                prev_token = self.tokens.get(token.asset)
                                 if prev_token.receiver == token.issuer:
                                     connection.session.active_tokens.add(token_tuple[0])
                                     self.tokens[token_tuple[0]] = token
@@ -212,7 +218,8 @@ class Broker:
         signature, timestamp = message[:64], int.from_bytes(message[64:68], 'big')
         now = int(time.time())
 
-        if self.seen_messages[2] != (lead := now//60%2):
+        lead = now//60%2
+        if self.seen_messages[2] != lead:
             self.seen_messages[lead].clear()
 
         if (now - 60) <= timestamp <= now:

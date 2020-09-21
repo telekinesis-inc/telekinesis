@@ -17,7 +17,7 @@ class RemoteController:
         self._istype = isinstance(target, type)
         self._mask = mask or set()
         self._task = asyncio.create_task(self._listen())
-        self._logger = logger or print
+        self._logger = logger
 
         self._state = {}
 
@@ -47,24 +47,31 @@ class RemoteController:
                     target_attribute = target.__getattribute__(attribute_name)
                 
                 if '__call__' in dir(target_attribute):
+                    if attribute_name == '__call__':
+                        target_attribute = target
                     try:
-                        self._state['methods'][attribute_name] = str(inspect.signature(target_attribute))
+                        self._state['methods'][attribute_name] = (str(inspect.signature(target_attribute)),
+                                                                  target_attribute.__doc__)
                     except:
-                        self._state['methods'][attribute_name] = None
+                        # self._logger(traceback.format_exc())
+                        self._state['methods'][attribute_name] = (None, target_attribute.__doc__)
                 else:
                     self._state['attributes'].append(attribute_name)
         
         if self._istype:
             self._state['_repr'] =  str(type(target))
+            self._state['methods']['__call__'] = (str(inspect.signature(target)), target.__init__.__doc__)
         else:
             self._state['_repr'] = target.__repr__()
 
         self._state['_channel'] = self._channel.route_dict()
     
-    def _call_method(self, method, args, kwargs):
+    async def _call_method(self, method, args, kwargs):
         dargs = RemoteObjectBase._decode(args, self._channel.session)
         dkwargs = RemoteObjectBase._decode(kwargs, self._channel.session)
-        self._logger('calling', method, 'args', dargs, 'kwargs', dkwargs)
+
+        if self._logger:
+            self._logger('calling', method, 'args', dargs, 'kwargs', dkwargs)
         
         if method[0] != '_' \
         or method in ('__call__', '__getitem__', '__setitem__', '__add__', 
@@ -78,7 +85,10 @@ class RemoteController:
                 else:
                     call_return = self._target.__getattribute__(method)(*dargs, **dkwargs)
                 
-                self._update_state()
+            if asyncio.iscoroutine(call_return):
+                call_return = await call_return
+
+            self._update_state()
             return call_return
         
         raise PermissionError('Calling a private method', method,'of a RemoteObject is not permitted')
@@ -94,18 +104,18 @@ class RemoteController:
     async def _onmessage(self, reply, payload):
         try:
             if payload:
-                call_return = self._call_method(**payload)
+                call_return = await self._call_method(**payload)
             else:
                 call_return = self
             await self._channel.send(reply, {'return': await self._encode(call_return, self._channel.session, self)})
         except Exception:
-            self._logger(traceback.format_exc())
+            if self._logger:
+                self._logger(traceback.format_exc())
     
     @staticmethod
     async def _encode(target, session, remote_session_id, mask=None, logger=None):
         mask = mask or set()
-        logger = logger or print
-        encode = lambda v: RemoteController._encode(v, Channel(session), remote_session_id, mask, logger)
+        encode = lambda v: RemoteController._encode(v, session, remote_session_id, mask, logger)
 
         if type(target) in (int, float, str, bool, bytes, type(None)):
             return (type(target).__name__, target)
@@ -119,11 +129,12 @@ class RemoteController:
             # TODO extend persmissions to remote_session_id
             return ('object', target._state)
         else:
-            if rcs := session.remote_controllers.get(id(target)):
+            if session.remote_controllers.get(id(target)):
+                rcs = session.remote_controllers.get(id(target))
                 for rc in rcs:
                     if rc._mask == mask and rc._logger == logger:
                         return ('object', rc._state)
-            return ('object', RemoteController(target, Channel(session), mask, logger)._state)
+            return ('object', RemoteController(target, Channel(session, is_public=True), mask, logger)._state)
 
 async def spawn(session, destination):
     new_channel = Channel(session)
@@ -181,10 +192,11 @@ class RemoteObjectBase:
                             pass
                     self.__delattr__(d)
 
-            for method_name, signature in state['methods'].items():
+            for method_name, (signature, docstring) in state['methods'].items():
                 signature = signature or '(*args, **kwargs)'
-                method = makefun.create_function(signature, 
+                method = makefun.create_function(signature,
                                                  partial(self._call_method, method_name),
+                                                 doc=docstring,
                                                  func_name=method_name,
                                                  module_name='telekinesis.client.RemoteObject')
                 self.__setattr__(method_name, method)
@@ -233,9 +245,11 @@ class RemoteObjectBase:
         if obj_type == 'set':
             return set([decode(v) for v in obj])
         if obj_type == 'object':
-            if ro := session.remote_objects.get(str(obj['_channel'])):
+            if session.remote_objects.get(str(obj['_channel'])):
+                ro = session.remote_objects.get(str(obj['_channel']))
                 return ro._update_state(obj)
-            if channel := session.channels.get(obj['_channel']['channel']):
+            if session.channels.get(obj['_channel']['channel']):
+                channel = session.channels.get(obj['_channel']['channel'])
                 pass  # TODO Patch potential security hole -> Un-authorized can interact with target
                 # if channel.validate_token_chain()
                 for rcs in session.remote_controllers.values():

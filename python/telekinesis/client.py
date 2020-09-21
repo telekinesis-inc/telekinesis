@@ -85,9 +85,11 @@ class Connection:
             len_h, len_p = [int.from_bytes(x, 'big') for x in [message[68:70], message[70:73]]]
             header = ujson.loads(message[73:73+len_h])
             payload = message[73+len_h:73+len_h+len_p]
-            if (action := header.get('send')):
+            if header.get('send'):
+                action = header.get('send')
                 PublicKey(action['source']['session']).verify(signature, message[64:])
-                if (channel := self.session.channels.get(action['destination']['channel'])):
+                if self.session.channels.get(action['destination']['channel']):
+                    channel = self.session.channels.get(action['destination']['channel'])
                     await channel.handle_message(action['source'], action['destination'], payload)
 
 class Session:
@@ -103,7 +105,8 @@ class Session:
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
 
-        if self.seen_messages[2] != (lead := now//60%2):
+        lead = now//60%2
+        if self.seen_messages[2] != lead:
             self.seen_messages[lead].clear()
 
         if (now - 60) <= timestamp <= now:
