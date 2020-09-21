@@ -166,7 +166,7 @@ class Broker:
             channel_obj.connections.add(connection)
             connection.channels.add(channel_obj)
     
-    def handle_close(self, connection, session, channel):
+    def handle_close(self, connection, session, channel, **kwargs):
         if session == connection.session.session_id:
             self.logger('close', connection.session.session_id[:4], channel[:4])
 

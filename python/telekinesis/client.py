@@ -6,6 +6,7 @@ import websockets
 import traceback
 import os
 import asyncio
+import bson
 
 from .cryptography import PrivateKey, PublicKey, SharedKey, Token
 
@@ -96,6 +97,8 @@ class Session:
         self.connections = set()
         self.seen_messages = (set(), set(), 0)
         self.issued_tokens = {}
+        self.remote_controllers = {}
+        self.remote_objects = {}
     
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
@@ -156,7 +159,7 @@ class Channel:
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
 
             if payload[:4] == b'\x00'*4:
-                self.messages.appendleft((source, payload[4:]))
+                self.messages.appendleft((source, bson.loads(payload[4:])))
                 self.lock.set()
             else:
                 raise NotImplementedError
@@ -176,7 +179,7 @@ class Channel:
 
         return self
     
-    async def send(self, destination, payload, allow_reply=False):
+    async def send(self, destination, payload_obj, allow_reply=False):
         headers = {
             'send': {
                 'source': self.route_dict(),
@@ -190,6 +193,8 @@ class Channel:
             headers['tokens'] = ['issue', token_tuple]
             headers['send']['source']['tokens'] = [token_tuple]
         
+        payload = bson.dumps(payload_obj)
+
         if len(payload) > list(self.session.connections)[0].MAX_PAYLOAD_LEN:
             raise NotImplementedError('Payload too large')
         
