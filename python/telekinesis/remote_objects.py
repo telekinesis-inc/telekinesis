@@ -22,7 +22,7 @@ class RemoteController:
         self._state = {}
 
         if id(target) in channel.session.remote_controllers:
-            channel.session.remote_controllers.add(self)
+            channel.session.remote_controllers[id(target)].add(self)
         else:
             channel.session.remote_controllers[id(target)] = set([self])
 
