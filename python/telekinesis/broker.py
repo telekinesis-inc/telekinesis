@@ -281,7 +281,7 @@ class Peer(Connection):
 
         await self.send({'broker': 'open'})
 
-        self.listener = asyncio.create_task(self.listen(callback))
+        self.listener = asyncio.get_event_loop().create_task(self.listen(callback))
         
         return self
 

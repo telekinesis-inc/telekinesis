@@ -45,7 +45,7 @@ class Connection:
         PublicKey(broker_id).verify(broker_signature, sent_challenge)
 
         self.broker_id = broker_id
-        self.listener = asyncio.create_task(self.listen())
+        self.listener = asyncio.get_event_loop().create_task(self.listen())
         
         return self
         

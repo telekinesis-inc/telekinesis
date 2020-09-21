@@ -16,7 +16,7 @@ class RemoteController:
         self._channel = channel
         self._istype = isinstance(target, type)
         self._mask = mask or set()
-        self._task = asyncio.create_task(self._listen())
+        self._task = asyncio.get_event_loop().create_task(self._listen())
         self._logger = logger
 
         self._state = {}
@@ -164,7 +164,7 @@ class RemoteObjectBase:
         return await self._call_method('__getitem__', *args, **kwargs)
     
     def __setitem__(self, *args, **kwargs):
-        self._tasks.add(asyncio.create_task(self._call_method('__setitem__', *args, **kwargs)))
+        self._tasks.add(asyncio.get_event_loop().create_task(self._call_method('__setitem__', *args, **kwargs)))
         #TO DO... wait for them somewhere
     
     async def __mul__(self, *args, **kwargs):
