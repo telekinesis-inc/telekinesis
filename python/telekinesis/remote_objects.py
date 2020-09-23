@@ -16,7 +16,8 @@ class RemoteController:
         self._channel = channel
         self._istype = isinstance(target, type)
         self._mask = mask or set()
-        self._task = asyncio.get_event_loop().create_task(self._listen())
+        self._listener = asyncio.get_event_loop().create_task(self._listen())
+        self._tasks = set()
         self._logger = logger
 
         self._state = {}
@@ -96,7 +97,9 @@ class RemoteController:
     async def _listen(self):
         await self._channel.listen()
         while True:
-            await self._onmessage(*(await self._channel.recv()))
+            self._tasks.add(asyncio.get_event_loop().create_task(self._onmessage(*(await self._channel.recv()))))
+            await asyncio.gather(*(x for x in self._tasks if x.done()))
+            self._tasks = set(x for x in self._tasks if not x.done())
         
     async def _close(self):
         await self._channel.close()

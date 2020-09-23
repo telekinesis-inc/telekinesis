@@ -105,6 +105,7 @@ class Broker:
             self.logger(traceback.format_exc())
 
         finally:
+            self.logger(connection.session.session_id[:4], 'disconnected')
             if connection:
                 for channel in connection.channels:
                     channel.connections.remove(connection)
