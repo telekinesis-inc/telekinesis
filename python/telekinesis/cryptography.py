@@ -1,15 +1,37 @@
 import base64
 import ujson
+import os
 
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.exceptions import InvalidSignature
 
 class PrivateKey:
-    def __init__(self, key_file=None):
+    def __init__(self, key_file=None, password=None):
+        if key_file and os.path.exists(key_file):
+            with open(key_file, 'rb') as kf:
+                data = kf.read()
+            self.key = serialization.load_pem_private_key(
+                data,
+                None if password is None else password.encode(),
+                default_backend()
+            )
+            return 
+
         self.key = ec.generate_private_key(curve=ec.SECP256R1, backend=default_backend())
+        
+        if key_file:
+            with open(key_file, 'wb') as kf:
+                enc = serialization.NoEncryption() if password is None else \
+                      serialization.BestAvailableEncryption(password.encode())
+                data = self.key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=enc
+                )
+                kf.write(data)
 
     def sign(self, m):
         signature = self.key.sign(m, ec.ECDSA(hashes.SHA256()))
