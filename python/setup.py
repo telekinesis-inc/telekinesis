@@ -18,6 +18,7 @@ setuptools.setup(
         'websockets',
         'cryptography',
         'makefun',
+        'aiohttp',
         'bson',
         'ujson'
     ],

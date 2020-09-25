@@ -7,6 +7,9 @@ import traceback
 
 import makefun
 import bson
+import warnings
+
+import re
 
 from .client import Channel
 
@@ -51,7 +54,12 @@ class RemoteController:
                     if attribute_name == '__call__':
                         target_attribute = target
                     try:
-                        self._state['methods'][attribute_name] = (str(inspect.signature(target_attribute)),
+                        signature = str(inspect.signature(target_attribute))
+                        if '_tk_inject_first_arg' in dir(target_attribute) and target_attribute._tk_inject_first_arg:
+                            signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
+                                          .replace('(,','(',1).replace('( ','(',1)
+
+                        self._state['methods'][attribute_name] = (signature,
                                                                   target_attribute.__doc__)
                     except:
                         # self._logger(traceback.format_exc())
@@ -67,7 +75,7 @@ class RemoteController:
 
         self._state['_channel'] = self._channel.route_dict()
     
-    async def _call_method(self, method, args, kwargs):
+    async def _call_method(self, reply, method, args, kwargs):
         dargs = RemoteObjectBase._decode(args, self._channel.session)
         dkwargs = RemoteObjectBase._decode(kwargs, self._channel.session)
 
@@ -82,10 +90,28 @@ class RemoteController:
                 call_return = self._target.__getattribute__(dargs[0])
             else:
                 if self._istype:
-                    call_return = self._target.__getattribute__(self._target, method)(*dargs, **dkwargs)
+                    target_method = self._target.__getattribute__(self._target, method)
+                    inject_source = False
+                    if method == '__call__':
+                        inject_source = '_tk_inject_first_arg' in dir(self._target.__init__) and self._target.__init__._tk_inject_first_arg
+                    else:
+                        inject_source = '_tk_inject_first_arg' in dir(target_method) and target_method._tk_inject_first_arg
+                    if inject_source:
+                        call_return = target_method(reply, *dargs, **dkwargs)
+                    else:
+                        call_return = target_method(*dargs, **dkwargs)
                 else:
-                    call_return = self._target.__getattribute__(method)(*dargs, **dkwargs)
-                
+                    target_method = self._target.__getattribute__(method)
+                    inject_source = False
+                    if method == '__call__':
+                        inject_source = '_tk_inject_first_arg' in dir(self._target) and self._target._tk_inject_first_arg
+                    else:
+                        inject_source = '_tk_inject_first_arg' in dir(target_method) and target_method._tk_inject_first_arg
+                    if inject_source:
+                        call_return = target_method(reply, *dargs, **dkwargs)
+                    else:
+                        call_return = target_method(*dargs, **dkwargs)
+
             if asyncio.iscoroutine(call_return):
                 call_return = await call_return
 
@@ -107,7 +133,7 @@ class RemoteController:
     async def _onmessage(self, reply, payload):
         try:
             if payload:
-                call_return = await self._call_method(**payload)
+                call_return = await self._call_method(reply, **payload)
             else:
                 call_return = self
             await self._channel.send(reply, {'return': await self._encode(call_return, self._channel.session, self)})
@@ -197,11 +223,17 @@ class RemoteObjectBase:
 
             for method_name, (signature, docstring) in state['methods'].items():
                 signature = signature or '(*args, **kwargs)'
-                method = makefun.create_function(signature,
-                                                 partial(self._call_method, method_name),
-                                                 doc=docstring,
-                                                 func_name=method_name,
-                                                 module_name='telekinesis.client.RemoteObject')
+                if self._session.compile_signatures and check_signature(signature):
+                    try:
+                        method = makefun.create_function(signature,
+                                                         partial(self._call_method, method_name),
+                                                         doc=docstring,
+                                                         func_name=method_name,
+                                                         module_name='telekinesis.client.RemoteObject')
+                    except SyntaxError:
+                        method = partial(self._call_method, method_name)
+                else:
+                    method = partial(self._call_method, method_name)
                 self.__setattr__(method_name, method)
 
             for attribute_name in state['attributes']:
@@ -260,3 +292,11 @@ class RemoteObjectBase:
                         if rc._channel is channel:
                             return rc._target 
             return RemoteObjectBase(session, obj)
+
+def check_signature(signature):
+    return not ('\n' in signature or \
+                (signature != re.sub(r'(?:[^A-Za-z0-9_])lambda(?=[\)\s\:])', '', signature)))
+
+def inject_first_arg(func):
+    func._tk_inject_first_arg = True
+    return func

@@ -93,7 +93,7 @@ class Connection:
                     await channel.handle_message(action['source'], action['destination'], payload)
 
 class Session:
-    def __init__(self, session_key_file=None):
+    def __init__(self, session_key_file=None, compile_signatures=True):
         self.session_key = PrivateKey(session_key_file)
         self.channels = {}
         self.connections = set()
@@ -101,6 +101,7 @@ class Session:
         self.issued_tokens = {}
         self.remote_controllers = {}
         self.remote_objects = {}
+        self.compile_signatures = compile_signatures
     
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
