@@ -230,7 +230,7 @@ class RemoteObjectBase:
                                                          doc=docstring,
                                                          func_name=method_name,
                                                          module_name='telekinesis.client.RemoteObject')
-                    except SyntaxError:
+                    except (SyntaxError, NameError):
                         method = partial(self._call_method, method_name)
                 else:
                     method = partial(self._call_method, method_name)
@@ -238,6 +238,7 @@ class RemoteObjectBase:
 
             for attribute_name in state['attributes']:
                     self.__setattr__(attribute_name, self._get_attribute(attribute_name))
+        return self
 
     async def _get_attribute(self, attribute_name):
         out = await self._call_method('_get_attribute', attribute_name)
