@@ -15,11 +15,12 @@ import re
 from .client import Channel
 
 class RemoteController:
-    def __init__(self, target, channel, mask=None):
+    def __init__(self, target, channel, mask=None, expose_tb=True):
         self._target = target
         self._channel = channel
         self._istype = isinstance(target, type)
         self._mask = mask or set()
+        self._expose_tb = expose_tb
         self._listener = asyncio.get_event_loop().create_task(self._listen())
         self._tasks = set()
         self._logger = logging.getLogger(__name__)
@@ -136,13 +137,20 @@ class RemoteController:
                 call_return = await self._call_method(reply, **payload)
             else:
                 call_return = self
-            await self._channel.send(reply, {'return': await self._encode(call_return, self._channel.session, self)})
+            await self._channel.send(reply, {
+                'return': await self._encode(call_return, 
+                                             self._channel.session, 
+                                             reply['session'],
+                                             self._mask,
+                                             self._expose_tb)})
         except Exception:
+            await self._channel.send(reply, {'error': traceback.format_exc() if self._expose_tb else ''})
+
             self._logger.error('RemoteController._onmessage', exc_info=True)
     @staticmethod
-    async def _encode(target, session, remote_session_id, mask=None):
+    async def _encode(target, session, remote_session_id, mask=None, expose_tb=True):
         mask = mask or set()
-        encode = lambda v: RemoteController._encode(v, session, remote_session_id, mask)
+        encode = lambda v: RemoteController._encode(v, session, remote_session_id, mask, expose_tb)
 
         if type(target) in (int, float, str, bool, bytes, type(None)):
             return (type(target).__name__, target)
@@ -161,7 +169,7 @@ class RemoteController:
                 for rc in rcs:
                     if rc._mask == mask:
                         return ('object', rc._state)
-            return ('object', RemoteController(target, Channel(session, is_public=True), mask)._state)
+            return ('object', RemoteController(target, Channel(session, is_public=True), mask, expose_tb)._state)
 
 async def spawn(session, destination):
     new_channel = Channel(session)
@@ -258,7 +266,11 @@ class RemoteObjectBase:
         _, out = await new_channel.recv()
         await new_channel.close()
         
-        return self._decode(out['return'], self._session)
+        if 'error' in out:
+            raise Exception(out['error'])
+
+        if 'return' in out:
+            return self._decode(out['return'], self._session)
     
     @staticmethod
     def _decode(obj_tuple, session):

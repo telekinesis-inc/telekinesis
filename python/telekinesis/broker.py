@@ -97,6 +97,7 @@ class Broker:
         connection = None
         try:
             connection = await Connection(websocket).handshake(self.sessions, self.broker_key)
+            self.logger.info ('new connection %s', connection.session.session_id[:4])
 
             async for message in websocket:
                 if self.check_no_repeat(message):
