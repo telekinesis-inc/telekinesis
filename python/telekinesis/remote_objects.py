@@ -211,8 +211,8 @@ class RemoteObjectBase:
     # __aiter__ __anext__ ...
 
     def __repr__(self):
-        ds, dc = self._state['_channel']['session'][:4], self._state['_channel']['channel'][:4]
-        return f'Remote Object -> ({ds} {dc}): {self._repr}'
+        # ds, dc = self._state['_channel']['session'][:4], self._state['_channel']['channel'][:4]
+        return f'\033[92m\u2248\033[0m {self._repr}'
     
     def _update_state(self, state):
         self._state = state
@@ -244,6 +244,7 @@ class RemoteObjectBase:
 
             for attribute_name in state['attributes']:
                     self.__setattr__(attribute_name, self._get_attribute(attribute_name))
+            self._repr = state.get('_repr')
         return self
 
     async def _get_attribute(self, attribute_name):
