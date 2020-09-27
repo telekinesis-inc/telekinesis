@@ -1,4 +1,5 @@
 import os
+import logging
 import inspect
 import types
 import asyncio
@@ -14,14 +15,14 @@ import re
 from .client import Channel
 
 class RemoteController:
-    def __init__(self, target, channel, mask=None, logger=None):
+    def __init__(self, target, channel, mask=None):
         self._target = target
         self._channel = channel
         self._istype = isinstance(target, type)
         self._mask = mask or set()
         self._listener = asyncio.get_event_loop().create_task(self._listen())
         self._tasks = set()
-        self._logger = logger
+        self._logger = logging.getLogger(__name__)
 
         self._state = {}
 
@@ -62,7 +63,7 @@ class RemoteController:
                         self._state['methods'][attribute_name] = (signature,
                                                                   target_attribute.__doc__)
                     except:
-                        # self._logger(traceback.format_exc())
+                        self._logger.error('RemoteController', exc_info=True)
                         self._state['methods'][attribute_name] = (None, target_attribute.__doc__)
                 else:
                     self._state['attributes'].append(attribute_name)
@@ -79,8 +80,7 @@ class RemoteController:
         dargs = RemoteObjectBase._decode(args, self._channel.session)
         dkwargs = RemoteObjectBase._decode(kwargs, self._channel.session)
 
-        if self._logger:
-            self._logger('calling', method, 'args', dargs, 'kwargs', dkwargs)
+        self._logger.info('calling %s args %s kwargs %s', method, str(dargs), str(dkwargs))
         
         if method[0] != '_' \
         or method in ('__call__', '__getitem__', '__setitem__', '__add__', 
@@ -138,13 +138,11 @@ class RemoteController:
                 call_return = self
             await self._channel.send(reply, {'return': await self._encode(call_return, self._channel.session, self)})
         except Exception:
-            if self._logger:
-                self._logger(traceback.format_exc())
-    
+            self._logger.error('RemoteController._onmessage', exc_info=True)
     @staticmethod
-    async def _encode(target, session, remote_session_id, mask=None, logger=None):
+    async def _encode(target, session, remote_session_id, mask=None):
         mask = mask or set()
-        encode = lambda v: RemoteController._encode(v, session, remote_session_id, mask, logger)
+        encode = lambda v: RemoteController._encode(v, session, remote_session_id, mask)
 
         if type(target) in (int, float, str, bool, bytes, type(None)):
             return (type(target).__name__, target)
@@ -161,9 +159,9 @@ class RemoteController:
             if session.remote_controllers.get(id(target)):
                 rcs = session.remote_controllers.get(id(target))
                 for rc in rcs:
-                    if rc._mask == mask and rc._logger == logger:
+                    if rc._mask == mask:
                         return ('object', rc._state)
-            return ('object', RemoteController(target, Channel(session, is_public=True), mask, logger)._state)
+            return ('object', RemoteController(target, Channel(session, is_public=True), mask)._state)
 
 async def spawn(session, destination):
     new_channel = Channel(session)

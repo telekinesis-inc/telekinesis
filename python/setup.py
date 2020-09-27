@@ -6,13 +6,13 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="telekinesis", 
-    version="0.1.0-alpha.7",
-    author="Elias Neuman",
-    author_email="elias.j.neuman@gmail.com.com",
+    version="0.1.0-alpha.8",
+    author="Telekinesis Cloud",
+    author_email="support@telekinesis.cloud",
     description="A websockets based RPC to easily develop, deploy and call services online.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/e-neuman/telekinesis",
+    url="https://github.com/telekinesis-cloud/telekinesis",
     packages=setuptools.find_packages(),
     install_requires=[
         'websockets',

@@ -1,20 +1,21 @@
-import ujson
+import logging
 import time
-from collections import deque
-
-import websockets
 import traceback
 import os
 import asyncio
 import bson
+from collections import deque
+
+import websockets
+import ujson
 
 from .cryptography import PrivateKey, PublicKey, SharedKey, Token
 
 class Connection:
-    def __init__(self, session, url='ws://localhost:2020', logger=None):
+    def __init__(self, session, url='ws://localhost:8776'):
         self.session = session
         self.url = url
-        self.logger = logger or print
+        self.logger = logging.getLogger(__name__)
         self.websocket = None
         self.t_offset = 0
         self.listener = None
@@ -68,7 +69,7 @@ class Connection:
                     await self.recv()
                     n_tries = 0
             except Exception:
-                self.logger(traceback.format_exc())
+                self.logger.error('Connection.listen', exc_info=True)
             
             await asyncio.sleep(1)
             if n_tries > 10:

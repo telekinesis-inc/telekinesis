@@ -1,3 +1,4 @@
+import logging
 import os
 import asyncio
 import time
@@ -83,13 +84,13 @@ class Channel:
         return False
 
 class Broker:
-    def __init__(self, broker_key_file=None, logger=None):
+    def __init__(self, broker_key_file=None):
         self.tokens = {}
         self.sessions = {}
         self.brokers = {}
         self.servers = {}
         self.broker_key = PrivateKey(broker_key_file)
-        self.logger = logger or print
+        self.logger = logging.getLogger(__name__)  
         self.seen_messages = (set(), set(), 0)
 
     async def handle_connection(self, websocket, _):
@@ -102,10 +103,10 @@ class Broker:
                     await self.handle_message(connection, message)
 
         except Exception:
-            self.logger(traceback.format_exc())
+            self.logger.error('Broker.handle_connection', exc_info=True)
 
         finally:
-            self.logger(connection.session.session_id[:4], 'disconnected')
+            self.logger.info ('%s disconnected', connection.session.session_id[:4])
             if connection:
                 for channel in connection.channels:
                     channel.connections.remove(connection)
@@ -141,16 +142,16 @@ class Broker:
             if dest_session.channels.get(destination['channel']):
                 dest_channel = dest_session.channels.get(destination['channel'])
                 if await dest_channel.validate_token_chain(source['session'], destination.get('tokens'), self.tokens):
-                    self.logger(source['session'][:4], source['channel'][:4],
-                        '>>>', len(message)//2**10, '>>>',
+                    self.logger.info('send %s %s >>> %s >>> %s %s', source['session'][:4], source['channel'][:4],
+                        str(len(message)//2**10),
                         destination['session'][:4], destination['channel'][:4])
 
                     for connection in dest_channel.connections:
                         await connection.websocket.send(message)
                     return
                 else:
-                    self.logger(source['session'][:4], source['channel'][:4],
-                            '|||', len(message)//2**10, '|||',
+                    self.logger.info('send %s %s ||| %s ||| %s %s', source['session'][:4], source['channel'][:4],
+                            str(len(message)//2**10),
                             destination['session'][:4], destination['channel'][:4])
 
         if destination.get('brokers'):
@@ -162,7 +163,7 @@ class Broker:
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
-            self.logger('listen', connection.session.session_id[:4], channel[:4], is_public)
+            self.logger.info('listen %s %s %s', str(connection.session.session_id[:4]), str(channel[:4]), str(is_public))
             
             if channel not in connection.session.channels:
                 connection.session.channels[channel] = Channel(connection.session, channel, is_public)
@@ -173,7 +174,7 @@ class Broker:
     
     def handle_close(self, connection, session, channel, **kwargs):
         if session == connection.session.session_id:
-            self.logger('close', connection.session.session_id[:4], channel[:4])
+            self.logger.info('close %s %s', str(connection.session.session_id[:4]), str(channel[:4]))
 
             if connection.session.channels.get(channel):
                 channel_obj = connection.session.channels.get(channel)
@@ -187,7 +188,7 @@ class Broker:
             if action == 'issue':
                 token = Token(**token_tuple[1])
                 if connection.session.session_id == token.issuer:
-                    self.logger('tokens', token.issuer[:4], action, token_tuple[0][:4])
+                    self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[0][:4]))
                     if token.verify_signature(token_tuple[0]):
                         if token.token_type == 'root':
                             connection.session.active_tokens.add(token_tuple[0])
@@ -201,7 +202,7 @@ class Broker:
             if action == 'revoke':
                 token = self.tokens.get(token_tuple)
                 if token and token.issuer == connection.session.session_id:
-                    self.logger('tokens', token.issuer[:4], action, token_tuple[:4])
+                    self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[:4]))
                     self.tokens.pop(token_tuple)
                     connection.session.active_tokens.remove(token_tuple)
 
@@ -234,7 +235,7 @@ class Broker:
         header = ujson.loads(m[73:73+int.from_bytes(m[68:70], 'big')])
         return header
 
-    async def serve(self, host='127.0.0.1', port=2020, **kwargs):
+    async def serve(self, host='127.0.0.1', port=8776, **kwargs):
         if 'compression' not in kwargs:
             kwargs['compression'] = None
         server = await websockets.serve(self.handle_connection, host, port, **kwargs)
@@ -249,12 +250,12 @@ class Broker:
                     await self.servers.pop((server_host, server_port)).close()
 
 class Peer(Connection):
-    def __init__(self, websocket, broker_key, logger=None):
+    def __init__(self, websocket, broker_key):
         super().__init__(websocket)
         self.broker_key = broker_key
         self.t_offset = 0
         self.listener = None
-        self.logger = logger or print
+        self.logger = logging.getLogger(__name__) 
 
     async def connect(self, sessions, callback):
         challenge = await self.websocket.recv()
@@ -302,7 +303,7 @@ class Peer(Connection):
                     await callback(self, await self.websocket.recv())
                     n_tries = 0
             except Exception:
-                self.logger(traceback.format_exc())
+                self.logger.error('Peer.listen', exc_info=True)
             
             await asyncio.sleep(1)
             if n_tries > 10:
