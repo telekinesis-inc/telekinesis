@@ -201,6 +201,8 @@ class Telekinesis():
         for action, arg in pipeline:
             self._logger.info('%s %s %s', action, arg, target)
             if action == 'get':
+                if arg[0] == '_':
+                    raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
                 ar, kw = arg
