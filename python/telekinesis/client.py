@@ -196,8 +196,10 @@ class Channel:
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
 
+
             if payload[:4] == b'\x00'*4:
                 self.messages.appendleft((source, bson.loads(payload[4:])))
+                # print('<<<<<', bson.loads(payload[4:]))
                 self.lock.set()
             else:
                 ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
@@ -228,6 +230,7 @@ class Channel:
     
     async def send(self, destination, payload_obj, allow_reply=False):
         source_route = self.route.clone()
+        # print('>>>>', payload_obj)
         if allow_reply:
             self.header_buffer.append(self.session.extend_route(source_route, destination.session))
             self.listen()

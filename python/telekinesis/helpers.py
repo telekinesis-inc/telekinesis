@@ -1,7 +1,7 @@
 import random
 import aiohttp
 
-from .client import Session, Connection
+from .client import Session, Connection, Route
 from .telekinesis import Telekinesis
 
 async def authenticate(url, print_callback=print, **kwargs):
@@ -16,8 +16,9 @@ async def authenticate(url, print_callback=print, **kwargs):
     s = Session()
     c = Connection(s, b['url'])
 
+    await c.lock.wait()
     assert bid == c.broker_id
-    entrypoint = Telekinesis(b['entrypoint'], s)
+    entrypoint = Telekinesis(Route(**b['entrypoint']), s)
 
     user = await entrypoint(print_callback, **kwargs)
 

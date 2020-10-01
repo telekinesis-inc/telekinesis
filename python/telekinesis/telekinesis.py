@@ -160,8 +160,12 @@ class Telekinesis():
         if isinstance(self._target, Route):
             route = self._target.clone()
         else:
-            route = self._add_listener(Channel(self._session), listener.expose_tb, 
-                                       listener.max_depth, listener.mask)
+            if isinstance(listener, Listener):
+                route = self._add_listener(Channel(self._session), listener.expose_tb, 
+                                        listener.max_depth, listener.mask)
+            else:
+                route = self._add_listener(Channel(self._session))
+                listener = self._listeners[route]
         
         token_header = self._session.extend_route(route, recepient_id, listener.max_depth)
         listener.channel.header_buffer.append(token_header)
@@ -170,17 +174,21 @@ class Telekinesis():
 
     async def _execute(self, route=None, pipeline=None):
         if pipeline:
-            self._state.pipeline += self._decode(pipeline)
+            pipeline = self._decode(pipeline)
+        else:
+            pipeline = []
+
+        pipeline = self._state.pipeline + pipeline
+        self._state.pipeline.clear()
         
         if isinstance(self._target, Route):
             new_channel = await Channel(self._session).send(
                 self._target,
-                {'pipeline': self._encode(self._state.pipeline)}, True)
+                {'pipeline': self._encode(pipeline, self._target.session)}, True)
 
             _, out = await new_channel.recv()
             await new_channel.close()
             
-            self._state.pipeline.clear()
             
             if 'error' in out:
                 raise Exception(out['error'])
@@ -190,7 +198,7 @@ class Telekinesis():
             raise Exception
         
         target = self._target
-        for action, arg in self._state.pipeline:
+        for action, arg in pipeline:
             self._logger.info('%s %s %s', action, arg, target)
             if action == 'get':
                 target = target.__getattribute__(arg)
@@ -210,7 +218,6 @@ class Telekinesis():
                 if asyncio.iscoroutine(target):
                     target = await target
         
-        self._state.pipeline.clear()
         return target
 
     def __await__(self):
@@ -220,14 +227,14 @@ class Telekinesis():
         return '\033[92m\u2248\033[0m ' + str(self._state.repr)
 
     def _encode(self, arg, receiver_id=None, listener=None):
-        if type(arg) in (int, float, str, bytes, type(None)):
+        if type(arg) in (int, float, str, bytes, bool, type(None)):
             return (type(arg).__name__, arg)
         if type(arg) in (range, slice):
             return (type(arg).__name__, (arg.start, arg.stop, arg.step))
         if type(arg) in (list, tuple, set):
-            return (type(arg).__name__, [self._encode(v) for v in arg])
+            return (type(arg).__name__, [self._encode(v, receiver_id, listener) for v in arg])
         if isinstance(arg, dict):
-            return ('dict', {x: self._encode(arg[x]) for x in arg})
+            return ('dict', {x: self._encode(arg[x], receiver_id, listener) for x in arg})
         if isinstance(arg, Telekinesis):
             obj = arg
         else:
@@ -238,7 +245,7 @@ class Telekinesis():
 
     def _decode(self, tup):
         typ, obj = tup
-        if typ in ('int', 'float', 'str', 'bytes', 'NoneType'):
+        if typ in ('int', 'float', 'str', 'bytes', 'bool', 'NoneType'):
             return obj
         if typ in ('range', 'slice'):
             return {'range': range, 'slice': slice}[typ](*obj)
