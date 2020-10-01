@@ -2,7 +2,7 @@ import random
 import aiohttp
 
 from .client import Session, Connection
-from .remote_objects import spawn
+from .telekinesis import Telekinesis
 
 async def authenticate(url, print_callback=print, **kwargs):
 
@@ -14,10 +14,10 @@ async def authenticate(url, print_callback=print, **kwargs):
     bid, b = random.choice(list(brokers.items()))
 
     s = Session()
-    c = await Connection(s, b['url']).connect()
+    c = Connection(s, b['url'])
 
     assert bid == c.broker_id
-    entrypoint = await spawn(s, b['entrypoint'])
+    entrypoint = Telekinesis(b['entrypoint'], s)
 
     user = await entrypoint(print_callback, **kwargs)
 

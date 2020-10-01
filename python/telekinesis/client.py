@@ -18,12 +18,24 @@ class Connection:
         self.logger = logging.getLogger(__name__)
         self.websocket = None
         self.t_offset = 0
-        self.listener = None
         self.MAX_PAYLOAD_LEN = 2**19
         self.broker_id = None
+        self.lock = asyncio.Event()
         session.connections.add(self)
 
-    async def connect(self):
+        self.listener = asyncio.get_event_loop().create_task(self.listen())
+
+    async def reconnect(self):
+        if self.lock.is_set():
+            self.lock.clear()
+            if self.listener:
+                self.listener.cancel()
+
+            self.listener = asyncio.get_event_loop().create_task(self.listen())
+
+        await self.lock.wait()
+
+    async def _connect(self):
         if self.websocket:
             await self.websocket.close()
 
@@ -46,13 +58,14 @@ class Connection:
         PublicKey(broker_id).verify(broker_signature, sent_challenge)
 
         self.broker_id = broker_id
-        self.listener = asyncio.get_event_loop().create_task(self.listen())
         
+        self.lock.set()
+
         return self
         
     async def send(self, header, payload=b''):
         if not self.websocket:
-            await self.connect()
+            await self.reconnect()
 
         h = ujson.dumps(header).encode()
         m = len(h).to_bytes(2, 'big') + len(payload).to_bytes(3, 'big') + h + payload
@@ -65,6 +78,7 @@ class Connection:
         n_tries = 0
         while True:
             try:
+                await self._connect()
                 while True:
                     await self.recv()
                     n_tries = 0
@@ -72,6 +86,7 @@ class Connection:
                 self.logger.error('Connection.listen', exc_info=True)
             
             await asyncio.sleep(1)
+
             if n_tries > 10:
                 raise Exception('Max tries reached')
             n_tries += 1
@@ -86,23 +101,25 @@ class Connection:
             len_h, len_p = [int.from_bytes(x, 'big') for x in [message[68:70], message[70:73]]]
             header = ujson.loads(message[73:73+len_h])
             payload = message[73+len_h:73+len_h+len_p]
-            if header.get('send'):
-                action = header.get('send')
-                PublicKey(action['source']['session']).verify(signature, message[64:])
-                if self.session.channels.get(action['destination']['channel']):
-                    channel = self.session.channels.get(action['destination']['channel'])
-                    await channel.handle_message(action['source'], action['destination'], payload)
+            for action, content in header:
+                if action == 'send':
+                    source, destination = Route(**content['source']), Route(**content['destination'])
+                    PublicKey(source.session).verify(signature, message[64:])
+                    if self.session.channels.get(destination.channel):
+                        channel = self.session.channels.get(destination.channel)
+                        channel.handle_message(source, destination, payload)
 
 class Session:
     def __init__(self, session_key_file=None, compile_signatures=True):
         self.session_key = PrivateKey(session_key_file)
         self.channels = {}
         self.connections = set()
+        self.compile_signatures = compile_signatures
         self.seen_messages = (set(), set(), 0)
         self.issued_tokens = {}
+
         self.remote_controllers = {}
         self.remote_objects = {}
-        self.compile_signatures = compile_signatures
     
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
@@ -117,57 +134,82 @@ class Session:
                 return True
         return False
 
-    async def issue_token(self, asset, receiver, token_type, max_depth=None, send=True):
+    def issue_token(self, asset, receiver, token_type, max_depth=None):
         token = Token(self.session_key.public_serial(), receiver, asset, token_type, max_depth)
 
         token_tuple = (token.sign(self.session_key), token.to_dict())
         
         self.issued_tokens[token_tuple[0]] = token
+        return ('token', ('issue', token_tuple))
 
-        if send:
-            for connection in self.connections:
-                await connection.send({'tokens': ['issue', token_tuple]})
-        return token_tuple
-
-    async def revoke_token(self, token_id, send=True):
-        token = self.issued_tokens.pop(token_id)
-        if send:
-            for connection in self.connections:
-                await connection.send({'tokens': ['revoke', token_id]})
-        return token
+    def revoke_token(self, token_id):
+        self.issued_tokens.pop(token_id)
+        return ('token', ('revoke', token_id))
     
-    async def extend_route(self, route, receiver):
-        token_tuple = await self.issue_token(route['tokens'][-1][0], receiver, 'extension')
-        route['tokens'].append(token_tuple)
-        return route
+    def extend_route(self, route, receiver, max_depth=None):
+        if route.session == receiver:
+            route.tokens = []
+            return None
+
+        for i, (_, token) in enumerate(route.tokens):
+            if token['receiver'] == receiver:
+                route.tokens = route.tokens[:i+1]
+                return None
+
+        if route.session == self.session_key.public_serial():
+            token_header = self.issue_token(route.channel, receiver, 'root', max_depth)
+            route.tokens = [token_header[1][1]]
+            return token_header
+
+        for i, (_, token) in enumerate(route.tokens):
+            if token['receiver'] == self.session_key.public_serial():
+                route.tokens = route.tokens[:i+1]
+
+        token_header = self.issue_token(route.tokens[-1][0], receiver, 'extension', max_depth)
+        route.tokens.append(token_header[1][1])
+        return token_header
+    
+    async def send(self, header, payload=b''):
+        for connection in self.connections:
+            await connection.send(header, payload)
 
 class Channel:
     def __init__(self, session, channel_key_file=None, is_public=False):
         self.session = session
         self.channel_key = PrivateKey(channel_key_file)
         self.is_public = is_public
+        self.route = Route(list(set(c.broker_id for c in self.session.connections)),
+                           self.session.session_key.public_serial(),
+                           self.channel_key.public_serial())
+        self.header_buffer = []
         self.chunks = {}
         self.messages = deque()
         self.lock = asyncio.Event()
         session.channels[self.channel_key.public_serial()] = self
     
     def route_dict(self):
-        return {
-            'brokers': list(set(c.broker_id for c in self.session.connections)),
-            'session': self.session.session_key.public_serial(),
-            'channel': self.channel_key.public_serial()}
+        return self.route.to_dict()
 
-    async def handle_message(self, source, destination, raw_payload):
-        if self.validate_token_chain(source['session'], destination.get('tokens')):
+    def handle_message(self, source, destination, raw_payload):
+        if self.validate_token_chain(source.session, destination.tokens):
 
-            shared_key = SharedKey(self.channel_key, PublicKey(source['channel']))
+            shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
 
             if payload[:4] == b'\x00'*4:
                 self.messages.appendleft((source, bson.loads(payload[4:])))
                 self.lock.set()
             else:
-                raise NotImplementedError
+                ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
+                i, n = int.from_bytes(ir, 'big'), int.from_bytes(nr, 'big')
+                if mid not in self.chunks:
+                    self.chunks[mid] = {}
+                self.chunks[mid][i] = chunk
+
+                if len(self.chunks[mid]) == n:
+                    chunks = self.chunks.pop(mid)
+                    self.messages.appendleft((source, bson.loads(b''.join(chunks[ii] for ii in range(n)))))
+                    self.lock.set()
     
     async def recv(self):
         if not self.messages:
@@ -176,45 +218,61 @@ class Channel:
         
         return self.messages.pop()
     
-    async def listen(self):
-        for connection in self.session.connections:
-            listen_dict = self.route_dict()
-            listen_dict['is_public'] = self.is_public
-            await connection.send({'listen': listen_dict})
+    def listen(self):
+        listen_dict = self.route.to_dict()
+        listen_dict['is_public'] = self.is_public
+        listen_dict.pop('tokens')
+        self.header_buffer.append(('listen', listen_dict))
 
         return self
     
     async def send(self, destination, payload_obj, allow_reply=False):
-        headers = {
-            'send': {
-                'source': self.route_dict(),
-                'destination': destination}}
-
+        source_route = self.route.clone()
         if allow_reply:
-            token_tuple = await self.session.issue_token(self.channel_key.public_serial(), 
-                                                         destination['session'], 
-                                                         'root', send=False)
-            headers['listen'] = self.route_dict() 
-            headers['tokens'] = ['issue', token_tuple]
-            headers['send']['source']['tokens'] = [token_tuple]
+            self.header_buffer.append(self.session.extend_route(source_route, destination.session))
+            self.listen()
         
         payload = bson.dumps(payload_obj)
 
-        if len(payload) > list(self.session.connections)[0].MAX_PAYLOAD_LEN:
-            raise NotImplementedError('Payload too large')
+        max_payload = list(self.session.connections)[0].MAX_PAYLOAD_LEN
+
+        if len(payload) < max_payload:
+            chunks = [b'\x00'*4 + payload]
+        else:
+            mid = os.urandom(4)
+            n = (len(payload) - 1) // max_payload + 1
+            if n > 2**16:
+                raise Exception(f'Payload size {len(payload)/2**20} MiB too large')
+            chunks = [i.to_bytes(2, 'big') + n.to_bytes(2, 'big') + mid + payload[i*max_payload: (i+1)*max_payload]
+                      for i in range(n)]
+
+        tasks = []
+        shared_key = SharedKey(self.channel_key, PublicKey(destination.channel))
+
+        header = ('send', {'source': source_route.to_dict(), 'destination': destination.to_dict()})
+        for chunk in chunks:
+            nonce = os.urandom(16)
+            raw_payload = nonce + shared_key.encrypt(chunk, nonce)
+
+            tasks.append(self.execute(header, raw_payload))
         
-        shared_key = SharedKey(self.channel_key, PublicKey(destination['channel']))
-        nonce = os.urandom(16)
-        raw_payload = nonce + shared_key.encrypt(b'\x00'*4 + payload, nonce)
-        
-        for connection in self.session.connections:
-            await connection.send(headers, raw_payload)
-        
+        await asyncio.gather(*tasks)
+
         return self
 
-    async def close(self):
-        for connection in self.session.connections:
-            await connection.send({'close': self.route_dict()})
+    async def execute(self, header=None, payload=b''):
+        await self.session.send([h for h in (self.header_buffer + [header]) if h], payload)
+        self.header_buffer = []
+
+        return self
+
+    def __await__(self):
+        return self.execute().__await__()
+
+    def close(self):
+        self.header_buffer.append(('close', self.route.to_dict()))
+
+        return self
 
     def validate_token_chain(self, source_id, tokens):
         if self.is_public or (source_id == self.session.session_key.public_serial()):
@@ -244,3 +302,20 @@ class Channel:
         if last_receiver == source_id:
             return True
         return False
+
+class Route:
+    def __init__(self, brokers, session, channel, tokens=None):
+        self.brokers = brokers
+        self.session = session
+        self.channel = channel
+        self.tokens = tokens or []
+
+    def to_dict(self):
+        return {
+            'brokers': self.brokers,
+            'session': self.session,
+            'channel': self.channel,
+            'tokens': self.tokens
+        }
+    def clone(self):
+        return Route(**self.to_dict())

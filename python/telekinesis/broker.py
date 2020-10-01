@@ -126,18 +126,22 @@ class Broker:
 
     async def handle_message(self, connection, message):
         headers = self.decode_header(message)
-        if headers.get('listen'):
-            self.handle_listen(connection, **headers.get('listen'))
-        if headers.get('tokens'):
-            await self.handle_tokens(connection, headers.get('tokens'))
-        if headers.get('broker'):
-            self.handle_broker_action(connection, headers.get('broker'))
-        if headers.get('send'):
-            await self.handle_send(connection, message, **headers.get('send'))
-        if headers.get('close'):
-            self.handle_close(connection, **headers.get('close'))
+        for action, args in headers:
+            if action == 'listen':
+                self.handle_listen(connection, **args)
+            if action == 'token':
+                await self.handle_tokens(connection, *args)
+            if action == 'broker':
+                self.handle_broker_action(connection, args)
+            if action == 'send':
+                await self.handle_send(connection, message, **args)
+            if action == 'close':
+                self.handle_close(connection, **args)
 
     async def handle_send(self, connection, message, source, destination):
+        self.logger.info('send %s %s ??? %s ??? %s %s', source['session'][:4], source['channel'][:4],
+                        str(len(message)//2**10),
+                        destination['session'][:4], destination['channel'][:4])
         if self.sessions.get(destination['session']):
             dest_session = self.sessions.get(destination['session'])
             if dest_session.channels.get(destination['channel']):
@@ -184,28 +188,27 @@ class Broker:
                 if not channel_obj.connections:
                     channel_obj.close()
 
-    async def handle_tokens(self, connection, *tokens):
-        for action, token_tuple in tokens:
-            if action == 'issue':
-                token = Token(**token_tuple[1])
-                if connection.session.session_id == token.issuer:
-                    self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[0][:4]))
-                    if token.verify_signature(token_tuple[0]):
-                        if token.token_type == 'root':
-                            connection.session.active_tokens.add(token_tuple[0])
-                            self.tokens[token_tuple[0]] = token
-                        elif token.token_type == 'extension':
-                            if self.tokens.get(token.asset):
-                                prev_token = self.tokens.get(token.asset)
-                                if prev_token.receiver == token.issuer:
-                                    connection.session.active_tokens.add(token_tuple[0])
-                                    self.tokens[token_tuple[0]] = token
-            if action == 'revoke':
-                token = self.tokens.get(token_tuple)
-                if token and token.issuer == connection.session.session_id:
-                    self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[:4]))
-                    self.tokens.pop(token_tuple)
-                    connection.session.active_tokens.remove(token_tuple)
+    async def handle_tokens(self, connection, action, token_tuple):
+        if action == 'issue':
+            token = Token(**token_tuple[1])
+            if connection.session.session_id == token.issuer:
+                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[0][:4]))
+                if token.verify_signature(token_tuple[0]):
+                    if token.token_type == 'root':
+                        connection.session.active_tokens.add(token_tuple[0])
+                        self.tokens[token_tuple[0]] = token
+                    elif token.token_type == 'extension':
+                        if self.tokens.get(token.asset):
+                            prev_token = self.tokens.get(token.asset)
+                            if prev_token.receiver == token.issuer:
+                                connection.session.active_tokens.add(token_tuple[0])
+                                self.tokens[token_tuple[0]] = token
+        if action == 'revoke':
+            token = self.tokens.get(token_tuple)
+            if token and token.issuer == connection.session.session_id:
+                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[:4]))
+                self.tokens.pop(token_tuple)
+                connection.session.active_tokens.remove(token_tuple)
 
     def handle_broker_action(self, connection, action):
         if action == 'open':
@@ -282,7 +285,7 @@ class Peer(Connection):
         self.session.connections.add(self)
         self.session.broker_connections.add(self)
 
-        await self.send({'broker': 'open'})
+        await self.send([('broker', 'open')])
 
         self.listener = asyncio.get_event_loop().create_task(self.listen(callback))
         
