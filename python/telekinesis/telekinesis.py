@@ -197,6 +197,11 @@ class Telekinesis():
                 return self._decode(out['return'])
             raise Exception
         
+        async def exc(x):
+            if isinstance(x, Telekinesis) and x._state.pipeline:
+                return x._execute(route)
+            return x
+
         target = self._target
         for action, arg in pipeline:
             self._logger.info('%s %s %s', action, arg, target)
@@ -206,11 +211,7 @@ class Telekinesis():
                 target = target.__getattribute__(arg)
             if action == 'call':
                 ar, kw = arg
-                args, kwargs = [None]*len(ar), {}
-                for i, x in enumerate(ar):
-                    args[i] = await x._execute(route) if isinstance(x, Telekinesis) else x
-                for i, x in kw.items():
-                    kwargs[i] = await x._execute(route) if isinstance(x, Telekinesis) else x
+                args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
                 
                 if '_tk_inject_first_arg' in dir(target) \
                 and target._tk_inject_first_arg:
