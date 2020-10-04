@@ -64,8 +64,14 @@ class Connection:
         return self
         
     async def send(self, header, payload=b''):
-        if not self.websocket:
-            await self.reconnect()
+        for action, _ in header:
+            self.logger.info('%s Sending %s: %s', self.session.session_key.public_serial()[:4],
+                             action, len(payload) if action == 'send' else 0)
+        if not self.websocket or self.websocket.closed:
+            if self.lock.is_set():
+                await self.reconnect()
+            else:
+                await self.lock.wait()
 
         h = ujson.dumps(header).encode()
         m = len(h).to_bytes(2, 'big') + len(payload).to_bytes(3, 'big') + h + payload
@@ -85,6 +91,7 @@ class Connection:
             except Exception:
                 self.logger.error('Connection.listen', exc_info=True)
             
+            self.lock.clear()
             await asyncio.sleep(1)
 
             if n_tries > 10:
@@ -92,6 +99,12 @@ class Connection:
             n_tries += 1
             
     async def recv(self):
+        if not self.websocket or self.websocket.closed:
+            if self.lock.is_set():
+                await self.reconnect()
+            else:
+                await self.lock.wait()
+
         message = await self.websocket.recv()
 
         signature, timestamp = message[:64], int.from_bytes(message[64:68], 'big')
@@ -102,6 +115,8 @@ class Connection:
             header = ujson.loads(message[73:73+len_h])
             payload = message[73+len_h:73+len_h+len_p]
             for action, content in header:
+                self.logger.info('%s Received %s: %s', self.session.session_key.public_serial()[:4], 
+                                 action, len(payload) if action == 'send' else 0)
                 if action == 'send':
                     source, destination = Route(**content['source']), Route(**content['destination'])
                     PublicKey(source.session).verify(signature, message[64:])
@@ -118,9 +133,6 @@ class Session:
         self.seen_messages = (set(), set(), 0)
         self.issued_tokens = {}
 
-        self.remote_controllers = {}
-        self.remote_objects = {}
-    
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
 
@@ -147,14 +159,6 @@ class Session:
         return ('token', ('revoke', token_id))
     
     def extend_route(self, route, receiver, max_depth=None):
-        if route.session == receiver:
-            route.tokens = []
-            return None
-
-        for i, (_, token) in enumerate(route.tokens):
-            if token['receiver'] == receiver:
-                route.tokens = route.tokens[:i+1]
-                return None
 
         if route.session == self.session_key.public_serial():
             token_header = self.issue_token(route.channel, receiver, 'root', max_depth)
@@ -186,6 +190,8 @@ class Channel:
         self.messages = deque()
         self.lock = asyncio.Event()
         session.channels[self.channel_key.public_serial()] = self
+
+        self.telekinesis = None
     
     def route_dict(self):
         return self.route.to_dict()
@@ -199,7 +205,6 @@ class Channel:
 
             if payload[:4] == b'\x00'*4:
                 self.messages.appendleft((source, bson.loads(payload[4:])))
-                # print('<<<<<', bson.loads(payload[4:]))
                 self.lock.set()
             else:
                 ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
@@ -230,7 +235,6 @@ class Channel:
     
     async def send(self, destination, payload_obj, allow_reply=False):
         source_route = self.route.clone()
-        # print('>>>>', payload_obj)
         if allow_reply:
             self.header_buffer.append(self.session.extend_route(source_route, destination.session))
             self.listen()
@@ -300,10 +304,10 @@ class Channel:
                     if not max_depth or depth <= max_depth:
                         last_receiver = token.receiver
                         asset = token_tuple[0]
+                        if last_receiver == source_id:
+                            return True
                         continue
             return False
-        if last_receiver == source_id:
-            return True
         return False
 
 class Route:
@@ -320,5 +324,6 @@ class Route:
             'channel': self.channel,
             'tokens': self.tokens
         }
+
     def clone(self):
         return Route(**self.to_dict())
