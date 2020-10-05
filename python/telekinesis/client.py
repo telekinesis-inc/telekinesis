@@ -4,6 +4,7 @@ import traceback
 import os
 import asyncio
 import bson
+import zlib
 from collections import deque
 
 import websockets
@@ -19,6 +20,7 @@ class Connection:
         self.websocket = None
         self.t_offset = 0
         self.MAX_PAYLOAD_LEN = 2**19
+        self.MAX_COMPRESSION_LEN = 2**22
         self.broker_id = None
         self.lock = asyncio.Event()
         session.connections.add(self)
@@ -204,7 +206,13 @@ class Channel:
 
 
             if payload[:4] == b'\x00'*4:
-                self.messages.appendleft((source, bson.loads(payload[4:])))
+                if payload[4] == 0:
+                    self.messages.appendleft((source, bson.loads(payload[5:])))
+                elif payload[4] == 255:
+                    self.messages.appendleft((source, bson.loads(zlib.decompress(payload[5:]))))
+                else:
+                    raise Exception(f'Received message with different encoding')
+
                 self.lock.set()
             else:
                 ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
@@ -215,7 +223,13 @@ class Channel:
 
                 if len(self.chunks[mid]) == n:
                     chunks = self.chunks.pop(mid)
-                    self.messages.appendleft((source, bson.loads(b''.join(chunks[ii] for ii in range(n)))))
+                    payload = b''.join(chunks[ii] for ii in range(n))
+                    if payload[0] == b'\x00':
+                        self.messages.appendleft((source, bson.loads(payload[1:])))
+                    elif payload[0] == b'\xff':
+                        self.messages.appendleft((source, bson.loads(zlib.decompress(payload[1:]))))
+                    else:
+                        raise Exception('Received message with different encoding')
                     self.lock.set()
     
     async def recv(self):
@@ -240,6 +254,13 @@ class Channel:
             self.listen()
         
         payload = bson.dumps(payload_obj)
+
+        max_compression = list(self.session.connections)[0].MAX_COMPRESSION_LEN
+
+        if len(payload) < max_compression:
+            payload = b'\xff' + zlib.compress(payload)
+        else:
+            payload = b'\x00' + payload
 
         max_payload = list(self.session.connections)[0].MAX_PAYLOAD_LEN
 

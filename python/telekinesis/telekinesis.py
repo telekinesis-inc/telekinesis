@@ -125,7 +125,11 @@ class Telekinesis():
         state.pipeline.append(('get', attr))
 
         return Telekinesis._from_state(self._target, self._session, state, self)
-    
+    def _get_root_state(self):
+        if self._parent:
+            return self._parent._get_root_state()
+        return self._state
+
     def _update_root_state(self, state):
         if self._parent:
             return self._parent._update_root_state(state)
@@ -163,7 +167,7 @@ class Telekinesis():
             
             await channel.send(reply, {
                 'return': self._encode(ret, reply.session, listener),
-                'state': self._state.to_dict()})
+                'repr': self._state.repr})
         except:
             self._logger.error(payload, exc_info=True)
 
@@ -209,8 +213,8 @@ class Telekinesis():
 
             if 'return' in out:
                 output = self._decode(out['return'], self._target.session)
-                state = out['state']
-                self._update_root_state(State(**state))
+                state = self._get_root_state()
+                state.repr = out['repr']
                 return output
 
             raise Exception
