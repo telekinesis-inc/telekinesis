@@ -9,6 +9,7 @@ import ujson
 import websockets
 
 from .cryptography import PrivateKey, PublicKey, Token
+from .client import Route
 
 class Connection:
     def __init__(self, websocket):
@@ -39,9 +40,57 @@ class Session:
     def __init__(self, session_id):
         self.session_id = session_id
         self.channels = {}
+        self.expecting_channels = {}
         self.connections = set()
-        self.broker_connections = set()
-        self.active_tokens = set()
+        self.broker_connections = {}
+        self.active_tokens = {}
+        self.cached_tokens = {}
+        self.expecting_tokens = {}
+        self.tasks = set()
+    
+    async def validate_peer_token(self, token, event):
+        if token.signature in self.cached_tokens \
+        and token.encode() == self.cached_tokens[token.signature].encode():
+            event.set()
+            return True
+        self.expecting_tokens[token.signature] = (event, token)
+        for broker in self.broker_connections.values():
+            await broker.send((('token', ('validate', token.encode())),))
+        self.tasks.add(asyncio.get_event_loop().create_task(self.clean_expecting_token(token)))
+        
+        return False
+
+    async def clean_expecting_token(self, token):
+        await asyncio.sleep(30)
+        self.expecting_tokens.pop(token.signature, None)
+    
+    async def timeout_cached_token(self, token):
+        await asyncio.sleep(60)
+        self.cached_tokens.pop(token.signature, None)
+
+    def approve_token(self, token):
+        self.tasks = set(x for x in self.tasks if not x.done())
+        if token.issuer == self.session_id:
+            self.active_tokens[token.signature] = token
+        else:
+            self.cached_tokens[token.signature] = token
+            self.tasks.add(asyncio.get_event_loop().create_task(self.timeout_cached_token(token)))
+
+        event, expected_token = self.expecting_tokens.get(token.signature, (None, None))
+        if expected_token and expected_token.encode() == token.encode():
+            self.expecting_tokens.pop(token.signature, None)
+            event.set()
+
+    async def expect_channel(self, channel_id):
+        if channel_id not in self.channels:
+            event = asyncio.Event()
+            self.expecting_channels[channel_id] = event
+            try:
+                await asyncio.wait_for(event.wait(), 15)
+                self.expecting_channels.pop(channel_id, None)
+            except asyncio.exceptions.TimeoutError:
+                pass
+        return self.channels.get(channel_id)
 
 class Channel:
     def __init__(self, session, channel_id, is_public):
@@ -56,7 +105,7 @@ class Channel:
         
         self.session.channels.pop(self.channel_id)
     
-    async def validate_token_chain(self, source_id, tokens, active_tokens):
+    async def validate_token_chain(self, source_id, tokens, broker):
         if (source_id == self.session.session_id) or self.is_public:
             return True
         
@@ -67,27 +116,23 @@ class Channel:
         last_receiver = self.session.session_id
         max_depth = None
         
-        for depth, token_tuple in enumerate(tokens):
-            if active_tokens.get(token_tuple[0]):
-                token = active_tokens.get(token_tuple[0])
+        for depth, enc_token in enumerate(tokens):
+            token = Token.decode(enc_token, False)
+            if await broker.check_token(token):
                 if (token.asset == asset) and (token.issuer == last_receiver):
-                    if token.max_depth:
-                        if not max_depth or (token.max_depth + depth) < max_depth:
-                            max_depth = token.max_depth + depth
-                    if not max_depth or depth <= max_depth:
-                        last_receiver = token.receiver
-                        asset = token_tuple[0]
-                        continue
-            return False
-        if last_receiver == source_id:
-            return True
+                    max_depth = (max_depth and min(max_depth, token.max_depth or max_depth)) or token.max_depth
+                    if depth > (max_depth or depth):
+                        return False
+                    if token.receiver == source_id:
+                        return True
+                    last_receiver = token.receiver
+                    asset = token.signature
+            
         return False
 
 class Broker:
     def __init__(self, broker_key_file=None):
-        self.tokens = {}
         self.sessions = {}
-        self.brokers = {}
         self.servers = {}
         self.broker_key = PrivateKey(broker_key_file)
         self.logger = logging.getLogger(__name__)  
@@ -120,9 +165,7 @@ class Broker:
                     connection.session.broker_connections.remove(connection)
 
                 if not connection.session.channels and not connection.session.broker_connections:
-                    session = self.sessions.pop(connection.session.session_id)
-                    for token_id in session.active_tokens:
-                        self.tokens.pop(token_id)
+                    self.sessions.pop(connection.session.session_id)
 
     async def handle_message(self, connection, message):
         headers = self.decode_header(message)
@@ -142,11 +185,15 @@ class Broker:
         self.logger.info('send %s %s ??? %s ??? %s %s', source['session'][:4], source['channel'][:4],
                         str(len(message)//2**10),
                         destination['session'][:4], destination['channel'][:4])
-        if self.sessions.get(destination['session']):
-            dest_session = self.sessions.get(destination['session'])
-            if dest_session.channels.get(destination['channel']):
-                dest_channel = dest_session.channels.get(destination['channel'])
-                if await dest_channel.validate_token_chain(source['session'], destination.get('tokens'), self.tokens):
+        s = Route(**source)
+        d = Route(**destination)
+        
+        dest_session = self.sessions.get(d.session)
+        if dest_session:
+            dest_channel = await dest_session.expect_channel(d.channel)
+
+            if dest_session.channels.get(d.channel):
+                if await dest_channel.validate_token_chain(s.session, d.tokens, self):
                     self.logger.info('send %s %s >>> %s >>> %s %s', source['session'][:4], source['channel'][:4],
                         str(len(message)//2**10),
                         destination['session'][:4], destination['channel'][:4])
@@ -159,11 +206,17 @@ class Broker:
                             str(len(message)//2**10),
                             destination['session'][:4], destination['channel'][:4])
 
-        if destination.get('brokers'):
-            brokers = destination.get('brokers')
-            for broker_id in brokers:
+        if d.brokers:
+            for broker_id in d.brokers:
                 if broker_id in self.sessions:
-                    for broker_connection in self.sessions[broker_id].broker_connections:
+                    for broker_connection in self.sessions[broker_id].broker_connections.values():
+                        for enc_token in d.tokens:
+                            token = Token.decode(enc_token, False)
+                            if self.broker_key.public_serial() in token.brokers \
+                            and token.issuer in self.sessions \
+                            and token.signature in self.sessions[token.issuer].active_tokens \
+                            and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode():
+                                await broker_connection.send((('token', ('approve', enc_token)),))
                         await broker_connection.websocket.send(message)
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
@@ -176,6 +229,10 @@ class Broker:
             channel_obj = connection.session.channels[channel]
             channel_obj.connections.add(connection)
             connection.channels.add(channel_obj)
+
+            event = connection.session.expecting_channels.pop(channel, None)
+            if event:
+                event.set()
     
     def handle_close(self, connection, session, channel, **kwargs):
         if session == connection.session.session_id:
@@ -188,37 +245,75 @@ class Broker:
                 if not channel_obj.connections:
                     channel_obj.close()
 
-    async def handle_tokens(self, connection, action, token_tuple):
+    async def handle_tokens(self, connection, action, *args):
         if action == 'issue':
-            token = Token(**token_tuple[1])
+            tokens = [Token.decode(x) for x in args if x]
+            token = tokens[0]
             if connection.session.session_id == token.issuer:
-                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[0][:4]))
-                if token.verify_signature(token_tuple[0]):
-                    if token.token_type == 'root':
-                        connection.session.active_tokens.add(token_tuple[0])
-                        self.tokens[token_tuple[0]] = token
-                    elif token.token_type == 'extension':
-                        if self.tokens.get(token.asset):
-                            prev_token = self.tokens.get(token.asset)
-                            if prev_token.receiver == token.issuer:
-                                connection.session.active_tokens.add(token_tuple[0])
-                                self.tokens[token_tuple[0]] = token
+                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                if token.token_type == 'root':
+                    connection.session.active_tokens[token.signature] = token
+                elif token.token_type == 'extension':
+                    prev_token = tokens[1]
+                    if await self.check_token(prev_token):
+                        connection.session.approve_token(token)
+
         if action == 'revoke':
-            token = self.tokens.get(token_tuple)
-            if token and token.issuer == connection.session.session_id:
-                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token_tuple[:4]))
-                self.tokens.pop(token_tuple)
-                connection.session.active_tokens.remove(token_tuple)
+            token = connection.session.active_tokens.get(args[0])
+            if token:
+                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                connection.session.active_tokens.pop(token.signature, None)
+
+        if action == 'validate':
+            token = Token.decode(args[0], False)
+            if token.issuer in self.sessions:
+                expected_token = self.sessions[token.issuer].active_tokens.get(token.signature)
+                if expected_token and token.encode() == expected_token.encode():
+                    broker_connection = connection.session.broker_connections.get(connection)
+                    if broker_connection:
+                        self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                        await broker_connection.send((('token', ('approve', token.encode())),))
+
+        if action == 'approve':
+            token = Token.decode(args[0])
+            self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+            connection.session.approve_token(token)
 
     def handle_broker_action(self, connection, action):
         if action == 'open':
-            connection.session.broker_connections.add(connection)
+            connection.session.broker_connections[connection] = Peer(connection.websocket, self.broker_key)
         if action == 'close':
-            connection.session.broker_sessions.remove(connection)
+            connection.session.broker_sessions.pop(connection, None)
 
     async def add_broker(self, url):
         websocket = await websockets.connect(url)
-        await Peer(websocket, self.broker_key).connect(self.sessions, self.handle_message)
+        peer = Peer(websocket, self.broker_key)
+        await peer.connect(self.sessions, self.handle_message) # This already adds the peer to self.sessions
+
+    async def check_token(self, token):
+        session = self.sessions.get(token.issuer)
+        if session:
+            if token.signature in session.active_tokens:
+                return token.encode() == session.active_tokens.get(token.signature).encode()
+            else:
+                event = asyncio.Event()
+                session.expecting_tokens[token.signature] = (event, token)
+                session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
+                await asyncio.wait_for(event.wait(), 30)
+
+                return True
+        else:
+            event = asyncio.Event()
+            for broker in token.brokers:
+                if broker in self.sessions \
+                and await self.sessions[broker].validate_peer_token(token, event):
+                    break
+            else:
+                try:
+                    await asyncio.wait_for(event.wait(), 30)
+                except asyncio.exceptions.TimeoutError:
+                    return False
+            return True
 
     def check_no_repeat(self, message):
         signature, timestamp = message[:64], int.from_bytes(message[64:68], 'big')
@@ -283,7 +378,7 @@ class Peer(Connection):
         
         self.session = sessions[session_id]
         self.session.connections.add(self)
-        self.session.broker_connections.add(self)
+        self.session.broker_connections[self] = self
 
         await self.send([('broker', 'open')])
 

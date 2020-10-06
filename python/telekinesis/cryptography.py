@@ -80,25 +80,45 @@ class SharedKey:
         return decryptor.update(ciphertext) + decryptor.finalize()
 
 class Token:
-    def __init__(self, issuer, receiver, asset, token_type, max_depth=None):
+    def __init__(self, issuer, brokers, receiver, asset, token_type, max_depth=None):
         self.issuer = issuer
+        self.brokers = brokers
         self.receiver = receiver
         self.asset = asset
         self.token_type = token_type
         self.max_depth = max_depth
+        self.signature = None
 
-    def verify_signature(self, signature):
+    def verify(self, signature):
         try:
-            PublicKey(self.issuer).verify(base64.b64decode(signature.encode()), self.to_string().encode()) 
+            PublicKey(self.issuer).verify(base64.b64decode(signature.encode()), self._to_string().encode()) 
+            self.signature = signature
             return True
         except InvalidSignature:
             return False
 
-    def to_dict(self):
-        return {x: self.__getattribute__(x) for x in ['issuer', 'receiver', 'asset', 'token_type', 'max_depth']}
+    def _to_dict(self):
+        return {x: self.__getattribute__(x) for x in ['issuer', 'brokers', 'receiver', 'asset', 
+                                                      'token_type', 'max_depth']}
 
-    def to_string(self):
-        return ujson.dumps(self.to_dict())
+    def _to_string(self):
+        return ujson.dumps(self._to_dict())
+        
+    def encode(self):
+        if not self.signature:
+            raise Exception('You need to sign the token before encoding it')
+        return self.signature + '.' + self._to_string()
 
     def sign(self, signing_key):
-        return base64.b64encode(signing_key.sign(self.to_string().encode())).decode()
+        self.signature = base64.b64encode(signing_key.sign(self._to_string().encode())).decode()
+        return self.signature
+
+    @staticmethod
+    def decode(string, verify=True):
+        token = Token(**ujson.loads(string[string.find('.')+1:]))
+        if not verify:
+            token.signature = string.split('.')[0]
+            return token
+        if token.verify(string.split('.')[0]):
+            return token
+        raise InvalidSignature

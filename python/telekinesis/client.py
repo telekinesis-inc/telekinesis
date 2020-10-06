@@ -10,7 +10,7 @@ from collections import deque
 import websockets
 import ujson
 
-from .cryptography import PrivateKey, PublicKey, SharedKey, Token
+from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignature
 
 class Connection:
     def __init__(self, session, url='ws://localhost:8776'):
@@ -148,13 +148,22 @@ class Session:
                 return True
         return False
 
-    def issue_token(self, asset, receiver, token_type, max_depth=None):
-        token = Token(self.session_key.public_serial(), receiver, asset, token_type, max_depth)
+    def issue_token(self, target, receiver, max_depth=None):
+        if isinstance(target, Token):
+            token_type = 'extension'
+            prev_token = target
+            asset = target.signature
+        else:
+            token_type = 'root'
+            prev_token = None
+            asset = target
 
-        token_tuple = (token.sign(self.session_key), token.to_dict())
+        token = Token(self.session_key.public_serial(), [x.broker_id for x in self.connections], 
+                      receiver, asset, token_type, max_depth)
+        signature = token.sign(self.session_key)
         
-        self.issued_tokens[token_tuple[0]] = token
-        return ('token', ('issue', token_tuple))
+        self.issued_tokens[signature] = token
+        return ('token', ('issue', token.encode(), prev_token and prev_token.encode()))
 
     def revoke_token(self, token_id):
         self.issued_tokens.pop(token_id)
@@ -163,15 +172,17 @@ class Session:
     def extend_route(self, route, receiver, max_depth=None):
 
         if route.session == self.session_key.public_serial():
-            token_header = self.issue_token(route.channel, receiver, 'root', max_depth)
+            token_header = self.issue_token(route.channel, receiver, max_depth)
             route.tokens = [token_header[1][1]]
             return token_header
 
-        for i, (_, token) in enumerate(route.tokens):
-            if token['receiver'] == self.session_key.public_serial():
+        for i, enc_token in enumerate(route.tokens):
+            token = Token.decode(enc_token)
+            if token.receiver == self.session_key.public_serial():
                 route.tokens = route.tokens[:i+1]
 
-        token_header = self.issue_token(route.tokens[-1][0], receiver, 'extension', max_depth)
+        token = Token.decode(route.tokens[-1], False)
+        token_header = self.issue_token(token, receiver, max_depth)
         route.tokens.append(token_header[1][1])
         return token_header
     
@@ -312,22 +323,24 @@ class Channel:
         last_receiver = self.session.session_key.public_serial()
         max_depth = None
         
-        for depth, token_tuple in enumerate(tokens):
-            token = Token(**token_tuple[1])
-            if token.verify_signature(token_tuple[0]):
-                if (token.asset == asset) and (token.issuer == last_receiver):
-                    if token.issuer == self.session.session_key.public_serial():
-                        if token_tuple[0] not in self.session.issued_tokens:
-                            return False
-                    if token.max_depth:
-                        if not max_depth or (token.max_depth + depth) < max_depth:
-                            max_depth = token.max_depth + depth
-                    if not max_depth or depth <= max_depth:
-                        last_receiver = token.receiver
-                        asset = token_tuple[0]
-                        if last_receiver == source_id:
-                            return True
-                        continue
+        for depth, token_string in enumerate(tokens):
+            try:
+                token = Token.decode(token_string)
+            except InvalidSignature:
+                return False
+            if (token.asset == asset) and (token.issuer == last_receiver):
+                if token.issuer == self.session.session_key.public_serial():
+                    if token.signature not in self.session.issued_tokens:
+                        return False
+                if token.max_depth:
+                    if not max_depth or (token.max_depth + depth) < max_depth:
+                        max_depth = token.max_depth + depth
+                if not max_depth or depth <= max_depth:
+                    last_receiver = token.receiver
+                    asset = token.signature
+                    if last_receiver == source_id:
+                        return True
+                    continue
             return False
         return False
 
