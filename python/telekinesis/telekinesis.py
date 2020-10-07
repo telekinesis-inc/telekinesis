@@ -11,18 +11,20 @@ import makefun
 from .client import Route, Channel
 
 class State:
-    def __init__(self, attributes=None, methods=None, repr=None, pipeline=None):
+    def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None):
         self.attributes = attributes
         self.methods = methods
         self.pipeline = pipeline or []
         self.repr = repr
+        self.doc = doc
 
     def to_dict(self):
         return {
             'attributes': self.attributes,
             'methods': self.methods,
             'pipeline': self.pipeline,
-            'repr': self.repr
+            'repr': self.repr,
+            'doc': self.doc
         }
     
     def clone(self):
@@ -68,10 +70,12 @@ class State:
         if isinstance(target, type):
             repr_ =  str(type(target))
             methods['__call__'] = (str(inspect.signature(target)), target.__init__.__doc__)
+            doc = target.__doc__
         else:
+            doc = None
             repr_ = target.__repr__()
 
-        return State(attributes, methods, repr_)
+        return State(attributes, methods, repr_, doc)
 
 class Listener:
     def __init__(self, channel, expose_tb=True, max_depth=None, mask=None):
@@ -113,18 +117,19 @@ class Telekinesis():
         else:
             self._update_state(State.from_object(target))
        
-    def __call__(self, *args, **kwargs):
-        self._state.pipeline.append(('call', (args, kwargs)))
-        return self
+    # def __call__(self, *args, **kwargs):
+    #     self._state.pipeline.append(('call', (args, kwargs)))
+    #     return self
     
     def __getattribute__(self, attr):
-        if (attr[0] == '_') and (attr != '__call__'):
+        if (attr[0] == '_'): #and (attr != '__call__'):
             return super().__getattribute__(attr)
         
         state = self._state.clone()
         state.pipeline.append(('get', attr))
 
         return Telekinesis._from_state(self._target, self._session, state, self)
+
     def _get_root_state(self):
         if self._parent:
             return self._parent._get_root_state()
@@ -141,10 +146,12 @@ class Telekinesis():
                 self.__delattr__(d)
 
         for method_name in state.methods:
-            self.__setattr__(method_name, None)
+            if method_name[0] != '_':
+                self.__setattr__(method_name, None)
 
         for attribute_name in state.attributes:
-            self.__setattr__(attribute_name, None)
+            if attribute_name[0] != '_':
+                self.__setattr__(attribute_name, None)
 
         self._state = state
 
@@ -297,9 +304,11 @@ class Telekinesis():
         method_name = state.pipeline[-1][1] if state.pipeline and state.pipeline[-1][0] == 'get' \
                                             else '__call__'
 
-        signature, docstring = state.methods.get(method_name) or (None, None)
-        signature = signature or '(*args, **kwargs)'
-        if not isinstance(target, type):
+        reset = 'call' in [x[0] for x in state.pipeline[:-1]]
+        if method_name in state.methods or reset:
+            signature, docstring = (not reset and state.methods.get(method_name)) or (None, None)
+            signature = signature or '(*args, **kwargs)'
+            # if not isinstance(target, type):
             signature = signature.replace('(', '(self, ')
 
             stderr = sys.stderr
@@ -310,10 +319,15 @@ class Telekinesis():
                     class Telekinesis_(Telekinesis):
                         @makefun.with_signature(signature,
                                                 func_name=method_name,
-                                                doc=docstring,
+                                                doc=docstring if method_name == '__call__' else None,
                                                 module_name='telekinesis.telekinesis')
                         def __call__(self, *args, **kwargs):
-                            return super().__call__(*args, **kwargs)
+                            state = self._state.clone()
+                            state.pipeline.append(('call', (args, kwargs)))
+
+                            return Telekinesis._from_state(self._target, self._session, state, self)
+                            # self._state.pipeline.append(('call', (args, kwargs)))
+                            # return self
                 else:
                     raise Exception
             except:
@@ -321,16 +335,25 @@ class Telekinesis():
                     logging.getLogger(__name__).info('Could not compile signature %s for %s', signature, method_name)
                 
                 class Telekinesis_(Telekinesis):
-                    @makefun.with_signature('(self, *args, **kwargs)',
-                                            func_name=method_name,
-                                            doc=docstring,
-                                            module_name='telekinesis.telekinesis')
-                    def __call__(self, *args, **kwargs):
-                        return super().__call__(*args, **kwargs)
+                        @makefun.with_signature('(self, *args, **kwargs)',
+                                                func_name=method_name,
+                                                doc=docstring if method_name == '__call__' else None,
+                                                module_name='telekinesis.telekinesis')
+                        def __call__(self, *args, **kwargs):
+                            self._state.pipeline.append(('call', (args, kwargs)))
+                            return self
 
-            sys.stderr = stderr
+                sys.stderr = stderr
 
-        return Telekinesis_(target, session, parent)._update_state(state)
+            out = Telekinesis_(target, session, parent)._update_state(state)
+            if method_name == '__call__':
+                out.__doc__ = state.doc
+            else:
+                out.__doc__ = docstring
+
+            return out
+        else:
+            return Telekinesis(target, session, parent)._update_state(state)
 
 def check_signature(signature):
     return not ('\n' in signature or \

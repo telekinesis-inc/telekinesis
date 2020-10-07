@@ -14,8 +14,10 @@ from .client import Route
 class Connection:
     def __init__(self, websocket):
         self.websocket = websocket
+        self.logger = logging.getLogger(__name__)
         self.session = None
         self.channels = set()
+        self.tasks = set()
 
     async def handshake(self, sessions, broker_key):
         challenge = os.urandom(32) + int(time.time()).to_bytes(4, 'big')
@@ -36,6 +38,25 @@ class Connection:
 
         return self
 
+    async def close(self, sessions):
+        try:
+            for channel in self.channels:
+                channel.connections.remove(self)
+                if not channel.connections:
+                    self.session.channels.pop(channel.channel_id)
+
+            self.session.connections.remove(self)
+
+            if self in self.session.broker_connections:
+                self.session.broker_connections.remove(self)
+
+            if not self.session.channels and not self.session.broker_connections:
+                sessions.pop(self.session.session_id)
+        
+            await asyncio.gather(*(x for x in self.tasks if x.done()))
+            [x.cancel() for x in self.tasks if not x.done()]
+        except Exception:
+            self.logger.error('Closing Connection', exc_info=True)
 class Session:
     def __init__(self, session_id):
         self.session_id = session_id
@@ -61,11 +82,11 @@ class Session:
         return False
 
     async def clean_expecting_token(self, token):
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)
         self.expecting_tokens.pop(token.signature, None)
     
     async def timeout_cached_token(self, token):
-        await asyncio.sleep(60)
+        await asyncio.sleep(15)
         self.cached_tokens.pop(token.signature, None)
 
     def approve_token(self, token):
@@ -146,7 +167,9 @@ class Broker:
 
             async for message in websocket:
                 if self.check_no_repeat(message):
-                    await self.handle_message(connection, message)
+                    await asyncio.gather(*(x for x in connection.tasks if x.done()))
+                    connection.tasks = set(x for x in connection.tasks if not x.done())
+                    connection.tasks.add(asyncio.get_event_loop().create_task(self.handle_message(connection, message)))
 
         except Exception:
             self.logger.error('Broker.handle_connection', exc_info=True)
@@ -154,19 +177,7 @@ class Broker:
         finally:
             self.logger.info ('%s disconnected', connection.session.session_id[:4])
             if connection:
-                for channel in connection.channels:
-                    channel.connections.remove(connection)
-                    if not channel.connections:
-                        connection.session.channels.pop(channel.channel_id)
-
-                connection.session.connections.remove(connection)
-
-                if connection in connection.session.broker_connections:
-                    connection.session.broker_connections.remove(connection)
-
-                if not connection.session.channels and not connection.session.broker_connections:
-                    self.sessions.pop(connection.session.session_id)
-
+                await connection.close(self.sessions)
     async def handle_message(self, connection, message):
         headers = self.decode_header(message)
         for action, args in headers:
@@ -286,9 +297,8 @@ class Broker:
             connection.session.broker_sessions.pop(connection, None)
 
     async def add_broker(self, url):
-        websocket = await websockets.connect(url)
-        peer = Peer(websocket, self.broker_key)
-        await peer.connect(self.sessions, self.handle_message) # This already adds the peer to self.sessions
+        peer = Peer(None, self.broker_key)
+        peer.connect(url, self.sessions, self.handle_message) # This already adds the peer to self.sessions
 
     async def check_token(self, token):
         session = self.sessions.get(token.issuer)
@@ -299,7 +309,7 @@ class Broker:
                 event = asyncio.Event()
                 session.expecting_tokens[token.signature] = (event, token)
                 session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
-                await asyncio.wait_for(event.wait(), 30)
+                await asyncio.wait_for(event.wait(), 15)
 
                 return True
         else:
@@ -310,7 +320,7 @@ class Broker:
                     break
             else:
                 try:
-                    await asyncio.wait_for(event.wait(), 30)
+                    await asyncio.wait_for(event.wait(), 15)
                 except asyncio.exceptions.TimeoutError:
                     return False
             return True
@@ -353,10 +363,24 @@ class Peer(Connection):
         super().__init__(websocket)
         self.broker_key = broker_key
         self.t_offset = 0
-        self.listener = None
-        self.logger = logging.getLogger(__name__) 
 
-    async def connect(self, sessions, callback):
+        self.broker_sessions = None
+        self.callback = None
+        self.listener = None
+
+    def connect(self, url, sessions, callback):
+        self.url = url
+        self.broker_sessions = sessions
+        self.callback = callback
+        self.listener = asyncio.get_event_loop().create_task(self.listen())
+
+
+    async def reconnect(self):
+        if self.websocket:
+            await self.websocket.close()
+        
+        self.websocket = await websockets.connect(self.url)
+        
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], 'big')
         
@@ -373,18 +397,10 @@ class Peer(Connection):
         signature, session_id = m[:64], m[64:152].decode()
         PublicKey(session_id).verify(signature, sent_challenge)
 
-        if session_id not in sessions:
-            sessions[session_id] = Session(session_id)
-        
-        self.session = sessions[session_id]
-        self.session.connections.add(self)
-        self.session.broker_connections[self] = self
 
         await self.send([('broker', 'open')])
 
-        self.listener = asyncio.get_event_loop().create_task(self.listen(callback))
-        
-        return self
+        return session_id
 
     async def send(self, header):
         h = ujson.dumps(header).encode()
@@ -394,15 +410,30 @@ class Peer(Connection):
         
         await self.websocket.send(s + t + m)
 
-    async def listen(self, callback):
+    async def listen(self):
         n_tries = 0
         while True:
             try:
+                session_id = await self.reconnect()
+
+                if session_id not in self.broker_sessions:
+                    self.broker_sessions[session_id] = Session(session_id)
+                
+                self.session = self.broker_sessions[session_id]
+                self.session.connections.add(self)
+                self.session.broker_connections[self] = self
+
                 while True:
-                    await callback(self, await self.websocket.recv())
+                    message = await self.websocket.recv()
+                    await asyncio.gather(*(x for x in self.tasks if x.done()))
+                    self.tasks = set(x for x in self.tasks if not x.done())
+                    self.tasks.add(asyncio.get_event_loop().create_task(self.callback(self, message)))
                     n_tries = 0
+
             except Exception:
                 self.logger.error('Peer.listen', exc_info=True)
+            finally:
+                self.close(self.broker_sessions)
             
             await asyncio.sleep(1)
             if n_tries > 10:

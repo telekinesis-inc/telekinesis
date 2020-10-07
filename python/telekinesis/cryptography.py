@@ -122,3 +122,4 @@ class Token:
         if token.verify(string.split('.')[0]):
             return token
         raise InvalidSignature
+    
