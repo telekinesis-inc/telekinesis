@@ -340,6 +340,7 @@ class Telekinesis():
 
         else:
             Telekinesis_ = Telekinesis
+            docstring = None
         
         if method_name == '__call__':
             def dundermethod(self, method, key):
