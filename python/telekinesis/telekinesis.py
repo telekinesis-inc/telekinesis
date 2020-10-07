@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import traceback
 import logging
+from functools import partialmethod
 
 import re
 import makefun
@@ -37,7 +38,7 @@ class State:
         attributes, methods, repr_ = [], {}, ''
         
         for attribute_name in dir(target):
-            if attribute_name[0] != '_' :
+            if attribute_name[0] != '_'  or attribute_name in ['__getitem__', '__setitem__', '__add__', '__mul__']:
                 try:
                     if isinstance(target, type):
                         target_attribute = target.__getattribute__(target, attribute_name)
@@ -117,10 +118,6 @@ class Telekinesis():
         else:
             self._update_state(State.from_object(target))
        
-    # def __call__(self, *args, **kwargs):
-    #     self._state.pipeline.append(('call', (args, kwargs)))
-    #     return self
-    
     def __getattribute__(self, attr):
         if (attr[0] == '_'): #and (attr != '__call__'):
             return super().__getattribute__(attr)
@@ -235,7 +232,7 @@ class Telekinesis():
         for action, arg in pipeline:
             self._logger.info('%s %s %s', action, arg, target)
             if action == 'get':
-                if arg[0] == '_':
+                if arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']:
                     raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
@@ -301,6 +298,20 @@ class Telekinesis():
 
     @staticmethod
     def _from_state(target, session, state, parent=None):
+        def callable_subclass(signature, method_name, docstring):
+            class Telekinesis_(Telekinesis):
+                @makefun.with_signature(signature,
+                                        func_name=method_name,
+                                        doc=docstring if method_name == '__call__' else None,
+                                        module_name='telekinesis.telekinesis')
+                def __call__(self, *args, **kwargs):
+                    state = self._state.clone()
+                    state.pipeline.append(('call', (args, kwargs)))
+
+                    return Telekinesis._from_state(self._target, self._session, state, self)
+            
+            return Telekinesis_
+
         method_name = state.pipeline[-1][1] if state.pipeline and state.pipeline[-1][0] == 'get' \
                                             else '__call__'
 
@@ -316,44 +327,44 @@ class Telekinesis():
 
             try:
                 if session.compile_signatures and check_signature(signature):
-                    class Telekinesis_(Telekinesis):
-                        @makefun.with_signature(signature,
-                                                func_name=method_name,
-                                                doc=docstring if method_name == '__call__' else None,
-                                                module_name='telekinesis.telekinesis')
-                        def __call__(self, *args, **kwargs):
-                            state = self._state.clone()
-                            state.pipeline.append(('call', (args, kwargs)))
-
-                            return Telekinesis._from_state(self._target, self._session, state, self)
-                            # self._state.pipeline.append(('call', (args, kwargs)))
-                            # return self
+                    Telekinesis_ = callable_subclass(signature, method_name, docstring)
                 else:
-                    raise Exception
+                    Telekinesis_ = callable_subclass('(self, *args, **kwargs)', method_name, docstring)
             except:
-                if session.compile_signatures and check_signature(signature):
-                    logging.getLogger(__name__).info('Could not compile signature %s for %s', signature, method_name)
-                
-                class Telekinesis_(Telekinesis):
-                        @makefun.with_signature('(self, *args, **kwargs)',
-                                                func_name=method_name,
-                                                doc=docstring if method_name == '__call__' else None,
-                                                module_name='telekinesis.telekinesis')
-                        def __call__(self, *args, **kwargs):
-                            self._state.pipeline.append(('call', (args, kwargs)))
-                            return self
+                Telekinesis_ = callable_subclass('(self, *args, **kwargs)', method_name, docstring)
 
-                sys.stderr = stderr
+            sys.stderr = stderr
 
-            out = Telekinesis_(target, session, parent)._update_state(state)
-            if method_name == '__call__':
-                out.__doc__ = state.doc
-            else:
-                out.__doc__ = docstring
-
-            return out
         else:
-            return Telekinesis(target, session, parent)._update_state(state)
+            Telekinesis_ = Telekinesis
+        
+        if method_name == '__call__':
+            def dumblemethod(self, method, key):
+                state = self._state.clone()
+                state.pipeline.append(('get', method))
+                state.pipeline.append(('call', ((key,), {})))
+                return Telekinesis._from_state(self._target, self._session, state, self)
+
+            def setitem(self, key, value):
+                state = self._state
+                state.pipeline.append(('get', '__setitem__'))
+                state.pipeline.append(('call', ((key, value), {})))
+                return Telekinesis._from_state(self._target, self._session, state, self)
+
+            if '__getitem__' in state.methods:
+                Telekinesis_.__getitem__ = partialmethod(dumblemethod, '__getitem__')
+            if '__add__' in state.methods:
+                Telekinesis_.__add__ = partialmethod(dumblemethod, '__getitem__')
+            if '__mul__' in state.methods:
+                Telekinesis_.__mul__ = partialmethod(dumblemethod, '__getitem__')
+            if '__setitem__' in state.methods:
+                Telekinesis_.__setitem__ = setitem
+
+        out = Telekinesis_(target, session, parent)._update_state(state)
+        out.__doc__ = state.doc if method_name == '__call__' else docstring
+
+        return out
+
 
 def check_signature(signature):
     return not ('\n' in signature or \
