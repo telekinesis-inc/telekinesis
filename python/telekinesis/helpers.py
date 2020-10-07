@@ -20,7 +20,7 @@ async def authenticate(url, print_callback=print, **kwargs):
     assert bid == c.broker_id
     entrypoint = Telekinesis(Route(**b['entrypoint']), s)
 
-    user = await entrypoint(print_callback, **kwargs)
+    user = await entrypoint._call(print_callback, **kwargs)
 
     if not user:
         raise Exception('Failed to authenticate')

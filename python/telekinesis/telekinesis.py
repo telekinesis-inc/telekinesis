@@ -13,10 +13,10 @@ from .client import Route, Channel
 
 class State:
     def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None):
-        self.attributes = attributes
-        self.methods = methods
+        self.attributes = attributes or []
+        self.methods = methods or {}
         self.pipeline = pipeline or []
-        self.repr = repr
+        self.repr = repr or ''
         self.doc = doc
 
     def to_dict(self):
@@ -38,7 +38,7 @@ class State:
         attributes, methods, repr_ = [], {}, ''
         
         for attribute_name in dir(target):
-            if attribute_name[0] != '_'  or attribute_name in ['__getitem__', '__setitem__', '__add__', '__mul__']:
+            if attribute_name[0] != '_'  or attribute_name in ['__call__', '__getitem__', '__setitem__', '__add__', '__mul__']:
                 try:
                     if isinstance(target, type):
                         target_attribute = target.__getattribute__(target, attribute_name)
@@ -196,6 +196,12 @@ class Telekinesis():
         
         return route
 
+    def _call(self, *args, **kwargs):
+        state = self._state.clone()
+        state.pipeline.append(('call', (args, kwargs)))
+
+        return Telekinesis._from_state(self._target, self._session, state, self)
+
     async def _execute(self, route=None, listener=None, pipeline=None):
         if not pipeline:
             pipeline = []
@@ -305,10 +311,7 @@ class Telekinesis():
                                         doc=docstring if method_name == '__call__' else None,
                                         module_name='telekinesis.telekinesis')
                 def __call__(self, *args, **kwargs):
-                    state = self._state.clone()
-                    state.pipeline.append(('call', (args, kwargs)))
-
-                    return Telekinesis._from_state(self._target, self._session, state, self)
+                    return self._call(*args, **kwargs)
             
             return Telekinesis_
 
@@ -339,7 +342,7 @@ class Telekinesis():
             Telekinesis_ = Telekinesis
         
         if method_name == '__call__':
-            def dumblemethod(self, method, key):
+            def dundermethod(self, method, key):
                 state = self._state.clone()
                 state.pipeline.append(('get', method))
                 state.pipeline.append(('call', ((key,), {})))
@@ -352,11 +355,11 @@ class Telekinesis():
                 return Telekinesis._from_state(self._target, self._session, state, self)
 
             if '__getitem__' in state.methods:
-                Telekinesis_.__getitem__ = partialmethod(dumblemethod, '__getitem__')
+                Telekinesis_.__getitem__ = partialmethod(dundermethod, '__getitem__')
             if '__add__' in state.methods:
-                Telekinesis_.__add__ = partialmethod(dumblemethod, '__getitem__')
+                Telekinesis_.__add__ = partialmethod(dundermethod, '__getitem__')
             if '__mul__' in state.methods:
-                Telekinesis_.__mul__ = partialmethod(dumblemethod, '__getitem__')
+                Telekinesis_.__mul__ = partialmethod(dundermethod, '__getitem__')
             if '__setitem__' in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
