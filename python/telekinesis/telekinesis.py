@@ -166,7 +166,7 @@ class Telekinesis():
     async def _handle(self, listener, channel, reply, payload):
         try:
             pipeline = self._decode(payload.get('pipeline'), reply.session)
-            self._logger.info('%s called %s', reply.session[:4], pipeline)
+            self._logger.info('%s called %s', reply.session[:4], len(pipeline))
             ret = await self._execute(reply, listener, pipeline)
             
             await channel.send(reply, {
@@ -236,12 +236,13 @@ class Telekinesis():
 
         target = self._target
         for action, arg in pipeline:
-            self._logger.info('%s %s %s', action, arg, target)
             if action == 'get':
+                self._logger.info('%s %s %s', action, arg, target)
                 if arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']:
                     raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
+                self._logger.info('%s %s', action, target)
                 ar, kw = arg
                 args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
                 

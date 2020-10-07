@@ -235,9 +235,9 @@ class Channel:
                 if len(self.chunks[mid]) == n:
                     chunks = self.chunks.pop(mid)
                     payload = b''.join(chunks[ii] for ii in range(n))
-                    if payload[0] == b'\x00':
+                    if payload[0] == 0:
                         self.messages.appendleft((source, bson.loads(payload[1:])))
-                    elif payload[0] == b'\xff':
+                    elif payload[0] == 255:
                         self.messages.appendleft((source, bson.loads(zlib.decompress(payload[1:]))))
                     else:
                         raise Exception('Received message with different encoding')
