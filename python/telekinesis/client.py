@@ -5,7 +5,7 @@ import os
 import asyncio
 import bson
 import zlib
-from collections import deque
+from collections import deque, OrderedDict
 
 import websockets
 import ujson
@@ -14,28 +14,36 @@ from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignat
 
 class Connection:
     def __init__(self, session, url='ws://localhost:8776'):
+        self.MAX_PAYLOAD_LEN = 2**19
+        self.MAX_COMPRESSION_LEN = 2**19
+        self.SUGGESTED_MAX_OUTBOX = 2**4
+        self.RESEND_TIMEOUT = 2 # sec
+        self.MAX_SEND_RETRIES = 3
+
         self.session = session
         self.url = url
         self.logger = logging.getLogger(__name__)
         self.websocket = None
         self.t_offset = 0
-        self.MAX_PAYLOAD_LEN = 2**19
-        self.MAX_COMPRESSION_LEN = 2**22
         self.broker_id = None
-        self.lock = asyncio.Event()
+
+        self.is_connnecting_lock = asyncio.Event()
+        self.awaiting_ack = OrderedDict()
+        self.out_queue = deque()
+
         session.connections.add(self)
 
         self.listener = asyncio.get_event_loop().create_task(self.listen())
 
     async def reconnect(self):
-        if self.lock.is_set():
-            self.lock.clear()
+        if self.is_connnecting_lock.is_set():
+            self.is_connnecting_lock.clear()
             if self.listener:
                 self.listener.cancel()
 
             self.listener = asyncio.get_event_loop().create_task(self.listen())
 
-        await self.lock.wait()
+        await self.is_connnecting_lock.wait()
 
     async def _connect(self):
         if self.websocket:
@@ -61,26 +69,80 @@ class Connection:
 
         self.broker_id = broker_id
         
-        self.lock.set()
+        headers = []
+        for token, prev_token in self.session.issued_tokens.values():
+            headers.append(('token', ('issue', token.encode(), prev_token and prev_token.encode())))
+        for channel in self.session.channels.values():
+            listen_dict = channel.route.to_dict()
+            listen_dict['is_public'] = channel.is_public
+            listen_dict.pop('tokens')
+            headers.append(('listen', listen_dict))
+        await self.send(headers)
+
+        self.is_connnecting_lock.set()
 
         return self
-        
-    async def send(self, header, payload=b''):
+
+    async def send(self, header, payload=b'', bundle_id=None, ack_message_id=None):
         for action, _ in header:
             self.logger.info('%s Sending %s: %s', self.session.session_key.public_serial()[:4],
                              action, len(payload) if action == 'send' else 0)
-        if not self.websocket or self.websocket.closed:
-            if self.lock.is_set():
-                await self.reconnect()
-            else:
-                await self.lock.wait()
-
-        h = ujson.dumps(header).encode()
-        m = len(h).to_bytes(2, 'big') + len(payload).to_bytes(3, 'big') + h + payload
-        t = int(time.time() - self.t_offset - 4).to_bytes(4, 'big')
-        s = self.session.session_key.sign(t + m,)
         
-        await self.websocket.send(s + t + m)
+        def encode(header, payload, bundle_id, message_id, retry):
+            h = ujson.dumps(header).encode()
+            r = (retry).to_bytes(1, 'big') + (message_id or b'')
+            m = len(h).to_bytes(2, 'big') + len(r+payload).to_bytes(3, 'big') + h + r + payload
+            t = int(time.time() - self.t_offset - 4).to_bytes(4, 'big')
+            s = self.session.session_key.sign(t + m)
+            return s, t + m
+
+        s, mm = encode(header, payload, bundle_id, ack_message_id, 255 if ack_message_id else 0)
+        message_id = s
+        
+        expect_ack = 'send' in set(a for a, _ in header) and not ack_message_id
+        if expect_ack:
+            lock = asyncio.Event()
+            if not self.awaiting_ack:
+                lock.set()
+            self.awaiting_ack[message_id or s] = (header, bundle_id, lock)
+
+        for retry in range(self.MAX_SEND_RETRIES):
+            if not self.websocket or self.websocket.closed:
+                if self.is_connnecting_lock.is_set():
+                    await self.reconnect()
+                else:
+                    await self.is_connnecting_lock.wait()
+
+            await self.websocket.send(s + mm)
+            
+            if not expect_ack or await self.expect_ack(message_id, lock):
+                return
+
+            if retry < (self.MAX_SEND_RETRIES - 1): 
+                s, mm = encode(header, payload, bundle_id, message_id, retry)
+
+        self.clear(bundle_id)
+        raise Exception('Max send retries reached')
+
+    async def expect_ack(self, message_id, lock):
+        await lock.wait()
+        if message_id not in self.awaiting_ack:
+            return True
+        lock.clear()
+        try:
+            await asyncio.wait_for(lock.wait(), self.RESEND_TIMEOUT)
+        except asyncio.TimeoutError:
+            lock.set()
+        if message_id not in self.awaiting_ack:
+            return True
+
+        return False
+
+    def clear(self, bundle_id):
+        if bundle_id:
+            for k, v in self.awaiting_ack.items():
+                if v[2] == bundle_id:
+                    self.awaiting_ack.pop(k)
 
     async def listen(self):
         n_tries = 0
@@ -93,7 +155,7 @@ class Connection:
             except Exception:
                 self.logger.error('Connection.listen', exc_info=True)
             
-            self.lock.clear()
+            self.is_connnecting_lock.clear()
             await asyncio.sleep(1)
 
             if n_tries > 10:
@@ -102,10 +164,10 @@ class Connection:
             
     async def recv(self):
         if not self.websocket or self.websocket.closed:
-            if self.lock.is_set():
+            if self.is_connnecting_lock.is_set():
                 await self.reconnect()
             else:
-                await self.lock.wait()
+                await self.is_connnecting_lock.wait()
 
         message = await self.websocket.recv()
 
@@ -115,16 +177,35 @@ class Connection:
 
             len_h, len_p = [int.from_bytes(x, 'big') for x in [message[68:70], message[70:73]]]
             header = ujson.loads(message[73:73+len_h])
-            payload = message[73+len_h:73+len_h+len_p]
+            full_payload = message[73+len_h:73+len_h+len_p]
             for action, content in header:
                 self.logger.info('%s Received %s: %s', self.session.session_key.public_serial()[:4], 
-                                 action, len(payload) if action == 'send' else 0)
+                                 action, len(full_payload) if action == 'send' else 0)
                 if action == 'send':
                     source, destination = Route(**content['source']), Route(**content['destination'])
                     PublicKey(source.session).verify(signature, message[64:])
                     if self.session.channels.get(destination.channel):
                         channel = self.session.channels.get(destination.channel)
-                        channel.handle_message(source, destination, payload)
+                        if full_payload[0] == 255:
+                            self.ack(source.session, full_payload[1:65])
+                        else:
+                            ret_signature = signature if full_payload[0] == 0 else full_payload[1:65]
+                            payload = full_payload[1:] if full_payload[0] == 0 else full_payload[65:]
+                            await self.send((('send', {'destination': content['source'], 'source': content['destination']}), ), 
+                                            b'', None, ret_signature)
+                            # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
+                            channel.handle_message(source, destination, payload)
+
+    def ack(self, source_id, message_id):
+        # print(self.session.session_key.public_serial()[:4], 'received ack', message_id[:4], 'from', source_id[:4])
+        header = self.awaiting_ack.get(message_id, [[]])[0]
+        for action, content in header:
+            if action == 'send':
+                if content['destination']['session'] == source_id:
+                    t = self.awaiting_ack.pop(message_id)
+                    t[2].set()
+                    if self.awaiting_ack:
+                        self.awaiting_ack[list(self.awaiting_ack.keys())[0]][2].set()
 
 class Session:
     def __init__(self, session_key_file=None, compile_signatures=True):
@@ -162,7 +243,7 @@ class Session:
                       receiver, asset, token_type, max_depth)
         signature = token.sign(self.session_key)
         
-        self.issued_tokens[signature] = token
+        self.issued_tokens[signature] = token, prev_token
         return ('token', ('issue', token.encode(), prev_token and prev_token.encode()))
 
     def revoke_token(self, token_id):
@@ -186,9 +267,13 @@ class Session:
         route.tokens.append(token_header[1][1])
         return token_header
     
-    async def send(self, header, payload=b''):
+    def clear(self, bundle_id):
         for connection in self.connections:
-            await connection.send(header, payload)
+            connection.clear(bundle_id)
+
+    async def send(self, header, payload=b'', bundle_id=None):
+        for connection in self.connections:
+            await connection.send(header, payload, bundle_id)
 
 class Channel:
     def __init__(self, session, channel_key_file=None, is_public=False):
@@ -211,10 +296,8 @@ class Channel:
 
     def handle_message(self, source, destination, raw_payload):
         if self.validate_token_chain(source.session, destination.tokens):
-
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
-
 
             if payload[:4] == b'\x00'*4:
                 if payload[4] == 0:
@@ -258,11 +341,27 @@ class Channel:
 
         return self
     
-    async def send(self, destination, payload_obj, allow_reply=False):
+    async def send(self, destination, payload_obj):
+        def encrypt_slice(payload, max_payload, shared_key, mid, n, i):
+            if i < n:
+                if n == 1:
+                    chunk = b'\x00'*4 + payload
+                else:
+                    if n > 2**16:
+                        raise Exception(f'Payload size {len(payload)/2**20} MiB too large')
+                    chunk = i.to_bytes(2, 'big') + n.to_bytes(2, 'big') + mid + payload[i*max_payload:(i+1)*max_payload]
+                
+                nonce = os.urandom(16)
+                yield nonce + shared_key.encrypt(chunk, nonce)
+                yield from encrypt_slice(payload, max_payload, shared_key, mid, n, i+1)
+        
+        async def execute(header, encrypted_slice_generator, mid):
+            for encrypted_slice in encrypted_slice_generator:
+                await self.execute(header, encrypted_slice, mid)
+
         source_route = self.route.clone()
-        if allow_reply:
-            self.header_buffer.append(self.session.extend_route(source_route, destination.session))
-            self.listen()
+        self.header_buffer.append(self.session.extend_route(source_route, destination.session))
+        self.listen()
         
         payload = bson.dumps(payload_obj)
 
@@ -273,34 +372,30 @@ class Channel:
         else:
             payload = b'\x00' + payload
 
-        max_payload = list(self.session.connections)[0].MAX_PAYLOAD_LEN
+        conn = list(self.session.connections)[0]
 
-        if len(payload) < max_payload:
-            chunks = [b'\x00'*4 + payload]
-        else:
-            mid = os.urandom(4)
-            n = (len(payload) - 1) // max_payload + 1
-            if n > 2**16:
-                raise Exception(f'Payload size {len(payload)/2**20} MiB too large')
-            chunks = [i.to_bytes(2, 'big') + n.to_bytes(2, 'big') + mid + payload[i*max_payload: (i+1)*max_payload]
-                      for i in range(n)]
+        max_payload = conn.MAX_PAYLOAD_LEN
+        max_outbox = conn.SUGGESTED_MAX_OUTBOX * len(self.session.connections)
 
-        tasks = []
+        mid = os.urandom(4)
         shared_key = SharedKey(self.channel_key, PublicKey(destination.channel))
 
         header = ('send', {'source': source_route.to_dict(), 'destination': destination.to_dict()})
-        for chunk in chunks:
-            nonce = os.urandom(16)
-            raw_payload = nonce + shared_key.encrypt(chunk, nonce)
 
-            tasks.append(self.execute(header, raw_payload))
+        n = (len(payload) - 1) // max_payload + 1
+        n_tasks = min(n, max_outbox)
+        gen = encrypt_slice(payload, max_payload, shared_key, mid, n, 0)
         
-        await asyncio.gather(*tasks)
+        try:
+            await asyncio.gather(*(execute(header, gen, mid) for _ in range(n_tasks)))
+        except asyncio.CancelledError:
+            self.session.clear(mid)
+            raise asyncio.CancelledError
 
         return self
 
-    async def execute(self, header=None, payload=b''):
-        await self.session.send([h for h in (self.header_buffer + [header]) if h], payload)
+    async def execute(self, header=None, payload=b'', bundle_id=None):
+        await self.session.send([h for h in (self.header_buffer + [header]) if h], payload, bundle_id)
         self.header_buffer = []
 
         return self

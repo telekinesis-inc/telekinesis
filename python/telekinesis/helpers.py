@@ -16,7 +16,7 @@ async def authenticate(url, print_callback=print, **kwargs):
     s = Session()
     c = Connection(s, b['url'])
 
-    await c.lock.wait()
+    await c.is_connnecting_lock.wait()
     assert bid == c.broker_id
     entrypoint = Telekinesis(Route(**b['entrypoint']), s)
 

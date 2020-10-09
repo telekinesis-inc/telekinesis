@@ -47,8 +47,7 @@ class Connection:
 
             self.session.connections.remove(self)
 
-            if self in self.session.broker_connections:
-                self.session.broker_connections.remove(self)
+            self.session.broker_connections.pop(self, None)
 
             if not self.session.channels and not self.session.broker_connections:
                 sessions.pop(self.session.session_id)
@@ -433,7 +432,7 @@ class Peer(Connection):
             except Exception:
                 self.logger.error('Peer.listen', exc_info=True)
             finally:
-                self.close(self.broker_sessions)
+                await self.close(self.broker_sessions)
             
             await asyncio.sleep(1)
             if n_tries > 10:
