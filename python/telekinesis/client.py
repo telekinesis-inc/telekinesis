@@ -46,6 +46,7 @@ class Connection:
         await self.is_connnecting_lock.wait()
 
     async def _connect(self):
+        self.logger.info('%s connecting', self.session.session_key.public_serial()[:4])
         if self.websocket:
             await self.websocket.close()
 
@@ -84,9 +85,8 @@ class Connection:
         return self
 
     async def send(self, header, payload=b'', bundle_id=None, ack_message_id=None):
-        for action, _ in header:
-            self.logger.info('%s Sending %s: %s', self.session.session_key.public_serial()[:4],
-                             action, len(payload) if action == 'send' else 0)
+        self.logger.info('%s sending: %s %s', self.session.session_key.public_serial()[:4],
+                         ' '.join(h[0] for h in header), len(payload))
         
         def encode(header, payload, bundle_id, message_id, retry):
             h = ujson.dumps(header).encode()
@@ -106,23 +106,30 @@ class Connection:
                 lock.set()
             self.awaiting_ack[message_id or s] = (header, bundle_id, lock)
 
-        for retry in range(self.MAX_SEND_RETRIES):
+        for retry in range(self.MAX_SEND_RETRIES + 1):
             if not self.websocket or self.websocket.closed:
+                self.logger.info('%s reconnecting during send retry %d', 
+                                 self.session.session_key.public_serial()[:4], retry)
                 if self.is_connnecting_lock.is_set():
                     await self.reconnect()
                 else:
                     await self.is_connnecting_lock.wait()
 
-            await self.websocket.send(s + mm)
+            try:
+                await self.websocket.send(s + mm)
+            except:
+                self.logger.error('%s Connection.send', self.session.session_key.public_serial()[:4], exc_info=True)
+                continue
             
             if not expect_ack or await self.expect_ack(message_id, lock):
                 return
 
-            if retry < (self.MAX_SEND_RETRIES - 1): 
+            if retry < (self.MAX_SEND_RETRIES): 
                 s, mm = encode(header, payload, bundle_id, message_id, retry)
+                self.logger.info('%s retrying send %d', self.session.session_key.public_serial()[:4], retry)
+                # await asyncio.sleep(1)
 
-        self.clear(bundle_id)
-        raise Exception('Max send retries reached')
+        raise Exception('%s Max send retries reached' % self.session.session_key.public_serial()[:4])
 
     async def expect_ack(self, message_id, lock):
         await lock.wait()
@@ -140,9 +147,13 @@ class Connection:
 
     def clear(self, bundle_id):
         if bundle_id:
+            self.logger.info('%s clearing %s', self.session.session_key.public_serial()[:4], bundle_id[:4])
+            ks = []
             for k, v in self.awaiting_ack.items():
-                if v[2] == bundle_id:
-                    self.awaiting_ack.pop(k)
+                if v[1] == bundle_id:
+                    ks.append(k)
+            for k in ks:
+                self.awaiting_ack.pop(k)
 
     async def listen(self):
         n_tries = 0
@@ -153,13 +164,13 @@ class Connection:
                     await self.recv()
                     n_tries = 0
             except Exception:
-                self.logger.error('Connection.listen', exc_info=True)
+                self.logger.error('%s Connection.listen', self.session.session_key.public_serial()[:4], exc_info=True)
             
             self.is_connnecting_lock.clear()
             await asyncio.sleep(1)
 
             if n_tries > 10:
-                raise Exception('Max tries reached')
+                raise Exception('%s Max tries reached' % self.session.session_key.public_serial()[:4])
             n_tries += 1
             
     async def recv(self):
@@ -178,9 +189,9 @@ class Connection:
             len_h, len_p = [int.from_bytes(x, 'big') for x in [message[68:70], message[70:73]]]
             header = ujson.loads(message[73:73+len_h])
             full_payload = message[73+len_h:73+len_h+len_p]
+            self.logger.info('%s received: %s %s', self.session.session_key.public_serial()[:4], 
+                             ' '.join(h[0] for h in header), len(full_payload))
             for action, content in header:
-                self.logger.info('%s Received %s: %s', self.session.session_key.public_serial()[:4], 
-                                 action, len(full_payload) if action == 'send' else 0)
                 if action == 'send':
                     source, destination = Route(**content['source']), Route(**content['destination'])
                     PublicKey(source.session).verify(signature, message[64:])
@@ -391,6 +402,8 @@ class Channel:
         except asyncio.CancelledError:
             self.session.clear(mid)
             raise asyncio.CancelledError
+        finally:
+            self.session.clear(mid)
 
         return self
 

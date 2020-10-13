@@ -40,22 +40,25 @@ class Connection:
 
     async def close(self, sessions):
         try:
+            await self.websocket.close()
             for channel in self.channels:
                 channel.connections.remove(self)
                 if not channel.connections:
                     self.session.channels.pop(channel.channel_id)
 
-            self.session.connections.remove(self)
+            if self in self.session.connections: 
+                self.session.connections.remove(self)
 
             self.session.broker_connections.pop(self, None)
 
             if not self.session.channels and not self.session.broker_connections:
-                sessions.pop(self.session.session_id)
+                sessions.pop(self.session.session_id, None)
         
             await asyncio.gather(*(x for x in self.tasks if x.done()))
             [x.cancel() for x in self.tasks if not x.done()]
         except Exception:
-            self.logger.error('Closing Connection', exc_info=True)
+            self.logger.error('Exception when closing %s', self.session.session_id[:4], exc_info=True)
+
 class Session:
     def __init__(self, session_id):
         self.session_id = session_id
@@ -171,25 +174,32 @@ class Broker:
                     connection.tasks.add(asyncio.get_event_loop().create_task(self.handle_message(connection, message)))
 
         except Exception:
-            self.logger.error('Broker.handle_connection', exc_info=True)
+            self.logger.error('%s .handle_connection', connection.session.session_id[:4], exc_info=True)
 
         finally:
             self.logger.info ('%s disconnected', connection.session.session_id[:4])
             if connection:
                 await connection.close(self.sessions)
+
     async def handle_message(self, connection, message):
-        headers = self.decode_header(message)
-        for action, args in headers:
-            if action == 'listen':
-                self.handle_listen(connection, **args)
-            if action == 'token':
-                await self.handle_tokens(connection, *args)
-            if action == 'broker':
-                self.handle_broker_action(connection, args)
-            if action == 'send':
-                await self.handle_send(connection, message, **args)
-            if action == 'close':
-                self.handle_close(connection, **args)
+        try:
+            headers = self.decode_header(message)
+            for action, args in headers:
+                if action == 'listen':
+                    self.handle_listen(connection, **args)
+                if action == 'token':
+                    await self.handle_tokens(connection, *args)
+                if action == 'broker':
+                    self.handle_broker_action(connection, args)
+                if action == 'send':
+                    await self.handle_send(connection, message, **args)
+                if action == 'close':
+                    self.handle_close(connection, **args)
+
+        except Exception:
+            self.logger.error('%s .handle_message', connection.session.session_id[:4], exc_info=True)
+            self.logger.info ('%s disconnected', connection.session.session_id[:4])
+            await connection.close(self.sessions)
 
     async def handle_send(self, connection, message, source, destination):
         self.logger.info('send %s %s ??? %s ??? %s %s', source['session'][:4], source['channel'][:4],
@@ -260,7 +270,8 @@ class Broker:
             tokens = [Token.decode(x) for x in args if x]
             token = tokens[0]
             if connection.session.session_id == token.issuer:
-                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                self.logger.info('tokens %s %s -> %s: %s (%s)', token.issuer[:4], action, 
+                                 token.signature[:4], str(token.receiver[:4]), token.asset[:4])
                 if token.token_type == 'root':
                     connection.session.active_tokens[token.signature] = token
                 elif token.token_type == 'extension':
