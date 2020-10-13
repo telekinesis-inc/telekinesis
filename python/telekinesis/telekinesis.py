@@ -210,13 +210,12 @@ class Telekinesis():
         self._state.pipeline.clear()
         
         if isinstance(self._target, Route):
-            new_channel = Channel(self._session)
-            await new_channel.send(
-                self._target,
-                {'pipeline': self._encode(pipeline, self._target.session, Listener(new_channel))})
+            async with Channel(self._session) as new_channel:
+                await new_channel.send(
+                    self._target,
+                    {'pipeline': self._encode(pipeline, self._target.session, Listener(new_channel))})
 
-            _, out = await new_channel.recv()
-            await new_channel.close()
+                _, out = await new_channel.recv()
             
             if 'error' in out:
                 raise Exception(out['error'])

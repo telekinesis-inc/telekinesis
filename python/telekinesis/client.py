@@ -257,9 +257,14 @@ class Session:
         self.issued_tokens[signature] = token, prev_token
         return ('token', ('issue', token.encode(), prev_token and prev_token.encode()))
 
-    def revoke_token(self, token_id):
-        self.issued_tokens.pop(token_id)
-        return ('token', ('revoke', token_id))
+    def revoke_tokens(self, asset):
+        children = [tid for tid, t in self.issued_tokens.items() if t[0].asset == asset]
+        headers = [h for hs in [self.revoke_tokens(tid) for tid in children] for h in hs]
+
+        tokens = self.issued_tokens.pop(asset, None)
+        if tokens:
+            return [('token', ('revoke', tokens[0].signature))] + headers
+        return headers
     
     def extend_route(self, route, receiver, max_depth=None):
 
@@ -418,6 +423,9 @@ class Channel:
 
     def close(self):
         self.header_buffer.append(('close', self.route.to_dict()))
+        self.header_buffer += self.session.revoke_tokens(self.channel_key.public_serial())
+
+        self.session.channels.pop(self.channel_key.public_serial(), None)
 
         return self
 
@@ -451,6 +459,12 @@ class Channel:
                     continue
             return False
         return False
+    
+    async def __aenter__(self):
+        return self.listen()
+    
+    async def __aexit__(self, *args):
+        return await self.close()
 
 class Route:
     def __init__(self, brokers, session, channel, tokens=None):
