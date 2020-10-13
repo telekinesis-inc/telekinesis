@@ -29,7 +29,6 @@ class Connection:
 
         self.is_connnecting_lock = asyncio.Event()
         self.awaiting_ack = OrderedDict()
-        self.out_queue = deque()
 
         session.connections.add(self)
 
@@ -101,10 +100,17 @@ class Connection:
         
         expect_ack = 'send' in set(a for a, _ in header) and not ack_message_id
         if expect_ack:
+            while True: # Clearing the skeletons in the closet 
+                if self.awaiting_ack:
+                    target = list(self.awaiting_ack.values())[0]
+                    if target[3] < (time.time() - (1 + self.MAX_SEND_RETRIES) * self.RESEND_TIMEOUT):
+                        self.clear(target[1])
+                        continue
+                break
             lock = asyncio.Event()
             if not self.awaiting_ack:
                 lock.set()
-            self.awaiting_ack[message_id or s] = (header, bundle_id, lock)
+            self.awaiting_ack[message_id or s] = (header, bundle_id, lock, time.time())
 
         for retry in range(self.MAX_SEND_RETRIES + 1):
             if not self.websocket or self.websocket.closed:
@@ -118,7 +124,7 @@ class Connection:
             try:
                 await self.websocket.send(s + mm)
             except:
-                self.logger.error('%s Connection.send', self.session.session_key.public_serial()[:4], exc_info=True)
+                self.logger.info('%s Connection.send', self.session.session_key.public_serial()[:4], exc_info=True)
                 continue
             
             if not expect_ack or await self.expect_ack(message_id, lock):
@@ -164,7 +170,7 @@ class Connection:
                     await self.recv()
                     n_tries = 0
             except Exception:
-                self.logger.error('%s Connection.listen', self.session.session_key.public_serial()[:4], exc_info=True)
+                self.logger.info('%s Connection.listen', self.session.session_key.public_serial()[:4], exc_info=True)
             
             self.is_connnecting_lock.clear()
             await asyncio.sleep(1)

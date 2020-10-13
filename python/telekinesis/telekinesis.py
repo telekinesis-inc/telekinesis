@@ -210,6 +210,7 @@ class Telekinesis():
         self._state.pipeline.clear()
         
         if isinstance(self._target, Route):
+            out = {}
             async with Channel(self._session) as new_channel:
                 await new_channel.send(
                     self._target,
