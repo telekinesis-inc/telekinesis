@@ -93,18 +93,19 @@ class Listener:
         return self
 
     async def listen(self):
-        try:
-            await self.channel.listen()
-            while True:
-                message = await self.channel.recv()
+        while True:
+            try:
+                await self.channel.listen()
+                while True:
+                    message = await self.channel.recv()
 
-                self.current_tasks.add(asyncio.get_event_loop().create_task(
-                    self.coro_callback(self, self.channel, *message)))
+                    self.current_tasks.add(asyncio.get_event_loop().create_task(
+                        self.coro_callback(self, self.channel, *message)))
 
-                await asyncio.gather(*(x for x in self.current_tasks if x.done()))
-                self.current_tasks = set(x for x in self.current_tasks if not x.done())
-        except:
-            logging.getLogger(__name__).error('', exc_info=True)
+                    await asyncio.gather(*(x for x in self.current_tasks if x.done()))
+                    self.current_tasks = set(x for x in self.current_tasks if not x.done())
+            except:
+                logging.getLogger(__name__).error('', exc_info=True)
 
 class Telekinesis():
     def __init__(self, target, session, parent=None):

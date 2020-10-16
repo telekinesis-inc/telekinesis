@@ -15,7 +15,7 @@ from .client import Route
 
 class Connection:
     def __init__(self, websocket):
-        self.MIN_CLIENT_VERSION = '0.1.0a14'
+        self.MIN_CLIENT_VERSION = '0.1.0a15'
         self.websocket = websocket
         self.logger = logging.getLogger(__name__)
         self.session = None
