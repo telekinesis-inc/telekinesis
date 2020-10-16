@@ -7,8 +7,10 @@ import bson
 import zlib
 from collections import deque, OrderedDict
 from pkg_resources import get_distribution
+import hashlib
 
-import blake3
+# import blake3
+
 import websockets
 import ujson
 
@@ -100,7 +102,7 @@ class Connection:
         def encode(header, payload, bundle_id, message_id, retry):
             h = ujson.dumps(header).encode()
             r = (retry).to_bytes(1, 'big') + (message_id or b'0'*64)
-            p = blake3.blake3(payload).digest()
+            p = hashlib.sha256(payload).digest()
             m = len(h).to_bytes(2, 'big') + len(r+p+payload).to_bytes(3, 'big') + h + r + p
             t = int(time.time() - self.t_offset).to_bytes(4, 'big')
             s = self.session.session_key.sign(t + m)
@@ -222,7 +224,7 @@ class Connection:
                             await self.send((('send', {'destination': content['source'], 'source': content['destination']}), ), 
                                             b'', None, ret_signature)
                             # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
-                            if blake3.blake3(payload).digest() == full_payload[65:65+32]:
+                            if hashlib.sha256(payload).digest() == full_payload[65:65+32]:
                                 channel.handle_message(source, destination, payload)
                             else:
                                 raise Exception('Authentication Error: message payload does not match signed hash')
