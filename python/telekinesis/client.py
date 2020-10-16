@@ -6,6 +6,7 @@ import asyncio
 import bson
 import zlib
 from collections import deque, OrderedDict
+from pkg_resources import get_distribution
 
 import blake3
 import websockets
@@ -62,9 +63,15 @@ class Connection:
         pk = self.session.session_key.public_serial().encode()
 
         sent_challenge = os.urandom(32)
-        await self.websocket.send(signature + pk + sent_challenge)
+        sent_metadata = {
+            'version': get_distribution(__name__.split('.')[0]).version
+        }
+        await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
+
+        if m[:len('Incompatible')] == b'Incompatible':
+            raise Exception(m.decode())
 
         broker_signature, broker_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
         PublicKey(broker_id).verify(broker_signature, sent_challenge)
@@ -95,7 +102,7 @@ class Connection:
             r = (retry).to_bytes(1, 'big') + (message_id or b'0'*64)
             p = blake3.blake3(payload).digest()
             m = len(h).to_bytes(2, 'big') + len(r+p+payload).to_bytes(3, 'big') + h + r + p
-            t = int(time.time() - self.t_offset - 4).to_bytes(4, 'big')
+            t = int(time.time() - self.t_offset).to_bytes(4, 'big')
             s = self.session.session_key.sign(t + m)
             return s, t + m + payload
 
@@ -247,7 +254,7 @@ class Session:
         if self.seen_messages[2] != lead:
             self.seen_messages[lead].clear()
 
-        if (now - 60) <= timestamp <= now:
+        if (now - 60 + 4) <= timestamp <= now + 4:
             if signature not in self.seen_messages[0].union(self.seen_messages[1]):
                 self.seen_messages[lead].add(signature)
                 return True

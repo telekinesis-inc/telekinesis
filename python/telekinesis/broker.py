@@ -4,6 +4,8 @@ import asyncio
 import time
 import traceback
 import base64
+from packaging import version
+from pkg_resources import get_distribution
 
 import ujson
 import websockets
@@ -13,6 +15,7 @@ from .client import Route
 
 class Connection:
     def __init__(self, websocket):
+        self.MIN_CLIENT_VERSION = '0.1.0a14'
         self.websocket = websocket
         self.logger = logging.getLogger(__name__)
         self.session = None
@@ -25,7 +28,14 @@ class Connection:
         await self.websocket.send(challenge)
         m = await asyncio.wait_for(self.websocket.recv(), 15)
         
-        signature, session_id, client_challenge = m[:64], m[64:152].decode(), m[152:184]
+        signature, session_id, client_challenge, metadata_raw = m[:64], m[64:152].decode(), m[152:184], m[184:]
+        metadata = ujson.loads(metadata_raw.decode())
+
+        if version.parse(metadata['version']) < version.parse(self.MIN_CLIENT_VERSION):
+            err_message = f'Incompatible version {metadata["version"]} < {self.MIN_CLIENT_VERSION}'
+            await self.websocket.send(err_message.encode())
+            raise Exception(err_message)
+
         PublicKey(session_id).verify(signature, challenge)
 
         await self.websocket.send(broker_key.sign(client_challenge) + broker_key.public_serial().encode() + \
@@ -176,11 +186,15 @@ class Broker:
                     connection.tasks.add(asyncio.get_event_loop().create_task(self.handle_message(connection, message)))
 
         except Exception:
-            self.logger.error('%s .handle_connection', connection.session.session_id[:4], exc_info=True)
+            if connection:
+                self.logger.error('%s .handle_connection', connection.session.session_id[:4], exc_info=True)
+            else:
+                self.logger.error('Handshake error', exc_info=True)
+
 
         finally:
-            self.logger.info ('%s disconnected', connection.session.session_id[:4])
             if connection:
+                self.logger.info ('%s disconnected', connection.session.session_id[:4])
                 await connection.close(self.sessions)
 
     async def handle_message(self, connection, message):
@@ -345,7 +359,7 @@ class Broker:
         if self.seen_messages[2] != lead:
             self.seen_messages[lead].clear()
 
-        if (now - 60) <= timestamp <= now:
+        if (now - 60 + 4) <= timestamp <= now + 4:
             if signature not in self.seen_messages[0].union(self.seen_messages[1]):
                 self.seen_messages[lead].add(signature)
                 return True
@@ -397,9 +411,15 @@ class Peer(Connection):
         pk = self.broker.broker_key.public_serial().encode()
 
         sent_challenge = os.urandom(32)
-        await self.websocket.send(signature + pk + sent_challenge)
+        sent_metadata = {
+            'version': get_distribution(__name__.split('.')[0]).version
+        }
+        await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
+
+        if m[:len('Incompatible')] == b'Incompatible':
+            raise Exception(m.decode())
 
         signature, session_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
         PublicKey(session_id).verify(signature, sent_challenge)

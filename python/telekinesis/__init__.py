@@ -5,13 +5,9 @@ from .helpers import authenticate
 
 # warnings.warn('EXPERIMENTAL package. API may change. Use only in non-critical, sand-boxed applications. Submit issues at https://github.com/eneuman/camarere')
 
-from pkg_resources import get_distribution, DistributionNotFound
+from pkg_resources import get_distribution
 
-try:
-    __version__ = get_distribution(__name__).version
-except DistributionNotFound:
-     # package is not installed
-    pass
+__version__ = get_distribution(__name__).version
 
 __all__ = [
     '__version__',
