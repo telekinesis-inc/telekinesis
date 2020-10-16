@@ -227,7 +227,7 @@ class Telekinesis():
                 state.repr = out['repr']
                 return output
 
-            raise Exception
+            raise Exception('Telekinesis communication error: received unrecognized message schema')
         
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:

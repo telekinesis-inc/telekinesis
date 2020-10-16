@@ -7,6 +7,7 @@ import bson
 import zlib
 from collections import deque, OrderedDict
 
+import blake3
 import websockets
 import ujson
 
@@ -91,11 +92,12 @@ class Connection:
         
         def encode(header, payload, bundle_id, message_id, retry):
             h = ujson.dumps(header).encode()
-            r = (retry).to_bytes(1, 'big') + (message_id or b'')
-            m = len(h).to_bytes(2, 'big') + len(r+payload).to_bytes(3, 'big') + h + r + payload
+            r = (retry).to_bytes(1, 'big') + (message_id or b'0'*64)
+            p = blake3.blake3(payload).digest()
+            m = len(h).to_bytes(2, 'big') + len(r+p+payload).to_bytes(3, 'big') + h + r + p
             t = int(time.time() - self.t_offset - 4).to_bytes(4, 'big')
             s = self.session.session_key.sign(t + m)
-            return s, t + m
+            return s, t + m + payload
 
         s, mm = encode(header, payload, bundle_id, ack_message_id, 255 if ack_message_id else 0)
         message_id = s
@@ -202,18 +204,21 @@ class Connection:
             for action, content in header:
                 if action == 'send':
                     source, destination = Route(**content['source']), Route(**content['destination'])
-                    PublicKey(source.session).verify(signature, message[64:])
+                    PublicKey(source.session).verify(signature, message[64:73+len_h+65+32])
                     if self.session.channels.get(destination.channel):
                         channel = self.session.channels.get(destination.channel)
                         if full_payload[0] == 255:
                             self.ack(source.session, full_payload[1:65])
                         else:
                             ret_signature = signature if full_payload[0] == 0 else full_payload[1:65]
-                            payload = full_payload[1:] if full_payload[0] == 0 else full_payload[65:]
+                            payload = full_payload[65+32:]
                             await self.send((('send', {'destination': content['source'], 'source': content['destination']}), ), 
                                             b'', None, ret_signature)
                             # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
-                            channel.handle_message(source, destination, payload)
+                            if blake3.blake3(payload).digest() == full_payload[65:65+32]:
+                                channel.handle_message(source, destination, payload)
+                            else:
+                                raise Exception('Authentication Error: message payload does not match signed hash')
 
     def ack(self, source_id, message_id):
         # print(self.session.session_key.public_serial()[:4], 'received ack', message_id[:4], 'from', source_id[:4])
