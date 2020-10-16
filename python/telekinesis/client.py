@@ -26,6 +26,7 @@ class Connection:
         self.websocket = None
         self.t_offset = 0
         self.broker_id = None
+        self.endpoint = None
 
         self.is_connnecting_lock = asyncio.Event()
         self.awaiting_ack = OrderedDict()
@@ -64,10 +65,11 @@ class Connection:
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
 
-        broker_signature, broker_id = m[:64], m[64:152].decode()
+        broker_signature, broker_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
         PublicKey(broker_id).verify(broker_signature, sent_challenge)
 
         self.broker_id = broker_id
+        self.endpoint = Route(**metadata.get('endpoint')) if metadata.get('endpoint') else None
         
         headers = []
         for token, prev_token in self.session.issued_tokens.values():

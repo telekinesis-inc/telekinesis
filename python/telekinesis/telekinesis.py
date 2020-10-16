@@ -370,7 +370,6 @@ class Telekinesis():
 
         return out
 
-
 def check_signature(signature):
     return not ('\n' in signature or \
                 (signature != re.sub(r'(?:[^A-Za-z0-9_])lambda(?=[\)\s\:])', '', signature)))

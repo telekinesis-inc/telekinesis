@@ -19,7 +19,7 @@ class Connection:
         self.channels = set()
         self.tasks = set()
 
-    async def handshake(self, sessions, broker_key):
+    async def handshake(self, sessions, broker_key, endpoint):
         challenge = os.urandom(32) + int(time.time()).to_bytes(4, 'big')
         
         await self.websocket.send(challenge)
@@ -28,7 +28,8 @@ class Connection:
         signature, session_id, client_challenge = m[:64], m[64:152].decode(), m[152:184]
         PublicKey(session_id).verify(signature, challenge)
 
-        await self.websocket.send(broker_key.sign(client_challenge) + broker_key.public_serial().encode())
+        await self.websocket.send(broker_key.sign(client_challenge) + broker_key.public_serial().encode() + \
+                                  ujson.dumps({'endpoint': endpoint and endpoint.to_dict()}).encode())
 
         if session_id not in sessions:
             sessions[session_id] = Session(session_id)
@@ -157,6 +158,7 @@ class Broker:
     def __init__(self, broker_key_file=None):
         self.sessions = {}
         self.servers = {}
+        self.endpoint = None
         self.broker_key = PrivateKey(broker_key_file)
         self.logger = logging.getLogger(__name__)  
         self.seen_messages = (set(), set(), 0)
@@ -164,7 +166,7 @@ class Broker:
     async def handle_connection(self, websocket, _):
         connection = None
         try:
-            connection = await Connection(websocket).handshake(self.sessions, self.broker_key)
+            connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.endpoint)
             self.logger.info ('new connection %s', connection.session.session_id[:4])
 
             async for message in websocket:
@@ -302,13 +304,13 @@ class Broker:
 
     def handle_broker_action(self, connection, action):
         if action == 'open':
-            connection.session.broker_connections[connection] = Peer(connection.websocket, self.broker_key)
+            connection.session.broker_connections[connection] = Peer(connection.websocket, self)
         if action == 'close':
             connection.session.broker_sessions.pop(connection, None)
 
-    async def add_broker(self, url):
-        peer = Peer(None, self.broker_key)
-        peer.connect(url, self.sessions, self.handle_message) # This already adds the peer to self.sessions
+    async def add_broker(self, url, inherit_endpoint=False):
+        peer = Peer(None, self)
+        peer.connect(url, inherit_endpoint) # This already adds the peer to self.sessions
 
     async def check_token(self, token):
         session = self.sessions.get(token.issuer)
@@ -369,21 +371,16 @@ class Broker:
                     await self.servers.pop((server_host, server_port)).close()
 
 class Peer(Connection):
-    def __init__(self, websocket, broker_key):
+    def __init__(self, websocket, broker):
         super().__init__(websocket)
-        self.broker_key = broker_key
+        self.broker = broker
         self.t_offset = 0
-
-        self.broker_sessions = None
-        self.callback = None
         self.listener = None
+        self.url = None
 
-    def connect(self, url, sessions, callback):
+    def connect(self, url, inherit_endpoint):
         self.url = url
-        self.broker_sessions = sessions
-        self.callback = callback
-        self.listener = asyncio.get_event_loop().create_task(self.listen())
-
+        self.listener = asyncio.get_event_loop().create_task(self.listen(inherit_endpoint))
 
     async def reconnect(self):
         if self.websocket:
@@ -395,41 +392,45 @@ class Peer(Connection):
         t_broker = int.from_bytes(challenge[-4:], 'big')
         
         self.t_offset = int(time.time()) - t_broker
-        signature = self.broker_key.sign(challenge)
+        signature = self.broker.broker_key.sign(challenge)
 
-        pk = self.broker_key.public_serial().encode()
+        pk = self.broker.broker_key.public_serial().encode()
 
         sent_challenge = os.urandom(32)
         await self.websocket.send(signature + pk + sent_challenge)
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
 
-        signature, session_id = m[:64], m[64:152].decode()
+        signature, session_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
         PublicKey(session_id).verify(signature, sent_challenge)
 
+        endpoint = Route(**metadata.get('endpoint')) if metadata.get('endpoint') else None
 
         await self.send([('broker', 'open')])
 
-        return session_id
+        return session_id, endpoint
 
     async def send(self, header):
         h = ujson.dumps(header).encode()
         m = len(h).to_bytes(2, 'big') + (0).to_bytes(3, 'big') + h 
         t = int(time.time() - self.t_offset - 4).to_bytes(4, 'big')
-        s = self.broker_key.sign(t + m,)
+        s = self.broker.broker_key.sign(t + m,)
         
         await self.websocket.send(s + t + m)
 
-    async def listen(self):
+    async def listen(self, inherit_endpoint):
         n_tries = 0
         while True:
             try:
-                session_id = await self.reconnect()
+                session_id, endpoint = await self.reconnect()
 
-                if session_id not in self.broker_sessions:
-                    self.broker_sessions[session_id] = Session(session_id)
+                if session_id not in self.broker.sessions:
+                    self.broker.sessions[session_id] = Session(session_id)
                 
-                self.session = self.broker_sessions[session_id]
+                if inherit_endpoint:
+                    self.broker.endpoint = endpoint
+
+                self.session = self.broker.sessions[session_id]
                 self.session.connections.add(self)
                 self.session.broker_connections[self] = self
 
@@ -437,13 +438,13 @@ class Peer(Connection):
                     message = await self.websocket.recv()
                     await asyncio.gather(*(x for x in self.tasks if x.done()))
                     self.tasks = set(x for x in self.tasks if not x.done())
-                    self.tasks.add(asyncio.get_event_loop().create_task(self.callback(self, message)))
+                    self.tasks.add(asyncio.get_event_loop().create_task(self.broker.handle_message(self, message)))
                     n_tries = 0
 
             except Exception:
                 self.logger.error('Peer.listen', exc_info=True)
             finally:
-                await self.close(self.broker_sessions)
+                await self.close(self.broker.sessions)
             
             await asyncio.sleep(1)
             if n_tries > 10:
