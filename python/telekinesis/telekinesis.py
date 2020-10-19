@@ -228,7 +228,7 @@ class Telekinesis():
                 state.repr = out['repr']
                 return output
 
-            raise Exception('Telekinesis communication error: received unrecognized message schema')
+            raise Exception('Telekinesis communication error: received unrecognized message schema %s' % out)
         
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
@@ -279,7 +279,7 @@ class Telekinesis():
             obj = Telekinesis(arg, self._session)
             
         route = obj._delegate(receiver_id, listener)
-        return ('obj', (route.to_dict(), obj._state.to_dict()))
+        return ('obj', (route.to_dict(), self._encode(obj._state.to_dict(), receiver_id, listener)))
 
     def _decode(self, tup, caller_id=None):
         typ, obj = tup
@@ -294,15 +294,20 @@ class Telekinesis():
             return {x: self._decode(obj[x], caller_id) for x in obj}
         
         route = Route(**obj[0])
-        state = State(**obj[1])
+        state = State(**self._decode(obj[1], caller_id))
         if route.session == self._session.session_key.public_serial() and route.channel in self._session.channels:
             channel = self._session.channels.get(route.channel)
             if channel.validate_token_chain(caller_id, route.tokens):
-                return Telekinesis._from_state(channel.telekinesis._target, self._session, state, channel.telekinesis)
+                if state.pipeline:
+                    return Telekinesis._from_state(channel.telekinesis._target, 
+                                                   self._session, 
+                                                   state, 
+                                                   channel.telekinesis)
+                return channel.telekinesis._target
             else:
-                raise Exception('Unauthorized!')
+                raise Exception(f'Unauthorized! {caller_id} {route.tokens}')
 
-        return Telekinesis._from_state(route, self._session, State(**obj[1]))
+        return Telekinesis._from_state(route, self._session, state)
 
     @staticmethod
     def _from_state(target, session, state, parent=None):
@@ -360,9 +365,9 @@ class Telekinesis():
             if '__getitem__' in state.methods:
                 Telekinesis_.__getitem__ = partialmethod(dundermethod, '__getitem__')
             if '__add__' in state.methods:
-                Telekinesis_.__add__ = partialmethod(dundermethod, '__getitem__')
+                Telekinesis_.__add__ = partialmethod(dundermethod, '__add__')
             if '__mul__' in state.methods:
-                Telekinesis_.__mul__ = partialmethod(dundermethod, '__getitem__')
+                Telekinesis_.__mul__ = partialmethod(dundermethod, '__mul__')
             if '__setitem__' in state.methods:
                 Telekinesis_.__setitem__ = setitem
 

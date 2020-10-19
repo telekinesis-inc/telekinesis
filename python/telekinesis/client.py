@@ -485,8 +485,10 @@ class Channel:
     async def __aenter__(self):
         return self.listen()
     
-    async def __aexit__(self, *args):
-        return await self.close()
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+        return isinstance(exc_type, Exception)
 
 class Route:
     def __init__(self, brokers, session, channel, tokens=None):
