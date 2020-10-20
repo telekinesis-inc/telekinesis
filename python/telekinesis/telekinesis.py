@@ -19,10 +19,11 @@ class State:
         self.repr = repr or ''
         self.doc = doc
 
-    def to_dict(self):
+    def to_dict(self, mask=None):
+        mask = mask or set()
         return {
-            'attributes': self.attributes,
-            'methods': self.methods,
+            'attributes': [x for x in self.attributes if x not in mask],
+            'methods': {k: v for k, v in self.methods.items() if k not in mask},
             'pipeline': self.pipeline,
             'repr': self.repr,
             'doc': self.doc
@@ -38,7 +39,8 @@ class State:
         attributes, methods, repr_ = [], {}, ''
         
         for attribute_name in dir(target):
-            if attribute_name[0] != '_'  or attribute_name in ['__call__', '__getitem__', '__setitem__', '__add__', '__mul__']:
+            if attribute_name[0] != '_'  or attribute_name in ['__call__', '__getitem__', '__setitem__', '__add__', 
+                                                               '__mul__']:
                 try:
                     if isinstance(target, type):
                         target_attribute = target.__getattribute__(target, attribute_name)
@@ -164,6 +166,22 @@ class Telekinesis():
         
         return route
 
+    def _delegate(self, recepient_id, parent_channel=None, expose_tb=True, max_depth=None, mask=None):
+        if isinstance(self._target, Route):
+            route = self._target.clone()
+
+        else:
+            route = self._add_listener(Channel(self._session), expose_tb, max_depth, mask)
+            listener = self._listeners[route]
+
+            if not parent_channel:
+                parent_channel = listener.channel
+        
+        token_header = self._session.extend_route(route, recepient_id, max_depth)
+        parent_channel.header_buffer.append(token_header)
+        
+        return route
+
     async def _handle(self, listener, channel, reply, payload):
         try:
             pipeline = self._decode(payload.get('pipeline'), reply.session)
@@ -180,23 +198,6 @@ class Telekinesis():
             await channel.send(reply, {
                 'error': traceback.format_exc() if listener.expose_tb else ''})
     
-    def _delegate(self, recepient_id, listener=None):
-        if isinstance(self._target, Route):
-            route = self._target.clone()
-
-        else:
-            if isinstance(listener, Listener):
-                route = self._add_listener(Channel(self._session), listener.expose_tb, 
-                                        listener.max_depth, listener.mask)
-            else:
-                route = self._add_listener(Channel(self._session))
-                listener = self._listeners[route]
-        
-        token_header = self._session.extend_route(route, recepient_id, listener.max_depth)
-        listener.channel.header_buffer.append(token_header)
-        
-        return route
-
     def _call(self, *args, **kwargs):
         state = self._state.clone()
         state.pipeline.append(('call', (args, kwargs)))
@@ -239,7 +240,8 @@ class Telekinesis():
         for action, arg in pipeline:
             if action == 'get':
                 self._logger.info('%s %s %s', action, arg, target)
-                if arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']:
+                if (arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']) \
+                or arg in listener.mask:
                     raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
@@ -290,8 +292,9 @@ class Telekinesis():
             else:
                 obj = Telekinesis(arg, self._session)
                 
-            route = obj._delegate(receiver_id, listener)
-            tup = ('obj', (route.to_dict(), self._encode(obj._state.to_dict(), receiver_id, listener, traversal_stack)))
+            route = obj._delegate(receiver_id, listener.channel, listener.expose_tb, listener.max_depth, listener.mask)
+            tup = ('obj', (route.to_dict(), self._encode(obj._state.to_dict(listener.mask), receiver_id, listener, 
+                                                         traversal_stack)))
         
         traversal_stack[i] = tup
 
