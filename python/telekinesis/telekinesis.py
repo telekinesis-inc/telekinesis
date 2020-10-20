@@ -295,14 +295,12 @@ class Telekinesis():
         
         traversal_stack[i] = tup
 
-        print('encode', traversal_stack, i, '\n\n')
         if output_stack:
             traversal_stack['root'] = i
             return traversal_stack
         return i
 
     def _decode(self, input_stack, caller_id=None, root=None, output_stack=None):
-        print('decode', input_stack, root, output_stack, '\n\n')
         out = None
         if root is None:
             root = input_stack['root']
