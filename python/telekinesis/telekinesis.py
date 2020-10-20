@@ -264,50 +264,95 @@ class Telekinesis():
     def __repr__(self):
         return '\033[92m\u2248\033[0m ' + str(self._state.repr)
 
-    def _encode(self, arg, receiver_id=None, listener=None):
-        if type(arg) in (int, float, str, bytes, bool, type(None)):
-            return (type(arg).__name__, arg)
-        if type(arg) in (range, slice):
-            return (type(arg).__name__, (arg.start, arg.stop, arg.step))
-        if type(arg) in (list, tuple, set):
-            return (type(arg).__name__, [self._encode(v, receiver_id, listener) for v in arg])
-        if isinstance(arg, dict):
-            return ('dict', {x: self._encode(arg[x], receiver_id, listener) for x in arg})
-        if isinstance(arg, Telekinesis):
-            obj = arg
+    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None):
+        i = str(id(arg))
+        if traversal_stack is None:
+            traversal_stack = {}
+            output_stack = True
         else:
-            obj = Telekinesis(arg, self._session)
-            
-        route = obj._delegate(receiver_id, listener)
-        return ('obj', (route.to_dict(), self._encode(obj._state.to_dict(), receiver_id, listener)))
+            output_stack = False
+            if i in traversal_stack:
+                return i
+    
+        traversal_stack[i] = None
 
-    def _decode(self, tup, caller_id=None):
-        typ, obj = tup
-        if typ in ('int', 'float', 'str', 'bytes', 'bool', 'NoneType'):
-            return obj
-        if typ in ('range', 'slice'):
-            return {'range': range, 'slice': slice}[typ](*obj)
-        if typ in ('list', 'tuple', 'set'):
-            return {'list':list, 'tuple':tuple, 'set':set}[typ]([self._decode(v, caller_id) 
-                                                                 for v in obj])
-        if typ == 'dict':
-            return {x: self._decode(obj[x], caller_id) for x in obj}
-        
-        route = Route(**obj[0])
-        state = State(**self._decode(obj[1], caller_id))
-        if route.session == self._session.session_key.public_serial() and route.channel in self._session.channels:
-            channel = self._session.channels.get(route.channel)
-            if channel.validate_token_chain(caller_id, route.tokens):
-                if state.pipeline:
-                    return Telekinesis._from_state(channel.telekinesis._target, 
-                                                   self._session, 
-                                                   state, 
-                                                   channel.telekinesis)
-                return channel.telekinesis._target
+        if type(arg) in (int, float, str, bytes, bool, type(None)):
+            tup = (type(arg).__name__, arg)
+        elif type(arg) in (range, slice):
+            tup = (type(arg).__name__, (arg.start, arg.stop, arg.step))
+        elif type(arg) in (list, tuple, set):
+            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack) for v in arg])
+        elif isinstance(arg, dict):
+            tup = ('dict', {x: self._encode(arg[x], receiver_id, listener, traversal_stack) for x in arg})
+        else:
+            if isinstance(arg, Telekinesis):
+                obj = arg
             else:
-                raise Exception(f'Unauthorized! {caller_id} {route.tokens}')
+                obj = Telekinesis(arg, self._session)
+                
+            route = obj._delegate(receiver_id, listener)
+            tup = ('obj', (route.to_dict(), self._encode(obj._state.to_dict(), receiver_id, listener, traversal_stack)))
+        
+        traversal_stack[i] = tup
 
-        return Telekinesis._from_state(route, self._session, state)
+        print('encode', traversal_stack, i, '\n\n')
+        if output_stack:
+            traversal_stack['root'] = i
+            return traversal_stack
+        return i
+
+    def _decode(self, input_stack, caller_id=None, root=None, output_stack=None):
+        print('decode', input_stack, root, output_stack, '\n\n')
+        out = None
+        if root is None:
+            root = input_stack['root']
+            output_stack = {}
+        if root in output_stack:
+            return output_stack[root]
+
+
+        typ, obj = input_stack[root]
+        if typ in ('int', 'float', 'str', 'bytes', 'bool', 'NoneType'):
+            out = obj
+        elif typ in ('range', 'slice'):
+            out = {'range': range, 'slice': slice}[typ](*obj)
+        elif typ == 'list':
+            out = [None] * len(obj)
+            output_stack[root] = out
+            for k, v in enumerate(obj):
+                out[k] = self._decode(input_stack, caller_id, v, output_stack)
+        elif typ == 'set':
+            out = set()
+            output_stack[root] = out
+            for v in obj:
+                out.add(self._decode(input_stack, caller_id, v, output_stack))
+        elif typ == 'tuple':
+            out = tuple(self._decode(input_stack, caller_id, v, output_stack) for v in obj)
+        elif typ == 'dict':
+            out = {}
+            output_stack[root] = out
+            for k, v in obj.items():
+                out[k] = self._decode(input_stack, caller_id, v, output_stack)
+        else:
+            route = Route(**obj[0])
+            state = State(**self._decode(input_stack, caller_id, obj[1], output_stack))
+
+            if route.session == self._session.session_key.public_serial() and route.channel in self._session.channels:
+                channel = self._session.channels.get(route.channel)
+                if channel.validate_token_chain(caller_id, route.tokens):
+                    if state.pipeline:
+                        return Telekinesis._from_state(channel.telekinesis._target, 
+                                                    self._session, 
+                                                    state, 
+                                                    channel.telekinesis)
+                    out = channel.telekinesis._target
+                else:
+                    raise Exception(f'Unauthorized! {caller_id} {route.tokens}')
+            else: 
+                out = Telekinesis._from_state(route, self._session, state)
+        
+        output_stack[root] = out
+        return out
 
     @staticmethod
     def _from_state(target, session, state, parent=None):
