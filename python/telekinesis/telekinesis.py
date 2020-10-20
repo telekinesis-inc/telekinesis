@@ -241,7 +241,7 @@ class Telekinesis():
             if action == 'get':
                 self._logger.info('%s %s %s', action, arg, target)
                 if (arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']) \
-                or arg in listener.mask:
+                or arg in (listener.mask or []):
                     raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
