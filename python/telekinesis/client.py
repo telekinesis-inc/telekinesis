@@ -239,6 +239,12 @@ class Connection:
                     t[2].set()
                     if self.awaiting_ack:
                         self.awaiting_ack[list(self.awaiting_ack.keys())[0]][2].set()
+    
+    def __await__(self):
+        async def await_lock():
+            await self.is_connnecting_lock.wait()
+            return self
+        return await_lock().__await__()
 
 class Session:
     def __init__(self, session_key_file=None):

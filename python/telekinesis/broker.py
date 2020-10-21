@@ -95,7 +95,7 @@ class Session:
         return False
 
     async def clean_expecting_token(self, token):
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         self.expecting_tokens.pop(token.signature, None)
     
     async def timeout_cached_token(self, token):
@@ -121,7 +121,7 @@ class Session:
             event = asyncio.Event()
             self.expecting_channels[channel_id] = event
             try:
-                await asyncio.wait_for(event.wait(), 1)
+                await asyncio.wait_for(event.wait(), 2)
                 self.expecting_channels.pop(channel_id, None)
             except asyncio.exceptions.TimeoutError:
                 pass
@@ -178,7 +178,8 @@ class Broker:
         connection = None
         try:
             connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.endpoint)
-            self.logger.info ('new connection %s', connection.session.session_id[:4])
+            self.logger.info ('%s: new connection %s', self.broker_key.public_serial()[:4],
+                               connection.session.session_id[:4])
 
             async for message in websocket:
                 if self.check_no_repeat(message):
@@ -188,14 +189,16 @@ class Broker:
 
         except Exception:
             if connection:
-                self.logger.error('%s .handle_connection', connection.session.session_id[:4], exc_info=True)
+                self.logger.error('%s: %s .handle_connection', self.broker_key.public_serial()[:4], 
+                                  connection.session.session_id[:4], exc_info=True)
             else:
-                self.logger.error('Handshake error', exc_info=True)
+                self.logger.error('%s: Handshake error', self.broker_key.public_serial(), exc_info=True)
 
 
         finally:
             if connection:
-                self.logger.info ('%s disconnected', connection.session.session_id[:4])
+                self.logger.info ('%s: %s disconnected', self.broker_key.public_serial()[:4], 
+                                  connection.session.session_id[:4])
                 await connection.close(self.sessions)
 
     async def handle_message(self, connection, message):
@@ -214,13 +217,15 @@ class Broker:
                     self.handle_close(connection, **args)
 
         except Exception:
-            self.logger.error('%s .handle_message', connection.session.session_id[:4], exc_info=True)
-            self.logger.info ('%s disconnected', connection.session.session_id[:4])
+            self.logger.error('%s: %s .handle_message', self.broker_key.public_serial()[:4],
+                              connection.session.session_id[:4], exc_info=True)
+            self.logger.info ('%s: %s disconnected', self.broker_key.public_serial()[:4],
+                              connection.session.session_id[:4])
             await connection.close(self.sessions)
 
     async def handle_send(self, connection, message, source, destination):
-        self.logger.info('send %s %s ??? %s ??? %s %s', source['session'][:4], source['channel'][:4],
-                        str(len(message)//2**10),
+        self.logger.info('%s: send %s %s ??? %s ??? %s %s', self.broker_key.public_serial()[:4],
+                        source['session'][:4], source['channel'][:4], str(len(message)//2**10),
                         destination['session'][:4], destination['channel'][:4])
         s = Route(**source)
         d = Route(**destination)
@@ -231,17 +236,17 @@ class Broker:
 
             if dest_session.channels.get(d.channel):
                 if await dest_channel.validate_token_chain(s.session, d.tokens, self):
-                    self.logger.info('send %s %s >>> %s >>> %s %s', source['session'][:4], source['channel'][:4],
-                        str(len(message)//2**10),
-                        destination['session'][:4], destination['channel'][:4])
+                    self.logger.info('%s: send %s %s >>> %s >>> %s %s', self.broker_key.public_serial()[:4],
+                                     source['session'][:4], source['channel'][:4], str(len(message)//2**10),
+                                     destination['session'][:4], destination['channel'][:4])
 
                     for connection in dest_channel.connections:
                         await connection.websocket.send(message)
                     return
                 else:
-                    self.logger.info('send %s %s ||| %s ||| %s %s', source['session'][:4], source['channel'][:4],
-                            str(len(message)//2**10),
-                            destination['session'][:4], destination['channel'][:4])
+                    self.logger.info('%s: send %s %s ||| %s ||| %s %s', self.broker_key.public_serial()[:4],
+                                     source['session'][:4], source['channel'][:4], str(len(message)//2**10),
+                                     destination['session'][:4], destination['channel'][:4])
 
         if d.brokers:
             for broker_id in d.brokers:
@@ -258,7 +263,8 @@ class Broker:
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
-            self.logger.info('listen %s %s %s', str(connection.session.session_id[:4]), str(channel[:4]), str(is_public))
+            self.logger.info('%s: listen %s %s %s', self.broker_key.public_serial()[:4], 
+                             str(connection.session.session_id[:4]), str(channel[:4]), str(is_public))
             
             if channel not in connection.session.channels:
                 connection.session.channels[channel] = Channel(connection.session, channel, is_public)
@@ -273,7 +279,8 @@ class Broker:
     
     def handle_close(self, connection, session, channel, **kwargs):
         if session == connection.session.session_id:
-            self.logger.info('close %s %s', str(connection.session.session_id[:4]), str(channel[:4]))
+            self.logger.info('%s: close %s %s', self.broker_key.public_serial()[:4],
+                             str(connection.session.session_id[:4]), str(channel[:4]))
 
             if connection.session.channels.get(channel):
                 channel_obj = connection.session.channels.get(channel)
@@ -287,8 +294,9 @@ class Broker:
             tokens = [Token.decode(x) for x in args if x]
             token = tokens[0]
             if connection.session.session_id == token.issuer:
-                self.logger.info('tokens %s %s -> %s: %s (%s)', token.issuer[:4], action, 
-                                 token.signature[:4], str(token.receiver[:4]), token.asset[:4])
+                self.logger.info('%s: tokens %s %s -> %s: %s (%s)', self.broker_key.public_serial()[:4],
+                                 token.issuer[:4], action, token.signature[:4], str(token.receiver[:4]), 
+                                 token.asset[:4])
                 if token.token_type == 'root':
                     connection.session.active_tokens[token.signature] = token
                 elif token.token_type == 'extension':
@@ -299,22 +307,24 @@ class Broker:
         if action == 'revoke':
             token = connection.session.active_tokens.get(args[0])
             if token:
-                self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                self.logger.info('%s: tokens %s %s %s', self.broker_key.public_serial()[:4],
+                                 str(token.issuer[:4]), action, str(token.signature[:4]))
                 connection.session.active_tokens.pop(token.signature, None)
 
         if action == 'validate':
             token = Token.decode(args[0], False)
             if token.issuer in self.sessions:
-                expected_token = self.sessions[token.issuer].active_tokens.get(token.signature)
-                if expected_token and token.encode() == expected_token.encode():
+                if await self.check_token(token):
                     broker_connection = connection.session.broker_connections.get(connection)
                     if broker_connection:
-                        self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+                        self.logger.info('%s: tokens %s %s %s', self.broker_key.public_serial()[:4],
+                                         str(token.issuer[:4]), action, str(token.signature[:4]))
                         await broker_connection.send((('token', ('approve', token.encode())),))
 
         if action == 'approve':
             token = Token.decode(args[0])
-            self.logger.info('tokens %s %s %s', str(token.issuer[:4]), action, str(token.signature[:4]))
+            self.logger.info('%s: tokens %s %s %s', self.broker_key.public_serial()[:4],
+                             str(token.issuer[:4]), action, str(token.signature[:4]))
             connection.session.approve_token(token)
 
     def handle_broker_action(self, connection, action):
@@ -336,7 +346,7 @@ class Broker:
                 event = asyncio.Event()
                 session.expecting_tokens[token.signature] = (event, token)
                 session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
-                await asyncio.wait_for(event.wait(), 1)
+                await asyncio.wait_for(event.wait(), 2)
 
                 return True
         else:
@@ -347,7 +357,7 @@ class Broker:
                     break
             else:
                 try:
-                    await asyncio.wait_for(event.wait(), 1)
+                    await asyncio.wait_for(event.wait(), 2)
                 except asyncio.exceptions.TimeoutError:
                     return False
             return True
@@ -417,7 +427,7 @@ class Peer(Connection):
         }
         await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
 
-        m = await asyncio.wait_for(self.websocket.recv(), 1)
+        m = await asyncio.wait_for(self.websocket.recv(), 15)
 
         if m[:len('Incompatible')] == b'Incompatible':
             raise Exception(m.decode())
