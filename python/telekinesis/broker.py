@@ -95,7 +95,7 @@ class Session:
         return False
 
     async def clean_expecting_token(self, token):
-        await asyncio.sleep(15)
+        await asyncio.sleep(1)
         self.expecting_tokens.pop(token.signature, None)
     
     async def timeout_cached_token(self, token):
@@ -117,10 +117,11 @@ class Session:
 
     async def expect_channel(self, channel_id):
         if channel_id not in self.channels:
+            list(self.connections)[0].logger.info('awaiting channel %s', channel_id[:4])
             event = asyncio.Event()
             self.expecting_channels[channel_id] = event
             try:
-                await asyncio.wait_for(event.wait(), 15)
+                await asyncio.wait_for(event.wait(), 1)
                 self.expecting_channels.pop(channel_id, None)
             except asyncio.exceptions.TimeoutError:
                 pass
@@ -335,7 +336,7 @@ class Broker:
                 event = asyncio.Event()
                 session.expecting_tokens[token.signature] = (event, token)
                 session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
-                await asyncio.wait_for(event.wait(), 15)
+                await asyncio.wait_for(event.wait(), 1)
 
                 return True
         else:
@@ -346,7 +347,7 @@ class Broker:
                     break
             else:
                 try:
-                    await asyncio.wait_for(event.wait(), 15)
+                    await asyncio.wait_for(event.wait(), 1)
                 except asyncio.exceptions.TimeoutError:
                     return False
             return True
@@ -416,7 +417,7 @@ class Peer(Connection):
         }
         await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
 
-        m = await asyncio.wait_for(self.websocket.recv(), 15)
+        m = await asyncio.wait_for(self.websocket.recv(), 1)
 
         if m[:len('Incompatible')] == b'Incompatible':
             raise Exception(m.decode())

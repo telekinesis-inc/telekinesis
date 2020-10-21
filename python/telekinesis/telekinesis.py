@@ -81,12 +81,9 @@ class State:
         return State(attributes, methods, repr_, doc)
 
 class Listener:
-    def __init__(self, channel, expose_tb=True, max_depth=None, mask=None):
+    def __init__(self, channel):
         self.channel = channel
         self.coro_callback = None
-        self.expose_tb = expose_tb
-        self.max_depth = max_depth
-        self.mask = mask
         self.current_tasks = set()
     
     def set_callback(self, coro_callback):
@@ -110,10 +107,15 @@ class Listener:
                 logging.getLogger(__name__).error('', exc_info=True)
 
 class Telekinesis():
-    def __init__(self, target, session, parent=None):
+    def __init__(self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True,
+                 parent=None):
         self._logger = logging.getLogger(__name__)
         self._target = target
         self._session = session
+        self._mask = mask or []
+        self._expose_tb = expose_tb
+        self._max_delegation_depth = max_delegation_depth
+        self._compile_signatures = compile_signatures
         self._parent = parent
         self._listeners = {}
         if isinstance(target, Route):
@@ -128,7 +130,8 @@ class Telekinesis():
         state = self._state.clone()
         state.pipeline.append(('get', attr))
 
-        return Telekinesis._from_state(self._target, self._session, state, self)
+        return Telekinesis._from_state(self._target, self._session, state, self._mask, self._expose_tb, 
+                                       self._max_delegation_depth, self._compile_signatures, self)
 
     def _get_root_state(self):
         if self._parent:
@@ -157,27 +160,27 @@ class Telekinesis():
 
         return self
 
-    def _add_listener(self, channel, expose_tb=True, max_depth=None, mask=None):
+    def _add_listener(self, channel):
         route = channel.route
 
         channel.telekinesis = self
         
-        self._listeners[route] = Listener(channel, expose_tb, max_depth, mask).set_callback(self._handle)
+        self._listeners[route] = Listener(channel).set_callback(self._handle)
         
         return route
 
-    def _delegate(self, recepient_id, parent_channel=None, expose_tb=True, max_depth=None, mask=None):
+    def _delegate(self, recepient_id, parent_channel=None):
         if isinstance(self._target, Route):
             route = self._target.clone()
 
         else:
-            route = self._add_listener(Channel(self._session), expose_tb, max_depth, mask)
+            route = self._add_listener(Channel(self._session))
             listener = self._listeners[route]
 
             if not parent_channel:
                 parent_channel = listener.channel
         
-        token_header = self._session.extend_route(route, recepient_id, max_depth)
+        token_header = self._session.extend_route(route, recepient_id, self._max_delegation_depth)
         parent_channel.header_buffer.append(token_header)
         
         return route
@@ -196,13 +199,14 @@ class Telekinesis():
 
             self._state.pipeline.clear()
             await channel.send(reply, {
-                'error': traceback.format_exc() if listener.expose_tb else ''})
+                'error': traceback.format_exc() if self._expose_tb else ''})
     
     def _call(self, *args, **kwargs):
         state = self._state.clone()
         state.pipeline.append(('call', (args, kwargs)))
 
-        return Telekinesis._from_state(self._target, self._session, state, self)
+        return Telekinesis._from_state(self._target, self._session, state, self._mask, self._expose_tb, 
+                                       self._max_delegation_depth, self._compile_signatures, self)
 
     async def _execute(self, route=None, listener=None, pipeline=None):
         if not pipeline:
@@ -241,7 +245,7 @@ class Telekinesis():
             if action == 'get':
                 self._logger.info('%s %s %s', action, arg, target)
                 if (arg[0] == '_' and arg not in ['__getitem__', '__setitem__', '__add__', '__mul__']) \
-                or arg in (listener.mask or []):
+                or arg in (self._mask or []):
                     raise Exception('Unauthorized!')
                 target = target.__getattribute__(arg)
             if action == 'call':
@@ -290,10 +294,11 @@ class Telekinesis():
             if isinstance(arg, Telekinesis):
                 obj = arg
             else:
-                obj = Telekinesis(arg, self._session)
+                obj = Telekinesis(arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, 
+                                  self._compile_signatures)
                 
-            route = obj._delegate(receiver_id, listener.channel, listener.expose_tb, listener.max_depth, listener.mask)
-            tup = ('obj', (route.to_dict(), self._encode(obj._state.to_dict(listener.mask), receiver_id, listener, 
+            route = obj._delegate(receiver_id, listener.channel)
+            tup = ('obj', (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, 
                                                          traversal_stack)))
         
         traversal_stack[i] = tup
@@ -343,20 +348,26 @@ class Telekinesis():
                 if channel.validate_token_chain(caller_id, route.tokens):
                     if state.pipeline:
                         return Telekinesis._from_state(channel.telekinesis._target, 
-                                                    self._session, 
-                                                    state, 
-                                                    channel.telekinesis)
+                                                       self._session, 
+                                                       state,
+                                                       self._mask,
+                                                       self._expose_tb,
+                                                       self._max_delegation_depth,
+                                                       self._compile_signatures,
+                                                       channel.telekinesis)
                     out = channel.telekinesis._target
                 else:
                     raise Exception(f'Unauthorized! {caller_id} {route.tokens}')
             else: 
-                out = Telekinesis._from_state(route, self._session, state)
+                out = Telekinesis._from_state(route, self._session, state, self._mask, self._expose_tb,
+                                              self._max_delegation_depth, self._compile_signatures)
         
         output_stack[root] = out
         return out
 
     @staticmethod
-    def _from_state(target, session, state, parent=None):
+    def _from_state(target, session, state, mask=None, expose_tb=True, max_delegation_depth=None, 
+                    compile_signatures=True, parent=None):
         def callable_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):
                 @makefun.with_signature(signature,
@@ -382,7 +393,7 @@ class Telekinesis():
             sys.stderr = io.StringIO()
 
             try:
-                if session.compile_signatures and check_signature(signature):
+                if compile_signatures and check_signature(signature):
                     Telekinesis_ = callable_subclass(signature, method_name, docstring)
                 else:
                     Telekinesis_ = callable_subclass('(self, *args, **kwargs)', method_name, docstring)
@@ -400,13 +411,15 @@ class Telekinesis():
                 state = self._state.clone()
                 state.pipeline.append(('get', method))
                 state.pipeline.append(('call', ((key,), {})))
-                return Telekinesis._from_state(self._target, self._session, state, self)
+                return Telekinesis._from_state(self._target, self._session, state, self._mask, self._expose_tb,
+                                               self._max_delegation_depth, self._compile_signatures, self)
 
             def setitem(self, key, value):
                 state = self._state
                 state.pipeline.append(('get', '__setitem__'))
                 state.pipeline.append(('call', ((key, value), {})))
-                return Telekinesis._from_state(self._target, self._session, state, self)
+                return Telekinesis._from_state(self._target, self._session, state, self._mask, self._expose_tb,
+                                               self._max_delegation_depth, self._compile_signatures, self)
 
             if '__getitem__' in state.methods:
                 Telekinesis_.__getitem__ = partialmethod(dundermethod, '__getitem__')
@@ -417,7 +430,8 @@ class Telekinesis():
             if '__setitem__' in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
-        out = Telekinesis_(target, session, parent)._update_state(state)
+        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent)
+        out._update_state(state)
         out.__doc__ = state.doc if method_name == '__call__' else docstring
 
         return out

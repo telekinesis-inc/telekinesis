@@ -241,11 +241,10 @@ class Connection:
                         self.awaiting_ack[list(self.awaiting_ack.keys())[0]][2].set()
 
 class Session:
-    def __init__(self, session_key_file=None, compile_signatures=True):
+    def __init__(self, session_key_file=None):
         self.session_key = PrivateKey(session_key_file)
         self.channels = {}
         self.connections = set()
-        self.compile_signatures = compile_signatures
         self.seen_messages = (set(), set(), 0)
         self.issued_tokens = {}
 
@@ -507,3 +506,6 @@ class Route:
 
     def clone(self):
         return Route(**self.to_dict())
+
+    def __repr__(self):
+        return f'Route {self.session[:4]} {self.channel[:4]}'
