@@ -13,14 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/telekinesis-cloud/telekinesis",
     packages=setuptools.find_packages(),
-    install_requires=[
-        "websockets",
-        "cryptography",
-        "makefun",
-        "aiohttp",
-        "bson",
-        "ujson",
-    ],
+    install_requires=["websockets", "cryptography", "makefun", "aiohttp", "bson", "ujson"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

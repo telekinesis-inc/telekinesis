@@ -182,9 +182,7 @@ class Broker:
         connection = None
         try:
             connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.endpoint)
-            self.logger.info(
-                "%s: new connection %s", self.broker_key.public_serial()[:4], connection.session.session_id[:4]
-            )
+            self.logger.info("%s: new connection %s", self.broker_key.public_serial()[:4], connection.session.session_id[:4])
 
             async for message in websocket:
                 if self.check_no_repeat(message):
@@ -205,9 +203,7 @@ class Broker:
 
         finally:
             if connection:
-                self.logger.info(
-                    "%s: %s disconnected", self.broker_key.public_serial()[:4], connection.session.session_id[:4]
-                )
+                self.logger.info("%s: %s disconnected", self.broker_key.public_serial()[:4], connection.session.session_id[:4])
                 await connection.close(self.sessions)
 
     async def handle_message(self, connection, message):
@@ -232,9 +228,7 @@ class Broker:
                 connection.session.session_id[:4],
                 exc_info=True,
             )
-            self.logger.info(
-                "%s: %s disconnected", self.broker_key.public_serial()[:4], connection.session.session_id[:4]
-            )
+            self.logger.info("%s: %s disconnected", self.broker_key.public_serial()[:4], connection.session.session_id[:4])
             await connection.close(self.sessions)
 
     async def handle_send(self, connection, message, source, destination):

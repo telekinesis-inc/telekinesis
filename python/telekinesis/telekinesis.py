@@ -60,10 +60,7 @@ class State:
                         try:
                             signature = str(inspect.signature(target_attribute))
 
-                            if (
-                                "_tk_inject_first_arg" in dir(target_attribute)
-                                and target_attribute._tk_inject_first_arg
-                            ):
+                            if "_tk_inject_first_arg" in dir(target_attribute) and target_attribute._tk_inject_first_arg:
                                 signature = (
                                     re.sub(r"[a-zA-Z0-9=\_\s]+(?=[\)\,])", "", signature, 1)
                                     .replace("(,", "(", 1)
@@ -120,14 +117,7 @@ class Listener:
 
 class Telekinesis:
     def __init__(
-        self,
-        target,
-        session,
-        mask=None,
-        expose_tb=True,
-        max_delegation_depth=None,
-        compile_signatures=True,
-        parent=None,
+        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
     ):
         self._logger = logging.getLogger(__name__)
         self._target = target
@@ -328,12 +318,7 @@ class Telekinesis:
                 obj = arg
             else:
                 obj = Telekinesis(
-                    arg,
-                    self._session,
-                    self._mask,
-                    self._expose_tb,
-                    self._max_delegation_depth,
-                    self._compile_signatures,
+                    arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures,
                 )
 
             route = obj._delegate(receiver_id, listener.channel)
@@ -416,14 +401,7 @@ class Telekinesis:
 
     @staticmethod
     def _from_state(
-        target,
-        session,
-        state,
-        mask=None,
-        expose_tb=True,
-        max_delegation_depth=None,
-        compile_signatures=True,
-        parent=None,
+        target, session, state, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
     ):
         def callable_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):

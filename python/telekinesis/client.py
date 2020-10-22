@@ -95,10 +95,7 @@ class Connection:
 
     async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
         self.logger.info(
-            "%s sending: %s %s",
-            self.session.session_key.public_serial()[:4],
-            " ".join(h[0] for h in header),
-            len(payload),
+            "%s sending: %s %s", self.session.session_key.public_serial()[:4], " ".join(h[0] for h in header), len(payload),
         )
 
         def encode(header, payload, bundle_id, message_id, retry):
@@ -129,9 +126,7 @@ class Connection:
 
         for retry in range(self.MAX_SEND_RETRIES + 1):
             if not self.websocket or self.websocket.closed:
-                self.logger.info(
-                    "%s reconnecting during send retry %d", self.session.session_key.public_serial()[:4], retry
-                )
+                self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial()[:4], retry)
                 if self.is_connnecting_lock.is_set():
                     await self.reconnect()
                 else:
@@ -290,12 +285,7 @@ class Session:
             asset = target
 
         token = Token(
-            self.session_key.public_serial(),
-            [x.broker_id for x in self.connections],
-            receiver,
-            asset,
-            token_type,
-            max_depth,
+            self.session_key.public_serial(), [x.broker_id for x in self.connections], receiver, asset, token_type, max_depth,
         )
         signature = token.sign(self.session_key)
 
@@ -414,10 +404,7 @@ class Channel:
                     if n > 2 ** 16:
                         raise Exception(f"Payload size {len(payload)/2**20} MiB too large")
                     chunk = (
-                        i.to_bytes(2, "big")
-                        + n.to_bytes(2, "big")
-                        + mid
-                        + payload[i * max_payload: (i + 1) * max_payload]
+                        i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload: (i + 1) * max_payload]
                     )
 
                 nonce = os.urandom(16)

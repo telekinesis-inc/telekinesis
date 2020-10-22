@@ -29,9 +29,7 @@ class PrivateKey:
                     else serialization.BestAvailableEncryption(password.encode())
                 )
                 data = self.key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=enc,
+                    encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=enc,
                 )
                 kf.write(data)
 
@@ -47,9 +45,7 @@ class PrivateKey:
 
 class PublicKey:
     def __init__(self, public_serial):
-        self.key = ec.EllipticCurvePublicKey.from_encoded_point(
-            ec.SECP256R1(), b"\x04" + base64.b64decode(public_serial)
-        )
+        self.key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), b"\x04" + base64.b64decode(public_serial))
 
     def verify(self, raw_signature, message):
         r = int.from_bytes(raw_signature[:32], "big")
@@ -94,9 +90,7 @@ class Token:
             return False
 
     def _to_dict(self):
-        return {
-            x: self.__getattribute__(x) for x in ["issuer", "brokers", "receiver", "asset", "token_type", "max_depth"]
-        }
+        return {x: self.__getattribute__(x) for x in ["issuer", "brokers", "receiver", "asset", "token_type", "max_depth"]}
 
     def _to_string(self):
         return ujson.dumps(self._to_dict())
