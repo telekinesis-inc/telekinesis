@@ -4,9 +4,10 @@ import aiohttp
 from .client import Session, Connection, Route
 from .telekinesis import Telekinesis
 
+
 async def authenticate(url, print_callback=print, **kwargs):
 
-    url = url if url[-5:] == '.json' else url.rstrip('/') + '/brokers.json'
+    url = url if url[-5:] == ".json" else url.rstrip("/") + "/brokers.json"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             brokers = await resp.json()
@@ -14,15 +15,15 @@ async def authenticate(url, print_callback=print, **kwargs):
     bid, b = random.choice(list(brokers.items()))
 
     s = Session()
-    c = Connection(s, b['url'])
+    c = Connection(s, b["url"])
 
     await c.is_connnecting_lock.wait()
     assert bid == c.broker_id
-    entrypoint = Telekinesis(Route(**b['entrypoint']), s)
+    entrypoint = Telekinesis(Route(**b["entrypoint"]), s)
 
     user = await entrypoint._call(print_callback, **kwargs)
 
     if not user:
-        raise Exception('Failed to authenticate')
+        raise Exception("Failed to authenticate")
 
     return user
