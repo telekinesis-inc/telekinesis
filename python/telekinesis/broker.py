@@ -156,7 +156,7 @@ class Channel:
             if await broker.check_token(token):
                 if (token.asset == asset) and (token.issuer == last_receiver):
                     max_depth = (max_depth and min(max_depth, token.max_depth or max_depth)) or token.max_depth
-                    if depth > (max_depth or depth):
+                    if depth >= (max_depth or (depth+1)):
                         return False
                     if token.receiver == source_id:
                         return True

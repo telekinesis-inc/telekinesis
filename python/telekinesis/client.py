@@ -478,7 +478,7 @@ class Channel:
                 if token.max_depth:
                     if not max_depth or (token.max_depth + depth) < max_depth:
                         max_depth = token.max_depth + depth
-                if not max_depth or depth <= max_depth:
+                if not max_depth or depth < max_depth:
                     last_receiver = token.receiver
                     asset = token.signature
                     if last_receiver == source_id:
