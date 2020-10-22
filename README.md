@@ -1,152 +1,90 @@
+This README is intended as a basic overview, you can find more detailed documentation at [Telekinesis.Cloud](https://telekinesis.cloud)'s website.
+
 # Telekinesis
 
-*noun* the ability to move objects by means of ~~thought alone~~ internet communication, without physical means;
+An open source library that **abstracts**, **optimizes** and **secures** RPC (Remote Procedure Calls), so that you can interact with objects and functions running on another computer, almost as if they were local.
 
-## Basic Idea
+##### Abstraction:
 
-Telekinesis is built on the premise that developing, publishing and calling services across the internet shouldn't be fundamentally different to writing local code. 
+You don't think about communication at all, all you care about are remote objects and functions. However, given remote calls have latency, Telekinesis uses asynchronous communication. Just remember to `await` your remote calls.
 
-With Telekinesis, to create a new service, just write a function or class and *publish* it to a *hub*:
+##### Optimization:
 
-```python
-# Example: stateless service (function):
-def hello(name='world'):
-    # Document your services with docstrings, default values and good argument names
-    return 'Hello ' + str(name)
+Telekinesis optimizes communication in 3 ways:
 
-# Publish and serve your new service in the telekinesis.cloud `hub` in one line:
-service_hello = await node.publish('<your-username>/hello', hello)
-```
+- Message brokers are distributed: This minimizes the physical distance messages have to travel to go from caller to callee.
+- Method chaining are bundled in a single message: Calling `obj.method_1().method_2().attribute` sends only one message over the network.
+- Delegation: Remote objects and functions can be delegated so the new caller communicates directly with the object/function provider.
 
+##### Security:
 
+Since we want to avoid [RPC](https://en.wikipedia.org/wiki/Remote_procedure_call) to turn into [RCE](https://en.wikipedia.org/wiki/Arbitrary_code_execution), Telekinesis takes several steps to keep communication secure:
 
-To call this new service (on a separate computer), just *get* it from the *hub* and call it:
-```python
-hello = await node.get('<your-username>/hello')
+- All message payloads (everything but the route and authorization headers) are end-to-end encrypted. 
+- All the messages are signed with session keys, and the edges completely control who who can communicate with a specific channel. 
+- The truly paranoid can even hard-code session keys (used for message signing) and channel keys (used for encryption) to rule out any man-in-the-middle attacks.
+- Telekinesis objects can have *masks* that block certain methods or attributed from being called remotely.
+- With the exception of a few useful Dunder Methods (such as `__call__`, `__setitem__`, `__add__`...) private methods and attributes (whose names start with `_`) are masked by default.
 
-# This should print 'Hello Awesome':
-print(await hello('Awesome'))
-```
+### Installation:
 
+Currently, only `python` is supported. The easiest way to install telekinesis is with `pip`:
 
-
-
-Moreover, if you want to create a more complex service (i.e. with state and multiple methods), use classes:
-
-```python
-# define a stateful service (object):
-class Counter:
-    def __init__(self, initial_value=0):
-        self.value = initial_value
-    def increment(self, amount=1):
-        self.value += amount
-        return self.value
-
-service_counter = await node.publish('<your-username>/Counter', Counter)
-```
-
-Then on the client side:
-```python
-Counter = await node.get('<your-username>/Counter')
-
-# This instantiates the object
-counter = await Counter(123)
-
-# This should print 123:
-print(counter.value)
-
-# This should print 223:
-print(await counter.increment(100))
-```
-## Main Features
-
-- **Open Source**: You can use it anywhere you like, look under the hood, find security issues (please do!), suggest changes, fork it... do anything you want. I just hope you find this useful!
-- **Low latency**: Telekinesis is based on websocket communication, so SSL and authorization verification occurs at the connection initialization stage; service requests and responses send a single network package - no back and forth.
-- **Role based authorization**: Telekinesis has a hierarchical, role-based, authorization system, which limits who can call and serve each service, making the services themselves simpler. **DO NOT TRUST YET!**
-- **Limited surface area**: The client doesn't have to trust the code of the service provider and viceversa. The computation runs entirely on the service provider side, so the only the service signature and the arguments passed are shared. Moreover, the service can have any dependencies and secrets the developer needs.
-- **No network set-up**: Once a hub is set-up and running, all the services created can start working, without having to set up ports, SSL or DNS.
-- **Services feel local**: Telekinesis makes the service instances on the client side feel like local code, maintaining the argument names, default values and docstrings.
-
-## Disclaimer
-
-This is a **PROTOTYPE**, nobody has AUDITED this code yet, so:
-- DO NOT TRUST with critical/confidential data.
-- DO NOT TRUST with personal passwords.
-- API will likely change and break your code!
-
-## Getting Started
-
-#### Installation:
 ```bash
 pip install telekinesis
 ```
 
-#### Connect to the telekinesis.cloud hub:
+Telekinesis communicates through Websockets protocol, uses elliptic curve encryption and serializes data with BSON. Any language that supports these may be supported in the future.
+
+The `js` directory contains a bundle file used to ensure `javascript` compatibility during development.
+
+### Basic Usage
+
+*The following examples assume there are 2 computers connected to a registry.*
+
+#### Manipulate remote objects:
+
+###### Computer A: Publish an object
+
 ```python
-from telekinesis import Node
+x = np.arange(10) # Define an object
 
-# Connect to a Telekinesis `hub`
-node = await Node('wss://telekinesis.cloud').connect()
-
-# telekinesis.cloud has `sign_up` and `sign_in` services to authenticate 
-
-# If you've never signed up, get and call the sign_up service:
-sign_up = await node.get('sign_up')
-
-# This prompts you for username and password to create your user:
-await sign_up()
-
-# Get the sign_in service:
-sign_in = await node.get('sign_in')
-
-# This prompts you for username and password and checks it matches with the one you signed up with:
-assert await sign_in() 
-
-# Create a sample service: 
-service_hello = await node.publish('<your-username>/hello', lambda name='World': 'Hello '+ str(name))
-
-# Get this service (you would normally do this in a different computer/script):
-hello = await node.get('<your-username>/hello')
-
-# This should print 'Hello Awesome':
-print(await hello('Awesome'))
-
-# To remove a service just call its remove method:
-await service_hello.remove()
+await registry.set(x, 'x')  # Publish the object to a registry
 ```
 
-#### Run a simple Telekinesis hub:
+###### Computer B: Manipulate the object
+
 ```python
-from telekinesis import Hub
+tk_x = await registry.get('x') # Get the object that "A" published
 
-# Start a local Telekinesis `hub`
-hub = await Hub().start()
+print(tk_x)
+```
+> `(Output) ≈  array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) `
 
-# By default the hub runs in 'ws://localhost:3388' (same url the Node connects to by default)
+```python
+print(await tk_x.dtype) #  Get an attribute
+```
+> `(Output) ≈  dtype('int64')`
+
+```python
+print(await tk_x.max()) #  Call a method
+```
+> `(Output) ≈  array([9])`
+
+
+#### Call remote functions:
+
+###### Computer A: Publish a function
+
+```python
+await registry.set(print, 'print')  # Publish the function
+```
+###### Computer B: Call the function
+```python
+tk_print = await registry.get('print') # Get the object that "A" published
+
+await tk_print('Hello A!')
 ```
 
-**Note**: This simple hub doesn't have the authorization layer activated. You can check out `examples/telekinesis_cloud_website/server.py` and `examples/telekinesis_cloud_website/services/sign_in.py` to see how the role based authorization system is leveraged.
+> (Output, back at Computer A) `Hello A!`
 
-## API Reference
-
-Telekinesis is still in early development, so the API is likely to change, and therefore its documentation will grow stale quickly.
-
-The best reference (for now) to check the functionality are the tests at `python/test`. 
-
-Each test is self contained and demonstrates one key functionality (i.e. having multiple workers for a service, delegating roles, etc).
-
-Also, make sure to check the `examples` directory.
-
-## Contribute
-
-If you are interested in this concept, you can contribute by:
-- Proposing API name changes (I'd rather make breaking changes now than later!)
-- Finding bugs and security holes
-- Submitting issues
-- Adding tests (see `python/test` directory)
-- Creating examples
-- Helping with the docstrings
-
-Any help is very appreciated!
-
-You can also register your email at https://telekinesis.cloud to be notified for updates (this also helps me gauge interest)
