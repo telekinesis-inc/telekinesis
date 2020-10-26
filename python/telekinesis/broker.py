@@ -73,6 +73,7 @@ class Connection:
             self.logger.error("Exception when closing %s", self.session.session_id[:4], exc_info=True)
 
 
+
 class Session:
     def __init__(self, session_id):
         self.session_id = session_id
@@ -393,7 +394,7 @@ class Broker:
 
     async def add_broker(self, url, inherit_endpoint=False):
         peer = Peer(None, self)
-        peer.connect(url, inherit_endpoint)  # This already adds the peer to self.sessions
+        await peer.connect(url, inherit_endpoint)  # This already adds the peer to self.sessions
 
     async def check_token(self, token):
         session = self.sessions.get(token.issuer)
@@ -460,10 +461,14 @@ class Peer(Connection):
         self.t_offset = 0
         self.listener = None
         self.url = None
+        self.lock = asyncio.Event()
+        self.exception = None
 
     def connect(self, url, inherit_endpoint):
         self.url = url
         self.listener = asyncio.get_event_loop().create_task(self.listen(inherit_endpoint))
+
+        return self
 
     async def reconnect(self):
         if self.websocket:
@@ -509,7 +514,12 @@ class Peer(Connection):
         n_tries = 0
         while True:
             try:
+                self.lock.clear()
                 session_id, endpoint = await self.reconnect()
+
+                if not (-15 < self.t_offset < 1):
+                    raise IncompatibleBrokerException(f'Unix time difference too large: {self.t_offset} seconds.')
+                self.lock.set()
 
                 if session_id not in self.broker.sessions:
                     self.broker.sessions[session_id] = Session(session_id)
@@ -528,12 +538,32 @@ class Peer(Connection):
                     self.tasks.add(asyncio.get_event_loop().create_task(self.broker.handle_message(self, message)))
                     n_tries = 0
 
+            except IncompatibleBrokerException as e:
+                self.exception = e
+
             except Exception:
                 self.logger.error("Peer.listen", exc_info=True)
             finally:
+                self.lock.set()
                 await self.close(self.broker.sessions)
 
-            await asyncio.sleep(1)
+            if self.exception:
+                return
+
             if n_tries > 10:
                 raise Exception("Max tries reached")
+            await asyncio.sleep(1)
             n_tries += 1
+    
+    def __await__(self):
+        async def wait_lock():
+            await self.lock.wait()
+            if self.exception:
+                raise self.exception
+        
+        return wait_lock().__await__()
+
+
+class IncompatibleBrokerException(Exception):
+    pass
+
