@@ -284,12 +284,29 @@ class Session:
             prev_token = None
             asset = target
 
-        token = Token(
-            self.session_key.public_serial(), [x.broker_id for x in self.connections], receiver, asset, token_type, max_depth,
-        )
-        signature = token.sign(self.session_key)
+        for token, prev_token_tmp in self.issued_tokens.values():
+            if (
+                token.asset == asset
+                and token.receiver == receiver
+                and token.token_type == token_type
+                and token.max_depth == max_depth
+                and all([x.broker_id in token.brokers for x in self.connections])
+            ):
+                prev_token = prev_token_tmp
+                break
+        else:
+            token = Token(
+                self.session_key.public_serial(),
+                [x.broker_id for x in self.connections],
+                receiver,
+                asset,
+                token_type,
+                max_depth,
+            )
+            signature = token.sign(self.session_key)
 
-        self.issued_tokens[signature] = token, prev_token
+            self.issued_tokens[signature] = token, prev_token
+
         return ("token", ("issue", token.encode(), prev_token and prev_token.encode()))
 
     def revoke_tokens(self, asset):

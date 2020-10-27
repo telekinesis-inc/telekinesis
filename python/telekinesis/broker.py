@@ -73,7 +73,6 @@ class Connection:
             self.logger.error("Exception when closing %s", self.session.session_id[:4], exc_info=True)
 
 
-
 class Session:
     def __init__(self, session_id):
         self.session_id = session_id
@@ -554,16 +553,15 @@ class Peer(Connection):
                 raise Exception("Max tries reached")
             await asyncio.sleep(1)
             n_tries += 1
-    
+
     def __await__(self):
         async def wait_lock():
             await self.lock.wait()
             if self.exception:
                 raise self.exception
-        
+
         return wait_lock().__await__()
 
 
 class IncompatibleBrokerException(Exception):
     pass
-

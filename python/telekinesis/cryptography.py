@@ -104,6 +104,9 @@ class Token:
         self.signature = base64.b64encode(signing_key.sign(self._to_string().encode())).decode()
         return self.signature
 
+    def __repr__(self):
+        return f'{self.issuer[:4]} - {self.signature and self.signature[:4]}: {self.receiver[:4]} ({self.asset[:4]})'
+
     @staticmethod
     def decode(string, verify=True):
         token = Token(**ujson.loads(string[string.find(".") + 1:]))
