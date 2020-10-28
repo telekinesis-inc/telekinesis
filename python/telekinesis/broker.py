@@ -51,24 +51,27 @@ class Connection:
 
         return self
 
-    async def close(self, sessions):
+    async def close(self, sessions, remove=True):
         try:
             await self.websocket.close()
             for channel in self.channels:
-                channel.connections.remove(self)
+                if self in channel.connections:
+                    channel.connections.remove(self)
                 if not channel.connections:
-                    self.session.channels.pop(channel.channel_id)
+                    self.session.channels.pop(channel.channel_id, None)
 
-            if self in self.session.connections:
-                self.session.connections.remove(self)
+            if remove:
+                if self in self.session.connections:
+                    self.session.connections.remove(self)
 
-            self.session.broker_connections.pop(self, None)
+                self.session.broker_connections.pop(self, None)
 
-            if not self.session.channels and not self.session.broker_connections:
-                sessions.pop(self.session.session_id, None)
+                if not self.session.channels and not self.session.broker_connections and not self.session.connections:
+                    sessions.pop(self.session.session_id, None)
 
-            await asyncio.gather(*(x for x in self.tasks if x.done()))
-            [x.cancel() for x in self.tasks if not x.done()]
+                await asyncio.gather(*(x for x in self.tasks if x.done()))
+                # print([x for x in self.tasks if not x.done()])
+                [x.cancel() for x in self.tasks if not x.done()]
         except Exception:
             self.logger.error("Exception when closing %s", self.session.session_id[:4], exc_info=True)
 
@@ -288,6 +291,16 @@ class Broker:
                             ):
                                 await broker_connection.send((("token", ("approve", enc_token)),))
                         await broker_connection.websocket.send(message)
+                        self.logger.info(
+                            "%s: send %s %s ))) %s ))) %s %s (%s)",
+                            self.broker_key.public_serial()[:4],
+                            source["session"][:4],
+                            source["channel"][:4],
+                            str(len(message) // 2 ** 10),
+                            destination["session"][:4],
+                            destination["channel"][:4],
+                            broker_id[:4],
+        )
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
@@ -517,7 +530,7 @@ class Peer(Connection):
                 self.lock.clear()
                 session_id, endpoint = await self.reconnect()
 
-                if not (-15 < self.t_offset < 1):
+                if not (-15 < self.t_offset < 2):
                     raise IncompatibleBrokerException(f'Unix time difference too large: {self.t_offset} seconds.')
                 self.lock.set()
 
@@ -531,29 +544,34 @@ class Peer(Connection):
                 self.session.connections.add(self)
                 self.session.broker_connections[self] = self
 
+                n_tries = 0
                 while True:
                     message = await self.websocket.recv()
-                    await asyncio.gather(*(x for x in self.tasks if x.done()))
-                    self.tasks = set(x for x in self.tasks if not x.done())
                     self.tasks.add(asyncio.get_event_loop().create_task(self.broker.handle_message(self, message)))
-                    n_tries = 0
+                    
+                    # await asyncio.gather(*(x for x in self.tasks if x.done() and not x.exception()), return_exceptions=True)
+                    self.tasks = set(x for x in self.tasks if not x.done())
+
 
             except IncompatibleBrokerException as e:
+                self.logger.error("Peer.listen", exc_info=True)
                 self.exception = e
+                await self.close(self.broker.sessions, False)
+                self.lock.set()
+                return
 
             except Exception:
                 self.logger.error("Peer.listen", exc_info=True)
-            finally:
+                await self.close(self.broker.sessions, False)
                 self.lock.set()
-                await self.close(self.broker.sessions)
 
-            if self.exception:
-                return
+                if n_tries > 10:
+                    self.logger.error("Peer.listen: Max connection retries reached", exc_info=True)
+                    return
 
-            if n_tries > 10:
-                raise Exception("Max tries reached")
-            await asyncio.sleep(1)
-            n_tries += 1
+                await asyncio.sleep(1)
+                n_tries += 1
+                continue
 
     def __await__(self):
         async def wait_lock():

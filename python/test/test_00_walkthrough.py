@@ -14,15 +14,17 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 
 async def test_walkthrough():
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
-        async def handle_message(self, connection, message):
-            if random.random() < 0.011:
+        async def handle_send(self, *args, **kwargs):
+            if random.random() < 0.02:
                 self.logger.error("Gotcha!!!")
-                message = Exception("Random Fault Injection")
-            await super().handle_message(connection, message)
+                kwargs["message"] = Exception("Random Fault Injection")
+            await super().handle_send(*args, **kwargs)
 
     broker_0 = await FaultyBroker().serve(port=8777)
 
     conn_0 = await Connection(Session(), "ws://localhost:8777")
+    conn_0.RESEND_TIMEOUT = 1
+
     broker_0.endpoint = Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._add_listener(
         Channel(conn_0.session, is_public=True)
     )
@@ -32,9 +34,10 @@ async def test_walkthrough():
 
     await asyncio.sleep(0.1)
     conn_1 = await Connection(Session(), "ws://localhost:8778")
+    conn_1.RESEND_TIMEOUT = 1
 
-    f = await Telekinesis(conn_1.endpoint, conn_1.session)
-    g = await f("Hello, ")  # Telekinesis objects that return Telekinesis objects are welcome
+    f = await asyncio.wait_for(Telekinesis(conn_1.endpoint, conn_1.session), 4)
+    g = await asyncio.wait_for(f("Hello, "), 4)  # Telekinesis objects that return Telekinesis objects are welcome
 
     assert "Hello, World" == await asyncio.wait_for(g("World"), 5)
 
@@ -48,13 +51,14 @@ async def test_walkthrough():
 
     await asyncio.sleep(0.1)
     conn_2 = await Connection(Session(), "ws://localhost:8778")
+    conn_2.RESEND_TIMEOUT = 1
 
     with pytest.raises(asyncio.TimeoutError):
-        g_2 = await asyncio.wait_for(Telekinesis(g._target, conn_2.session)._execute(), 2)
+        g_2 = await asyncio.wait_for(Telekinesis(g._target, conn_2.session)._execute(), 4)
 
     delegator_route = Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
 
-    g_2 = await Telekinesis(delegator_route, conn_2.session)._call()
+    g_2 = await asyncio.wait_for(Telekinesis(delegator_route, conn_2.session)._call()._execute(), 4)
 
     assert "Hello, World!!" == await g_2("World!!")
 
@@ -76,9 +80,9 @@ async def test_walkthrough():
         conn_1.session.session_key.public_serial()
     )  # << Max delegation depth!
 
-    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)._call()._execute(), 2)
+    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)._call()._execute(), 4)
 
-    assert await asyncio.wait_for(counter.increment().increment().value._execute(), 2) == 2
+    assert await asyncio.wait_for(counter.increment().increment().value._execute(), 4) == 2
 
     with pytest.raises(Exception, match=r".*not callable.*"):
         await counter.to_be_masked()
@@ -98,7 +102,7 @@ async def test_walkthrough():
         conn_2.session.session_key.public_serial()
     )
 
-    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)._call()._execute(), 2)
+    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)._call()._execute(), 4)
 
     with pytest.raises(asyncio.TimeoutError):  # Max delegation depth doesn't allow it!
-        await asyncio.wait_for(counter_2.value._execute(), 2)
+        await asyncio.wait_for(counter_2.value._execute(), 4)
