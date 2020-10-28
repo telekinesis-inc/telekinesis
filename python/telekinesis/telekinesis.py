@@ -116,7 +116,7 @@ class Listener:
                     await asyncio.gather(*(x for x in self.current_tasks if x.done()))
                     self.current_tasks = set(x for x in self.current_tasks if not x.done())
             except Exception:
-                logging.getLogger(__name__).error("", exc_info=True)
+                logging.getLogger(__name__).error("Listener error", exc_info=True)
 
     async def close(self, close_public=False):
         if close_public or not self.channel.is_public:
@@ -234,7 +234,10 @@ class Telekinesis:
             self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
 
             self._state.pipeline.clear()
-            await listener.channel.send(reply, {"error": traceback.format_exc() if self._expose_tb else ""})
+            try:
+                await listener.channel.send(reply, {"error": traceback.format_exc() if self._expose_tb else ""})
+            finally:
+                pass
 
     def _call(self, *args, **kwargs):
         state = self._state.clone()

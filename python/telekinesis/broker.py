@@ -14,7 +14,7 @@ from .client import Route
 
 class Connection:
     def __init__(self, websocket):
-        self.MIN_CLIENT_VERSION = "0.1.0a16"
+        self.MIN_CLIENT_VERSION = "0.1.0a18"
         self.websocket = websocket
         self.logger = logging.getLogger(__name__)
         self.session = None
@@ -176,7 +176,7 @@ class Broker:
         self.endpoint = None
         self.broker_key = PrivateKey(broker_key_file)
         self.logger = logging.getLogger(__name__)
-        self.seen_messages = (set(), set(), 0)
+        self.seen_messages = [set(), set(), 0]
 
     async def handle_connection(self, websocket, _):
         connection = None
@@ -423,13 +423,14 @@ class Broker:
         signature, timestamp = message[:64], int.from_bytes(message[64:68], "big")
         now = int(time.time())
 
-        lead = now // 60 % 2
+        lead = now // 60
         if self.seen_messages[2] != lead:
-            self.seen_messages[lead].clear()
+            self.seen_messages[lead % 2].clear()
+            self.seen_messages[2] = lead
 
         if (now - 60 + 4) <= timestamp <= now + 4:
             if signature not in self.seen_messages[0].union(self.seen_messages[1]):
-                self.seen_messages[lead].add(signature)
+                self.seen_messages[lead % 2].add(signature)
                 return True
 
         return False

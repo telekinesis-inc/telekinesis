@@ -142,7 +142,7 @@ class Connection:
                 return
 
             if retry < (self.MAX_SEND_RETRIES):
-                s, mm = encode(header, payload, bundle_id, message_id, retry)
+                s, mm = encode(header, payload, bundle_id, message_id, retry+1)
                 self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
         raise Exception("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
@@ -220,7 +220,7 @@ class Connection:
                         if full_payload[0] == 255:
                             self.ack(source.session, full_payload[1:65])
                         else:
-                            ret_signature = signature if full_payload[0] == 0 else full_payload[1:65]
+                            ret_signature = signature if (full_payload[0] == 0) else full_payload[1:65]
                             payload = full_payload[65 + 32:]
                             await self.send(
                                 (("send", {"destination": content["source"], "source": content["destination"]}),),
@@ -230,7 +230,11 @@ class Connection:
                             )
                             # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
                             if hashlib.sha256(payload).digest() == full_payload[65: 65 + 32]:
-                                channel.handle_message(source, destination, payload)
+                                if (
+                                    (ret_signature == signature) 
+                                    or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
+                                ):
+                                    channel.handle_message(source, destination, payload)
                             else:
                                 raise Exception("Authentication Error: message payload does not match signed hash")
 
@@ -258,20 +262,21 @@ class Session:
         self.session_key = PrivateKey(session_key_file)
         self.channels = {}
         self.connections = set()
-        self.seen_messages = (set(), set(), 0)
+        self.seen_messages = [set(), set(), 0]
         self.issued_tokens = {}
         self.pending_tasks = set()
 
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
 
-        lead = now // 60 % 2
+        lead = now // 60
         if self.seen_messages[2] != lead:
-            self.seen_messages[lead].clear()
+            self.seen_messages[lead % 2].clear()
+            self.seen_messages[2] = lead
 
         if (now - 60 + 4) <= timestamp <= now + 4:
             if signature not in self.seen_messages[0].union(self.seen_messages[1]):
-                self.seen_messages[lead].add(signature)
+                self.seen_messages[lead % 2].add(signature)
                 return True
         return False
 

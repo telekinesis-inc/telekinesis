@@ -15,7 +15,7 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 async def test_walkthrough():
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
         async def handle_message(self, connection, message):
-            if random.random() < 0.03:
+            if random.random() < 0.011:
                 self.logger.error("Gotcha!!!")
                 message = Exception("Random Fault Injection")
             await super().handle_message(connection, message)
@@ -36,11 +36,11 @@ async def test_walkthrough():
     f = await Telekinesis(conn_1.endpoint, conn_1.session)
     g = await f("Hello, ")  # Telekinesis objects that return Telekinesis objects are welcome
 
-    assert "Hello, World" == await g("World")
+    assert "Hello, World" == await asyncio.wait_for(g("World"), 5)
 
     long_message = "a" * 2 ** 20
 
-    assert "Hello, " + long_message == await g(long_message)  # Telekinesis should handle big messages
+    assert "Hello, " + long_message == await asyncio.wait_for(g(long_message), 20)  # Telekinesis should handle big messages
 
     broker_2 = await FaultyBroker().serve(port=8779)  # Yet another Broker!
     await broker_2.add_broker("ws://localhost:8777", True)
@@ -76,9 +76,9 @@ async def test_walkthrough():
         conn_1.session.session_key.public_serial()
     )  # << Max delegation depth!
 
-    counter = await Telekinesis(route_counter, conn_1.session)._call()
+    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)._call()._execute(), 2)
 
-    assert await counter.increment().increment().value == 2
+    assert await asyncio.wait_for(counter.increment().increment().value._execute(), 2) == 2
 
     with pytest.raises(Exception, match=r".*not callable.*"):
         await counter.to_be_masked()
@@ -98,7 +98,7 @@ async def test_walkthrough():
         conn_2.session.session_key.public_serial()
     )
 
-    counter_2 = await Telekinesis(counter_delegator_route, conn_2.session)._call()
+    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)._call()._execute(), 2)
 
     with pytest.raises(asyncio.TimeoutError):  # Max delegation depth doesn't allow it!
         await asyncio.wait_for(counter_2.value._execute(), 2)
