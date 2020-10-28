@@ -8764,7 +8764,7 @@ const TK = (function() {
       let sentChallenge = window.crypto.getRandomValues(new Uint8Array(32))
       let sentMetadata = new TextEncoder().encode(
         JSON.stringify({
-		  version: '0.1.0a16'
+		  version: '0.1.0a18'
 		})
 	  )
 

@@ -32,7 +32,7 @@ class Connection:
         self.broker_id = None
         self.endpoint = None
 
-        self.is_connnecting_lock = asyncio.Event()
+        self.is_connecting_lock = asyncio.Event()
         self.awaiting_ack = OrderedDict()
 
         session.connections.add(self)
@@ -40,14 +40,14 @@ class Connection:
         self.listener = asyncio.get_event_loop().create_task(self.listen())
 
     async def reconnect(self):
-        if self.is_connnecting_lock.is_set():
-            self.is_connnecting_lock.clear()
+        if self.is_connecting_lock.is_set():
+            self.is_connecting_lock.clear()
             if self.listener:
                 self.listener.cancel()
 
             self.listener = asyncio.get_event_loop().create_task(self.listen())
 
-        await self.is_connnecting_lock.wait()
+        await self.is_connecting_lock.wait()
 
     async def _connect(self):
         self.logger.info("%s connecting", self.session.session_key.public_serial()[:4])
@@ -89,7 +89,7 @@ class Connection:
             headers.append(("listen", listen_dict))
         await self.send(headers)
 
-        self.is_connnecting_lock.set()
+        self.is_connecting_lock.set()
 
         return self
 
@@ -127,10 +127,10 @@ class Connection:
         for retry in range(self.MAX_SEND_RETRIES + 1):
             if not self.websocket or self.websocket.closed:
                 self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial()[:4], retry)
-                if self.is_connnecting_lock.is_set():
+                if self.is_connecting_lock.is_set():
                     await self.reconnect()
                 else:
-                    await self.is_connnecting_lock.wait()
+                    await self.is_connecting_lock.wait()
 
             try:
                 await self.websocket.send(s + mm)
@@ -182,7 +182,7 @@ class Connection:
             except Exception:
                 self.logger.info("%s Connection.listen", self.session.session_key.public_serial()[:4], exc_info=True)
 
-            self.is_connnecting_lock.clear()
+            self.is_connecting_lock.clear()
             await asyncio.sleep(1)
 
             if n_tries > 10:
@@ -191,10 +191,10 @@ class Connection:
 
     async def recv(self):
         if not self.websocket or self.websocket.closed:
-            if self.is_connnecting_lock.is_set():
+            if self.is_connecting_lock.is_set():
                 await self.reconnect()
             else:
-                await self.is_connnecting_lock.wait()
+                await self.is_connecting_lock.wait()
 
         message = await self.websocket.recv()
 
@@ -247,7 +247,7 @@ class Connection:
 
     def __await__(self):
         async def await_lock():
-            await self.is_connnecting_lock.wait()
+            await self.is_connecting_lock.wait()
             return self
 
         return await_lock().__await__()
@@ -260,6 +260,7 @@ class Session:
         self.connections = set()
         self.seen_messages = (set(), set(), 0)
         self.issued_tokens = {}
+        self.pending_tasks = set()
 
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
@@ -396,6 +397,15 @@ class Channel:
                     else:
                         raise Exception("Received message with different encoding")
                     self.lock.set()
+        else:
+            self.session.logger.error(
+                "Invalid Tokens: %s %s -> %s %s [%s]",
+                source.session[:4],
+                source.channel[:4],
+                destination.session[:4],
+                destination.channel[:4],
+                destination.tokens,
+            )
 
     async def recv(self):
         if not self.messages:
@@ -516,6 +526,13 @@ class Channel:
                     continue
             return False
         return False
+
+    def __repr__(self):
+        return "Channel %s %s: %s" % (
+            self.session.session_key.public_serial()[:4],
+            self.channel_key.public_serial()[:4],
+            self.telekinesis,
+        )
 
     async def __aenter__(self):
         return self.listen()

@@ -1,5 +1,6 @@
 import sys
 import io
+import time
 import asyncio
 import inspect
 import traceback
@@ -13,12 +14,13 @@ from .client import Route, Channel
 
 
 class State:
-    def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None):
+    def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None, last_change=None):
         self.attributes = attributes or []
         self.methods = methods or {}
         self.pipeline = pipeline or []
         self.repr = repr or ""
         self.doc = doc
+        self.last_change = last_change
 
     def to_dict(self, mask=None):
         mask = mask or set()
@@ -28,6 +30,7 @@ class State:
             "pipeline": self.pipeline,
             "repr": self.repr,
             "doc": self.doc,
+            "last_change": self.last_change,
         }
 
     def clone(self):
@@ -67,7 +70,7 @@ class State:
                                     .replace("( ", "(", 1)
                                 )
                         except Exception:
-                            logger.debug("Cound not obtain signature from %s.%s", target, attribute_name)
+                            logger.debug("Could not obtain signature from %s.%s", target, attribute_name)
 
                         methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
@@ -84,13 +87,14 @@ class State:
             doc = None
             repr_ = target.__repr__()
 
-        return State(attributes, methods, repr_, doc)
+        return State(attributes, methods, repr_, doc, None, time.time())
 
 
 class Listener:
     def __init__(self, channel):
         self.channel = channel
         self.coro_callback = None
+        self.listen_task = None
         self.current_tasks = set()
 
     def set_callback(self, coro_callback):
@@ -106,7 +110,7 @@ class Listener:
                     message = await self.channel.recv()
 
                     self.current_tasks.add(
-                        asyncio.get_event_loop().create_task(self.coro_callback(self, self.channel, *message))
+                        asyncio.get_event_loop().create_task(self.coro_callback(self, *message))
                     )
 
                     await asyncio.gather(*(x for x in self.current_tasks if x.done()))
@@ -114,11 +118,18 @@ class Listener:
             except Exception:
                 logging.getLogger(__name__).error("", exc_info=True)
 
+    async def close(self, close_public=False):
+        if close_public or not self.channel.is_public:
+            self.listen_task and self.listen_task.cancel()
+            await asyncio.gather(*self.current_tasks)
+            await self.channel.close()
+
 
 class Telekinesis:
     def __init__(
         self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
     ):
+
         self._logger = logging.getLogger(__name__)
         self._target = target
         self._session = session
@@ -183,11 +194,11 @@ class Telekinesis:
 
         channel.telekinesis = self
 
-        self._listeners[route] = Listener(channel).set_callback(self._handle)
+        self._listeners[route] = Listener(channel).set_callback(self._handle_request)
 
         return route
 
-    def _delegate(self, recepient_id, parent_channel=None):
+    def _delegate(self, receiver_id, parent_channel=None):
         if isinstance(self._target, Route):
             route = self._target.clone()
 
@@ -198,23 +209,32 @@ class Telekinesis:
             if not parent_channel:
                 parent_channel = listener.channel
 
-        token_header = self._session.extend_route(route, recepient_id, self._max_delegation_depth)
+        token_header = self._session.extend_route(route, receiver_id, self._max_delegation_depth)
         parent_channel.header_buffer.append(token_header)
 
         return route
 
-    async def _handle(self, listener, channel, reply, payload):
+    async def _handle_request(self, listener, reply, payload):
         try:
-            pipeline = self._decode(payload.get("pipeline"), reply.session)
-            self._logger.info("%s called %s", reply.session[:4], len(pipeline))
-            ret = await self._execute(reply, listener, pipeline)
+            if "close" in payload:
+                await listener.close()
+            elif "ping" in payload:
+                await listener.channel.send(reply, {"repr": self._state.repr, "timestamp": self._state.last_change})
+            elif "pipeline" in payload:
+                pipeline = self._decode(payload.get("pipeline"), reply.session)
+                self._logger.info("%s called %s", reply.session[:4], len(pipeline))
+                ret = await self._execute(reply, listener, pipeline)
 
-            await channel.send(reply, {"return": self._encode(ret, reply.session, listener), "repr": self._state.repr})
+                await listener.channel.send(reply, {
+                    "return": self._encode(ret, reply.session, listener),
+                    "repr": self._state.repr,
+                    "timestamp": self._state.last_change})
+
         except Exception:
-            self._logger.error(payload, exc_info=True)
+            self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
 
             self._state.pipeline.clear()
-            await channel.send(reply, {"error": traceback.format_exc() if self._expose_tb else ""})
+            await listener.channel.send(reply, {"error": traceback.format_exc() if self._expose_tb else ""})
 
     def _call(self, *args, **kwargs):
         state = self._state.clone()
@@ -239,24 +259,11 @@ class Telekinesis:
         self._state.pipeline.clear()
 
         if isinstance(self._target, Route):
-            out = {}
             async with Channel(self._session) as new_channel:
-                await new_channel.send(
-                    self._target, {"pipeline": self._encode(pipeline, self._target.session, Listener(new_channel))}
+                return await self._send_request(
+                    new_channel,
+                    pipeline=self._encode(pipeline, self._target.session, Listener(new_channel))
                 )
-
-                _, out = await new_channel.recv()
-
-            if "error" in out:
-                raise Exception(out["error"])
-
-            if "return" in out:
-                output = self._decode(out["return"], self._target.session)
-                state = self._get_root_state()
-                state.repr = out["repr"]
-                return output
-
-            raise Exception("Telekinesis communication error: received unrecognized message schema %s" % out)
 
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
@@ -285,13 +292,54 @@ class Telekinesis:
                     target = await target
 
         self._update_state(State.from_object(self._target))
+        self._state.last_change = time.time()
         return target
+
+    async def _send_request(self, channel, **kwargs):
+        response = {}
+        await channel.send(self._target, kwargs)
+
+        _, response = await channel.recv()
+
+        state = self._get_root_state()
+        if "repr" in response and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
+            state.last_change = response.get("timestamp") or time.time()
+            state.repr = response["repr"]
+
+        if "repr" in response:
+            state = self._get_root_state()
+
+        if "error" in response:
+            raise Exception(response["error"])
+
+        if "return" in response:
+            return self._decode(response["return"], self._target.session)
+
+        if "repr" not in response:
+            raise Exception("Telekinesis communication error: received unrecognized message schema %s" % response)
+
+    async def _close(self):
+        try:
+            if isinstance(self._target, Route):
+                async with Channel(self._session) as new_channel:
+                    await new_channel.send(self._target, {"close": True})
+            else:
+                for listener in self._listeners:
+                    await listener.close(True)
+        except Exception:
+            self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
 
     def __await__(self):
         return self._execute().__await__()
 
     def __repr__(self):
         return "\033[92m\u2248\033[0m " + str(self._state.repr)
+
+    def __del__(self):
+        if self._parent is None:
+            self._session.pending_tasks.add(
+                asyncio.get_event_loop().create_task(self._close())
+            )
 
     def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None):
         i = str(id(arg))
