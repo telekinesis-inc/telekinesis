@@ -40,7 +40,7 @@ class Connection:
         await self.websocket.send(
             broker_key.sign(client_challenge)
             + broker_key.public_serial().encode()
-            + ujson.dumps({"endpoint": endpoint and endpoint.to_dict()}).encode()
+            + ujson.dumps({"endpoint": endpoint and endpoint.to_dict()}, escape_forward_slashes=False).encode()
         )
 
         if session_id not in sessions:

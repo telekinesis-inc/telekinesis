@@ -93,7 +93,7 @@ class Token:
         return {x: self.__getattribute__(x) for x in ["issuer", "brokers", "receiver", "asset", "token_type", "max_depth"]}
 
     def _to_string(self):
-        return ujson.dumps(self._to_dict())
+        return ujson.dumps(self._to_dict(), escape_forward_slashes=False)
 
     def encode(self):
         if not self.signature:

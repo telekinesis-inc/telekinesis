@@ -18,9 +18,6 @@ from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignat
 
 class Connection:
     def __init__(self, session, url="ws://localhost:8776"):
-        self.MAX_PAYLOAD_LEN = 2 ** 19
-        self.MAX_COMPRESSION_LEN = 2 ** 19
-        self.SUGGESTED_MAX_OUTBOX = 2 ** 4
         self.RESEND_TIMEOUT = 2  # sec
         self.MAX_SEND_RETRIES = 3
 
@@ -66,7 +63,8 @@ class Connection:
 
         sent_challenge = os.urandom(32)
         sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
-        await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
+        await self.websocket.send(
+            signature + pk + sent_challenge + ujson.dumps(sent_metadata, escape_forward_slashes=False).encode())
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
 
@@ -99,7 +97,7 @@ class Connection:
         )
 
         def encode(header, payload, bundle_id, message_id, retry):
-            h = ujson.dumps(header).encode()
+            h = ujson.dumps(header, escape_forward_slashes=False).encode()
             r = (retry).to_bytes(1, "big") + (message_id or b"0" * 64)
             p = hashlib.sha256(payload).digest()
             m = len(h).to_bytes(2, "big") + len(r + p + payload).to_bytes(3, "big") + h + r + p
@@ -352,6 +350,10 @@ class Session:
 
 class Channel:
     def __init__(self, session, channel_key_file=None, is_public=False):
+        self.MAX_PAYLOAD_LEN = 2 ** 19
+        self.MAX_COMPRESSION_LEN = 2 ** 19
+        self.MAX_OUTBOX = 2 ** 4
+
         self.session = session
         self.channel_key = PrivateKey(channel_key_file)
         self.is_public = is_public
@@ -367,9 +369,6 @@ class Channel:
         session.channels[self.channel_key.public_serial()] = self
 
         self.telekinesis = None
-
-    def route_dict(self):
-        return self.route.to_dict()
 
     def handle_message(self, source, destination, raw_payload):
         if self.validate_token_chain(source.session, destination.tokens):
@@ -434,7 +433,7 @@ class Channel:
                     chunk = b"\x00" * 4 + payload
                 else:
                     if n > 2 ** 16:
-                        raise Exception(f"Payload size {len(payload)/2**20} MiB too large")
+                        raise Exception(f"Payload size {len(payload)/2**20} MiB is too large")
                     chunk = (
                         i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload: (i + 1) * max_payload]
                     )
@@ -453,26 +452,19 @@ class Channel:
 
         payload = bson.dumps(payload_obj)
 
-        max_compression = list(self.session.connections)[0].MAX_COMPRESSION_LEN
-
-        if len(payload) < max_compression:
+        if len(payload) < self.MAX_COMPRESSION_LEN:
             payload = b"\xff" + zlib.compress(payload)
         else:
             payload = b"\x00" + payload
-
-        conn = list(self.session.connections)[0]
-
-        max_payload = conn.MAX_PAYLOAD_LEN
-        max_outbox = conn.SUGGESTED_MAX_OUTBOX * len(self.session.connections)
 
         mid = os.urandom(4)
         shared_key = SharedKey(self.channel_key, PublicKey(destination.channel))
 
         header = ("send", {"source": source_route.to_dict(), "destination": destination.to_dict()})
 
-        n = (len(payload) - 1) // max_payload + 1
-        n_tasks = min(n, max_outbox)
-        gen = encrypt_slice(payload, max_payload, shared_key, mid, n, 0)
+        n = (len(payload) - 1) // self.MAX_PAYLOAD_LEN + 1
+        n_tasks = min(n, self.MAX_OUTBOX)
+        gen = encrypt_slice(payload, self.MAX_PAYLOAD_LEN, shared_key, mid, n, 0)
 
         try:
             await asyncio.gather(*(execute(header, gen, mid) for _ in range(n_tasks)))
