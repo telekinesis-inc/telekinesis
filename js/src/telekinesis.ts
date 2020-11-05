@@ -48,7 +48,7 @@ export class State {
   }
   
   static fromTarget(target: Object) {
-    return State.fromObject({
+    let state = State.fromObject({
       attributes: Object.getOwnPropertyNames(target),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
@@ -58,6 +58,10 @@ export class State {
       pipeline: [],
       last_change: Date.now() / 1000,
     })
+    if (target instanceof Function) {
+      state.methods.set('__call__', ['(*args)', target.toString()]);
+    }
+    return state;
   }
 }
 export class Listener {
@@ -80,7 +84,7 @@ export class Listener {
         await (this.channel.listen() as any);
         while (true) {
           let message = await this.channel.recv() as [Route?, {}?];
-          console.log('message', message)
+          // console.log('message', message)
           if (message[0] === undefined) {
             return;
           }
@@ -206,7 +210,7 @@ export class Telekinesis extends Function {
     return route;
   }
   async _handleRequest(listener: Listener, reply: Route, payload: {}) {
-    console.log('handleRequest!!', this, listener, reply);
+    // console.log('handleRequest!!', this, listener, reply);
     try {
       if ((payload as any)['close'] !== undefined) {
         await listener.close();
@@ -214,7 +218,7 @@ export class Telekinesis extends Function {
         await listener.channel.send(reply, {repr: this._state.repr, timestamp: this._state.lastChange})
       } else if ((payload as any)['pipeline'] !== undefined) {
         let pipeline = this._decode((payload as any)['pipeline']) as [];
-        console.log(`${reply.session.slice(0, 4)} called ${pipeline.length}`)
+        // console.log(`${reply.session.slice(0, 4)} called ${pipeline.length}`)
 
         let ret = await this._execute(listener, reply, pipeline);
 
@@ -271,40 +275,49 @@ export class Telekinesis extends Function {
       return x;
     }
     let target: any = this._target;
+    let prevTarget = target;
 
     for (let step in pipeline) {
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
-        console.log(`${action} ${arg} ${target}`);
+        // console.log(`${action} ${arg} ${target}`);
         if (arg[0] === '_' || this._mask.has(arg)) {
           throw 'Unauthorized!';
         }
+        prevTarget = target;
         target = (target as any)[arg];
         if (target === undefined) {
           throw TypeError(`Attribute ${arg} not found`)
         }
+        if (target instanceof Function) {
+          target.bind(prevTarget)
+        }
       } else if (action === 'call') {
-        console.log(`${action} ${target}`);
+        // console.log(`${action} ${target}`);
         
         let ar = pipeline[step][1][0] as [];
         let args: any[] = [];
         for (let i in ar) {
           args[i] = await exc(ar[i]);
         }
-        console.log(args)
+        // console.log(args)
 
         if (target._tk_inject_first === true) {
           args = [reply as Route, ...args];
         }
-        try {
-          target = await target(...args);
-        } catch(e) {
-          if (e.message.includes("class constructors must be invoked with 'new'")) {
-            target = await new target(...args);
-          } else {
-            throw e;
+        
+        const isConstructor = (x: any) => {
+          try {
+            return !!(new (new Proxy(x, {construct() {return isConstructor}}))())
+          } catch(e) {
+            return false
           }
+        }
+        if (isConstructor(target)) {
+          target = await new target(...args);
+        } else {
+          target = await target.call(prevTarget, ...args);
         }
       }
     }
@@ -361,12 +374,13 @@ export class Telekinesis extends Function {
       } as any)[typeof target] as string, target]
     } else if (typeof target !== 'undefined' && target instanceof Uint8Array) {
       out[1] = ['bytes', target];
-    } else if (typeof target !== 'undefined' && target instanceof Array) {
+    } else if (typeof target !== 'undefined' && (target instanceof Array || target instanceof Set)) {
       let children: string[] = [];
-      for (let v in target) {
-        children[v] = await this._encode(target[v], receiverId, listener, traversalStack)
+      let arr = target instanceof Array? target: Array.from(target.values());
+      for (let v in arr) {
+        children[v] = await this._encode(arr[v], receiverId, listener, traversalStack)
       }
-      out[1] = ['list', children];
+      out[1] = [target instanceof Array? 'list': 'set', children];
     } else if (Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
@@ -416,16 +430,32 @@ export class Telekinesis extends Function {
       let typ = (inputStack as any)[root][0] as string;
       let obj = (inputStack as any)[root][1] as any;
 
-      if (['int', 'float', 'str', 'bytes', 'bool', 'NoneType'].includes(typ)) {
+      if (['int', 'float', 'str', 'bool', 'NoneType'].includes(typ)) {
         // console.log(obj)
         out = obj;
-      } else if (['list', 'tuple'].includes(typ)) {
-        out = Array(obj.length);
-        outputStack.set(root, out);
-        for (let k in obj) {
-          out[k] = this._decode(inputStack, callerId, obj[k], outputStack);
+      } else if (typ === 'bytes') {
+        out = obj.buffer;
+      } else if (['list', 'tuple', 'set'].includes(typ)) {
+        let arr = Array(obj.length);
+        outputStack.set(root, arr);
+        for (let k in (obj as [])) {
+          arr[k] = this._decode(inputStack, callerId, obj[k], outputStack);
         }
+        if (typ === 'set') {
+          out = arr.reduce((p, v) => {p.add(v); return p}, new Set());
+        } else {
+          out = arr;
+        }
+        outputStack.set(root, out);
 
+      } else if (['range', 'slice'].includes(typ)) {
+        // TODO: Handle slice more gracefully! (maybe TK.Slice object?)
+        let n = Math.ceil( (obj[1] - obj[0]) / obj[2] )
+        if (n <= 0) {
+          out = [];
+        } else {
+          out = new Array(n).fill(0).map((_, i) => obj[0] + obj[2] * i);
+        } 
       } else if (typ === 'dict') {
         out = {}
         outputStack.set(root, out);

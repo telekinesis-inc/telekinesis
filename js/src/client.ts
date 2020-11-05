@@ -1,5 +1,5 @@
 import { serialize, deserialize } from "bson";
-import { gzip, inflate } from 'zlib'
+import { deflate, inflate } from 'zlib'
 import { bytesToInt, intToBytes  } from "./helpers"
 import { PublicKey, PrivateKey, SharedKey, Token } from "./cryptography"
 import { Telekinesis } from "./telekinesis";
@@ -88,7 +88,7 @@ export class Connection {
     
     let metadata = JSON.parse(new TextDecoder().decode(m.slice(152))) as {};
 
-    console.log(metadata)
+    // console.log(metadata)
     if (metadata.hasOwnProperty('endpoint')) {
       this.endpoint = Route.fromObject((metadata as any).endpoint as any);
     }
@@ -299,7 +299,7 @@ export class Channel {
   route?: Route;
 
   headerBuffer: Header[];
-  chunks: Map<Uint8Array, Map<number, Uint8Array>>;
+  chunks: Map<number, Map<number, Uint8Array>>;
   messages: [Route, {}][];
   waiting: (([]) => void)[];
   initLocks: ((channel: Channel) => void)[];
@@ -349,12 +349,12 @@ export class Channel {
       )
 
       let payloadSer = new Uint8Array();
-      if (bytesToInt(payloadSer.slice(0,4)) === 0) {
+      if (bytesToInt(rawChunk.slice(0,4)) === 0) {
         payloadSer = rawChunk.slice(4,);
       } else {
         let i = bytesToInt(rawChunk.slice(0, 2));
         let n = bytesToInt(rawChunk.slice(2, 4));
-        let mid = rawChunk.slice(4, 8);
+        let mid = bytesToInt(rawChunk.slice(4, 8));
         let chunk = rawChunk.slice(8);
 
         if (!this.chunks.has(mid)) {
@@ -372,7 +372,6 @@ export class Channel {
           return
         }
       }
-
 
       let payload;
       if (payloadSer[0] === 0) {
@@ -467,10 +466,11 @@ export class Channel {
 
       let payload = new Uint8Array(serialize(payloadObj));
 
-      if (payload.length > this.MAX_COMPRESSION_LEN) {
+      if (payload.length < this.MAX_COMPRESSION_LEN) {
         payload = new Uint8Array([255, ...(await new Promise((r, rej) => {
-          gzip(payload, (err, buf) => err ? rej(err) : r(new Uint8Array(buf)))
+          deflate(payload, (err, buf) => err ? rej(err) : r(new Uint8Array(buf)))
         }) as Uint8Array)]);
+
       } else {
         payload = new Uint8Array([0, ...payload]);
       }
