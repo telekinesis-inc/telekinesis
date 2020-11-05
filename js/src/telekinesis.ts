@@ -124,6 +124,7 @@ export class Telekinesis extends Function {
 
   _lastUpdate: number;
   _blockThen: boolean;
+  _isTelekinesisObject: boolean;
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true, 
@@ -147,6 +148,7 @@ export class Telekinesis extends Function {
     }
     this._lastUpdate = Date.now();
     this._blockThen = false;
+    this._isTelekinesisObject = true;
 
     return new Proxy(this, {
       get(target: Telekinesis, prop: string) {
@@ -154,7 +156,11 @@ export class Telekinesis extends Function {
           return (target as any)[prop];
         }
         if (prop === 'then') {
-          if (target._blockThen && (Date.now() - target._lastUpdate) < 100) {
+          // console.log(target._blockThen, Date.now() - target._lastUpdate);
+          if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
+            // console.log('here');
+            // return undefined;
+            // return (r: any) => r(target);
             return new Promise(r => r(target));
           }
           return (async (r: any) => r(await target._execute()))
@@ -340,7 +346,7 @@ export class Telekinesis extends Function {
     if (Object.getOwnPropertyNames(response).includes('return')) {
       // console.log((response as any)['return'])
       let out = this._decode((response as any)['return'], (this._target as Route).session)
-      if (out && Object.getPrototypeOf(out).constructor.name === 'Telekinesis') {
+      if (out && out._isTelekinesisObject === true) {
         out._lastUpdate = Date.now();
         out._blockThen = true;
       }
@@ -381,7 +387,7 @@ export class Telekinesis extends Function {
         children[v] = await this._encode(arr[v], receiverId, listener, traversalStack)
       }
       out[1] = [target instanceof Array? 'list': 'set', children];
-    } else if (Object.getPrototypeOf(target).constructor.name === 'Object') {
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
         (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack);
@@ -389,7 +395,7 @@ export class Telekinesis extends Function {
       out[1] = ['dict', children];
     } else {
       let obj: Telekinesis;
-      if (Object.getPrototypeOf(target).constructor.name === 'Telekinesis') {
+      if (target._isTelekinesisObject === true) {
         obj = target;
       } else {
         obj = new Telekinesis(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, 
