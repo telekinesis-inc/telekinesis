@@ -196,15 +196,17 @@ class Telekinesis:
     def _delegate(self, receiver_id, parent_channel=None):
         if isinstance(self._target, Route):
             route = self._target.clone()
+            max_delegation_depth = None
 
         else:
             route = self._add_listener(Channel(self._session))
             listener = self._listeners[route]
+            max_delegation_depth = self._max_delegation_depth
 
             if not parent_channel:
                 parent_channel = listener.channel
 
-        token_header = self._session.extend_route(route, receiver_id, self._max_delegation_depth)
+        token_header = self._session.extend_route(route, receiver_id, max_delegation_depth)
         parent_channel.header_buffer.append(token_header)
 
         return route

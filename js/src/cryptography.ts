@@ -174,16 +174,26 @@ export class Token {
   asset: string;
   tokenType: "root"|"extension";
   maxDepth: number | null;
+  validFrom: number;
+  validUntil: number | null;
+  failMode: 'CLOSED'|'OPEN';
+  metadata: {};
   signature?: string;
   
   constructor(
-    issuer: string, brokers: string[], receiver: string, asset: string, tokenType: 'root'|'extension', maxDepth?: number) {
+    issuer: string, brokers: string[], receiver: string, asset: string, tokenType: 'root'|'extension', maxDepth?: number,
+    validFrom?: number, validUntil?: number, failMode: 'CLOSED'|'OPEN' = 'CLOSED', metadata: {} = {}) {
     this.issuer = issuer;
     this.brokers = brokers;
     this.receiver = receiver;
     this.asset = asset;
     this.tokenType = tokenType;
     this.maxDepth = maxDepth || null;
+    this.validFrom = validFrom || Date.now()/1000;
+    this.validUntil = validUntil || null;
+    this.failMode = failMode;
+    this.metadata = metadata;
+
   }
   async verify(signature: string) {
     try {
@@ -206,7 +216,11 @@ export class Token {
       receiver: this.receiver,
       asset: this.asset,
       token_type: this.tokenType,
-      max_depth: this.maxDepth
+      max_depth: this.maxDepth,
+      valid_from: this.validFrom,
+      valid_until: this.validUntil,
+      fail_mode: this.failMode,
+      metadata: this.metadata,
     }
   }
   encode() {
@@ -222,7 +236,8 @@ export class Token {
   }
   static async decode(encodedToken: string, verify: boolean = true) {
     let obj = JSON.parse(encodedToken.substr(encodedToken.indexOf('.') + 1));
-    let token = new Token(obj.issuer, obj.brokers, obj.receiver, obj.asset, obj.token_type, obj.max_depth);
+    let token = new Token(obj.issuer, obj.brokers, obj.receiver, obj.asset, obj.token_type, obj.max_depth, obj.valid_from,
+      obj.valid_until, obj.fail_mode, obj.metadata);
     let signature = encodedToken.substring(0, encodedToken.indexOf('.'));
     if (!verify) {
       token.signature = signature;

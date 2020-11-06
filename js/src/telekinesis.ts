@@ -199,8 +199,10 @@ export class Telekinesis extends Function {
   }
   async _delegate(receiverId: string, parentChannel?: Channel) {
     let route: Route;
+    let maxDelegationDepth = this._maxDelegationDepth;
     if (this._target instanceof Route) {
       route = this._target.clone();
+      maxDelegationDepth = undefined;
     } else {
       route = await this._addListener(new Channel(this._session));
       let listener = this._listeners.get(route) as Listener;
@@ -210,7 +212,7 @@ export class Telekinesis extends Function {
       }
     }
 
-    let tokenHeader = await this._session.extendRoute(route, receiverId, this._maxDelegationDepth);
+    let tokenHeader = await this._session.extendRoute(route, receiverId, maxDelegationDepth);
     (parentChannel as Channel).headerBuffer.push(tokenHeader as Header);
 
     return route;

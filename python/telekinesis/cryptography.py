@@ -1,6 +1,7 @@
 import base64
 import ujson
 import os
+import time
 
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 from cryptography.hazmat.backends import default_backend
@@ -72,13 +73,20 @@ class SharedKey:
 
 
 class Token:
-    def __init__(self, issuer, brokers, receiver, asset, token_type, max_depth=None):
+    def __init__(
+        self, issuer, brokers, receiver, asset, token_type, max_depth=None, valid_from=None, valid_until=None, 
+        fail_mode="CLOSED", metadata=None
+    ):
         self.issuer = issuer
         self.brokers = brokers
         self.receiver = receiver
         self.asset = asset
         self.token_type = token_type
         self.max_depth = max_depth
+        self.valid_from = valid_from or time.time()
+        self.valid_until = valid_until
+        self.metadata = metadata or {}
+        self.fail_mode = fail_mode
         self.signature = None
 
     def verify(self, signature):
@@ -90,7 +98,10 @@ class Token:
             return False
 
     def _to_dict(self):
-        return {x: self.__getattribute__(x) for x in ["issuer", "brokers", "receiver", "asset", "token_type", "max_depth"]}
+        return {x: self.__getattribute__(x) for x in [
+            "issuer", "brokers", "receiver", "asset", "token_type", "max_depth", "valid_from", "valid_until", "fail_mode",
+            "metadata" 
+        ]}
 
     def _to_string(self):
         return ujson.dumps(self._to_dict(), escape_forward_slashes=False)
