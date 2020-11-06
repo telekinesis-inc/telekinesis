@@ -27,7 +27,7 @@ class Connection:
         self.websocket = None
         self.t_offset = 0
         self.broker_id = None
-        self.endpoint = None
+        self.entrypoint = None
 
         self.is_connecting_lock = asyncio.Event()
         self.awaiting_ack = OrderedDict()
@@ -75,7 +75,7 @@ class Connection:
         PublicKey(broker_id).verify(broker_signature, sent_challenge)
 
         self.broker_id = broker_id
-        self.endpoint = Route(**metadata.get("endpoint")) if metadata.get("endpoint") else None
+        self.entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
 
         headers = []
         for token, prev_token in self.session.issued_tokens.values():

@@ -21,7 +21,7 @@ class Connection:
         self.channels = set()
         self.tasks = set()
 
-    async def handshake(self, sessions, broker_key, endpoint):
+    async def handshake(self, sessions, broker_key, entrypoint):
         challenge = os.urandom(32) + int(time.time()).to_bytes(4, "big")
 
         await self.websocket.send(challenge)
@@ -40,7 +40,7 @@ class Connection:
         await self.websocket.send(
             broker_key.sign(client_challenge)
             + broker_key.public_serial().encode()
-            + ujson.dumps({"endpoint": endpoint and endpoint.to_dict()}, escape_forward_slashes=False).encode()
+            + ujson.dumps({"entrypoint": entrypoint and entrypoint.to_dict()}, escape_forward_slashes=False).encode()
         )
 
         if session_id not in sessions:
@@ -151,6 +151,7 @@ class Channel:
             return True
 
         if not tokens:
+            broker.logger.info("||| no tokens")
             return False
 
         asset = self.channel_id
@@ -161,7 +162,7 @@ class Channel:
             token = Token.decode(enc_token, False)
             if await broker.check_token(token):
                 if (token.asset == asset) and (token.issuer == last_receiver):
-                    max_depth = (max_depth and min(max_depth, token.max_depth or max_depth)) or token.max_depth
+                    max_depth = (max_depth and min(max_depth, (token.max_depth or max_depth) + depth)) or token.max_depth
                     if depth >= (max_depth or (depth + 1)):
                         return False
                     if token.receiver == source_id:
@@ -169,6 +170,8 @@ class Channel:
                     last_receiver = token.receiver
                     asset = token.signature
 
+            else:
+                broker.logger.info("||| token failed broker.check_token ")
         return False
 
 
@@ -176,7 +179,7 @@ class Broker:
     def __init__(self, broker_key_file=None):
         self.sessions = {}
         self.servers = {}
-        self.endpoint = None
+        self.entrypoint = None
         self.broker_key = PrivateKey(broker_key_file)
         self.logger = logging.getLogger(__name__)
         self.seen_messages = [set(), set(), 0]
@@ -184,7 +187,7 @@ class Broker:
     async def handle_connection(self, websocket, _):
         connection = None
         try:
-            connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.endpoint)
+            connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.entrypoint)
             self.logger.info("%s: new connection %s", self.broker_key.public_serial()[:4], connection.session.session_id[:4])
 
             async for message in websocket:
@@ -404,9 +407,9 @@ class Broker:
         if action == "close":
             connection.session.broker_sessions.pop(connection, None)
 
-    async def add_broker(self, url, inherit_endpoint=False):
+    async def add_broker(self, url, inherit_entrypoint=False):
         peer = Peer(None, self)
-        await peer.connect(url, inherit_endpoint)  # This already adds the peer to self.sessions
+        await peer.connect(url, inherit_entrypoint)  # This already adds the peer to self.sessions
 
     async def check_token(self, token):
         session = self.sessions.get(token.issuer)
@@ -477,9 +480,9 @@ class Peer(Connection):
         self.lock = asyncio.Event()
         self.exception = None
 
-    def connect(self, url, inherit_endpoint):
+    def connect(self, url, inherit_entrypoint):
         self.url = url
-        self.listener = asyncio.get_event_loop().create_task(self.listen(inherit_endpoint))
+        self.listener = asyncio.get_event_loop().create_task(self.listen(inherit_entrypoint))
 
         return self
 
@@ -509,11 +512,11 @@ class Peer(Connection):
         signature, session_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
         PublicKey(session_id).verify(signature, sent_challenge)
 
-        endpoint = Route(**metadata.get("endpoint")) if metadata.get("endpoint") else None
+        entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
 
         await self.send([("broker", "open")])
 
-        return session_id, endpoint
+        return session_id, entrypoint
 
     async def send(self, header):
         h = ujson.dumps(header).encode()
@@ -523,12 +526,12 @@ class Peer(Connection):
 
         await self.websocket.send(s + t + m)
 
-    async def listen(self, inherit_endpoint):
+    async def listen(self, inherit_entrypoint):
         n_tries = 0
         while True:
             try:
                 self.lock.clear()
-                session_id, endpoint = await self.reconnect()
+                session_id, entrypoint = await self.reconnect()
 
                 if not (-15 < self.t_offset < 2):
                     raise IncompatibleBrokerException(f'Unix time difference too large: {self.t_offset} seconds.')
@@ -537,8 +540,8 @@ class Peer(Connection):
                 if session_id not in self.broker.sessions:
                     self.broker.sessions[session_id] = Session(session_id)
 
-                if inherit_endpoint:
-                    self.broker.endpoint = endpoint
+                if inherit_entrypoint:
+                    self.broker.entrypoint = entrypoint
 
                 self.session = self.broker.sessions[session_id]
                 self.session.connections.add(self)

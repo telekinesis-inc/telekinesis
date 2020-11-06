@@ -25,7 +25,7 @@ async def test_walkthrough():
     conn_0 = await Connection(Session(), "ws://localhost:8777")
     conn_0.RESEND_TIMEOUT = 1
 
-    broker_0.endpoint = Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._add_listener(
+    broker_0.entrypoint = Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._add_listener(
         Channel(conn_0.session, is_public=True)
     )
 
@@ -36,7 +36,7 @@ async def test_walkthrough():
     conn_1 = await Connection(Session(), "ws://localhost:8778")
     conn_1.RESEND_TIMEOUT = 1
 
-    f = await asyncio.wait_for(Telekinesis(conn_1.endpoint, conn_1.session), 4)
+    f = await asyncio.wait_for(Telekinesis(conn_1.entrypoint, conn_1.session), 4)
     g = await asyncio.wait_for(f("Hello, "), 4)  # Telekinesis objects that return Telekinesis objects are welcome
 
     assert "Hello, World" == await asyncio.wait_for(g("World"), 5)

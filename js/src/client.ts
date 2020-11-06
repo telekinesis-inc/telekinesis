@@ -15,7 +15,7 @@ export class Connection {
   websocket?: WebSocket;
   brokerId?: string;
   tOffset: number;
-  endpoint?: Route;
+  entrypoint?: Route;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
     // this.RESEND_TIMEOUT = 2; // sec
@@ -69,7 +69,7 @@ export class Connection {
     let sentChallenge = window.crypto.getRandomValues(new Uint8Array(32));
     let sentMetadata = new TextEncoder().encode(
       JSON.stringify({
-        version: '0.1.0a18'
+        version: '0.1.0a19'
       })
     )
 
@@ -89,8 +89,8 @@ export class Connection {
     let metadata = JSON.parse(new TextDecoder().decode(m.slice(152))) as {};
 
     // console.log(metadata)
-    if (metadata.hasOwnProperty('endpoint')) {
-      this.endpoint = Route.fromObject((metadata as any).endpoint as any);
+    if (metadata.hasOwnProperty('entrypoint')) {
+      this.entrypoint = Route.fromObject((metadata as any).entrypoint as any);
     }
 
     try {
