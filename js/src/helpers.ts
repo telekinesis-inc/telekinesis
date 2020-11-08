@@ -16,22 +16,27 @@ export function bytesToInt(bytes: Uint8Array) {
 }
 
 export async function authenticate(url: string, printCallback: ((output: any) => void) = console.log) {
-  let s = new Session();
 
-  if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
-    let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
-    url = url.slice(0, i) + ':8776' + url.slice(i);
-  }
-
-  let c = new Connection(s, url);
-  await c.connect();
-
-  let endpoint = new Telekinesis(c.entrypoint as Route, s);
-
-  let user = await endpoint._call(printCallback, ...Array.from(arguments).slice(2,));
+  let user = await (await new PublicUser(url) as any).authenticate._call(printCallback, ...Array.from(arguments).slice(2,));
 
   if (!user) {
     throw 'Failed to authenticate';
   }
   return user;
+}
+
+export class PublicUser {
+  constructor(url: string) {
+    if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
+      let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
+      url = url.slice(0, i) + ':8776' + url.slice(i);
+    }
+    return new Promise<any>(async (r) => {
+      let session = new Session();
+      let c = new Connection(session, url);
+      await c.connect();
+
+      r(new Telekinesis(c.entrypoint as Route, session) as any);
+    })
+  }
 }

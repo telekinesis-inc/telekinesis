@@ -6,6 +6,15 @@ from .telekinesis import Telekinesis
 
 
 async def authenticate(url, print_callback=print, **kwargs):
+
+    user = await (await PublicUser(url)).authenticate._call(print_callback, **kwargs)
+
+    if not user:
+        raise Exception("Failed to authenticate")
+
+    return user
+
+async def PublicUser(url):
     s = Session()
 
     if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
@@ -14,11 +23,6 @@ async def authenticate(url, print_callback=print, **kwargs):
 
     c = await Connection(s, url)
 
-    entrypoint = Telekinesis(c.entrypoint, s)
+    return Telekinesis(c.entrypoint, s)
 
-    user = await entrypoint._call(print_callback, **kwargs)
-
-    if not user:
-        raise Exception("Failed to authenticate")
-
-    return user
+        

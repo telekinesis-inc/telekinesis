@@ -1,7 +1,7 @@
 {
   "name": "telekinesis-js",
-  "version": "0.1.0-alpha.20",
-  "description": "A websockets based RPC to easily develop, deploy and call services online.",
+  "version": "0.1.0-alpha.21",
+  "description": "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
   "main": "./lib/index.js",
   "typings": "./lib/index.d.ts",
   "scripts": {
