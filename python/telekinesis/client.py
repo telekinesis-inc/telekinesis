@@ -1,613 +1,557 @@
-import os
-import inspect
-from functools import partial
-import re
-import types
-import warnings
-
-import json
-import asyncio
-import websockets
+import logging
 import time
+import os
+import asyncio
+import bson
+import zlib
+from collections import deque, OrderedDict
+from pkg_resources import get_distribution
 import hashlib
 
-from getpass import getpass
-import makefun
-from uuid import uuid4
-from collections import deque
-from makefun import create_function
-from .common import sign, generate_public_serial, encode_message, decode_message, create_private_key, \
-                    serialize_private_key, deserialize_private_key, extend_role, get_certificate_dependencies, \
-                    event_wait, check_function_signature, encrypt, decrypt, derive_shared_key
+# import blake3
 
-class Node:
-    def __init__(self, url='ws://localhost:3388', auth_file_path=None, key_password=None, connection=None):
-        if connection is None:
-            self.connection = Connection(url, auth_file_path, key_password)
-        else:
-            self.connection = connection
+import websockets
+import ujson
 
-    async def connect(self, **kwargs):
-        await self.connection.connect(**kwargs)
-        return self
-    
-    async def close(self):
-        return await self.connection.close()
-    
-    async def get(self, function_name):
-        async with Thread(self.connection) as thread:
-            await thread.send({
-                'method': 'GET_SERVICE', 
-                'function': function_name})
-            
-            message = await thread.recv()
+from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignature
 
-        return self._create_service_instance(message['signature'],
-                                             function_name,
-                                             can_serve=message['can_serve'],
-                                             docstring=message['docstring'],
-                                             service_type=message['type'])
-
-    async def publish(self, function_name, function_impl, n_workers=1, foreground=False, replace=False, static_page=None, can_call=None, inject_first_arg=False):
-
-        signature = str(inspect.signature(function_impl))
-
-        if inject_first_arg:
-            signature = re.sub(r'[a-zA-Z0-9=\_\s]+(?=[\)\,])', '', signature, 1)\
-                          .replace('(,','(',1).replace('( ','(',1)
-
-        message = {
-            'method': 'PUBLISH', 
-            'function': function_name,
-            'type': 'function' if isinstance(function_impl, types.FunctionType) else 'object',
-            'replace': replace,
-            'signature': signature, 
-            'docstring': function_impl.__doc__,
-            'can_call': can_call if can_call is None or isinstance(can_call[0], list) or isinstance(can_call[0], tuple) else [can_call]
-        }
-
-        if static_page is not None:
-            message['static'] = static_page
-
-        async with Thread(self.connection) as thread:
-            await thread.send(message)
-            ret_message = await thread.recv()
-            # print(ret_message)
-
-        service = self._create_service_instance(signature, function_name, function_impl, True, inject_first_arg, message['docstring'],
-                                             message['type'])
-        service.start(n_workers)
-
-        if foreground:
-            await asyncio.gather(*service.workers)
-
-        return service
-
-    def _create_service_instance(self, signature, function_name, function_impl=None, can_serve=False, inject_first_arg=False,
-                                       docstring=None, service_type='function'):
-        def create_call():
-            return Call(self.connection, function_name)
-
-        async def await_request():
-            return await Request(self.connection, function_name)._await_request()
-
-        async def call_service(*args, **kwargs):
-            if service_type == 'function':
-                call = create_call()
-                return await call.call(*args, **kwargs)
-            else:
-                ro = RemoteObject(self.connection, function_name, args, kwargs)
-                return await ro._start()
-
-        async def run_service(function_impl=function_impl, inject_first_arg=inject_first_arg):
-            def get_object_state(function_impl):
-                props = {}
-                meths = {}
-
-                for d in dir(function_impl):
-                    if d[0] != '_':
-                        sub = function_impl.__getattribute__(d)
-                        if isinstance(sub, types.MethodType):
-                            meths[d] = {'signature': str(inspect.signature(sub)),
-                                        'docstring': sub.__doc__}
-                        else:
-                            props[d] = sub
-                return props, meths
-
-            if function_impl is None:
-                raise Exception('Function to be served has to be specified somewhere.')
-
-            while True:
-                async with Request(self.connection, function_name) as req:
-                    try:
-                        if service_type == 'function':
-                            if inject_first_arg:
-                                output = function_impl(req, *req.args, **req.kwargs)
-                            else:
-                                output = function_impl(*req.args, **req.kwargs)
-
-                            if asyncio.iscoroutinefunction(function_impl):
-                                output = await output
-                            await req.send_return(output)
-                        else:
-                            if inject_first_arg:
-                                obj = function_impl(req, *req.args, **req.kwargs)
-                            else:
-                                obj = function_impl(*req.args, **req.kwargs)
-                            res = None
-                            while True:
-                                props, meths = get_object_state(obj)
-                                await req.send_update(props=props, meths=meths, response=res)
-                                m = await req._thread.recv()
-                                if 'obj_method' in m:
-                                    args = m.get('args') or []
-                                    kwargs = m.get('kwargs') or {}
-                                    res = obj.__getattribute__(m['obj_method'])(*args, **kwargs)
-
-                                    if asyncio.iscoroutinefunction(obj.__getattribute__(m['obj_method'])):
-                                        res = await res
-                                if '_close' in m:
-                                    # await req.send_update(props=props, meths=meths, response=res, call_return=None)
-                                    break
-                    except asyncio.exceptions.CancelledError:
-                        break
-                    except Exception as e:
-                        await req.send_update(error=str(e))
-
-        def start(workers, n_workers=1, function_impl=function_impl, inject_first_arg=inject_first_arg):
-            for _ in range(n_workers):
-                workers.append(asyncio.get_event_loop().create_task(run_service(function_impl, inject_first_arg)))
-
-        async def remove():
-            async with Thread(self.connection) as thread:
-                await thread.send({'method': 'REMOVE', 'function': function_name})
-
-                await asyncio.sleep(2)
-
-                return await thread.recv()
-        
-        if check_function_signature(signature):
-            raise check_function_signature(signature)
-        service = makefun.create_function(signature, call_service, doc=docstring)
-
-        if service_type == 'function':
-            service.create_call = create_call
-
-        if can_serve:
-            service.run = run_service
-            service.workers = []
-            service.start = partial(start, service.workers)
-            service.stop_all = lambda: [t.cancel() for t in service.workers] and None
-            service.remove = remove
-            service.await_request = await_request
-
-        return service
-
-    async def list(self):
-        async with Thread(self.connection) as thread:
-            await thread.send({'method': 'LIST'})
-
-            return await thread.recv()
-
-    async def __aenter__(self):
-        return await self.connect()
-
-    async def __aexit__(self, _, __, ___):
-        return await self.close()
-
-class Thread:
-    def __init__(self, connection):
-        while True:
-            thread_id = uuid4().hex
-            if thread_id not in connection.threads:
-                connection.threads[thread_id] = self
-                break
-
-        self.event = asyncio.Event()
-        self.queue = deque()
-        self.chunks = {}
-        self.thread_id = thread_id
-        self.connection = connection
-
-    async def send(self, message):
-        if not self.connection.is_connected():
-            await self.connection.connect()
-        
-        await encode_message(self.thread_id, message, self.connection)
-
-    async def recv(self):
-        await self.event.wait()
-
-        if len(self.queue) == 1:
-            self.event.clear()
-
-        message = self.queue.pop()
-
-        if 'error' in message:
-            raise Exception(message['error'])
-
-        if 'warning' in message:
-            warnings.warn(message['warning'])
-        
-        return message
-    
-    async def close(self):
-        await self.send({'method': 'CLOSE_THREAD'})
-        self.connection.threads.pop(self.thread_id, None)
-    
-    async def __aenter__(self):
-        # if not self.connection.is_connected():
-        #     await self.connection.connect()
-        return self
-    
-    async def __aexit__(self, _, __, ___):
-        await self.close()
 
 class Connection:
-    def __init__(self, url='ws://localhost:3388', auth_file=None, key_password=None):
+    def __init__(self, session, url="ws://localhost:8776"):
+        self.RESEND_TIMEOUT = 2  # sec
+        self.MAX_SEND_RETRIES = 3
+
+        self.session = session
         self.url = url
-        self.is_connected = lambda: False
-        self.threads = {}
-        self._chunks = {}
-        self.role_certificates = []
-        self.roles = []
-        self.auth_file = None
-        self.hashed_key_password = None
-        self._retry_connect = False
-
-        self.pending_messages = {}
-        self.seen_messages = (set(), set())
-
-        self.update_auth_file_params(auth_file, key_password)
-
-        if auth_file is None or not os.path.exists(auth_file):
-            self.private_key = create_private_key()
-            if auth_file is not None:
-                self.save_auth_file()
-        else:
-            self.load_auth_file()
-
-        self.public_key = generate_public_serial(self.private_key)
-
+        self.logger = logging.getLogger(__name__)
         self.websocket = None
-        self.listener = None
+        self.t_offset = 0
+        self.broker_id = None
+        self.entrypoint = None
 
-    async def connect(self, **kwargs):
-        for i_retry in range(3):
-            try:
-                # if self.is_connected():
-                    # await self.websocket.close()
-                self.websocket = await websockets.connect(self.url+'/ws/', **kwargs)
-                self.is_connected = lambda: not self.websocket.closed
-                self._retry_connect = True
-                break
-            except Exception as e:
-                await asyncio.sleep(2)
-        else:
-            raise Exception('Max connection retries reached')
+        self.is_connecting_lock = asyncio.Event()
+        self.awaiting_ack = OrderedDict()
 
-        self.listener = asyncio.get_event_loop().create_task(self._listen())
+        session.connections.add(self)
 
-        await self.authenticate()
+        self.listener = asyncio.get_event_loop().create_task(self.listen())
 
-        if self.threads:
-            async with Thread(self) as thread:
-                await thread.send({
-                    'method': 'RECOVER_THREADS',
-                    'threads': list(self.threads.keys())
-                })
-                print(await thread.recv())
-            # TODO close non recovered threads
+    async def reconnect(self):
+        if self.is_connecting_lock.is_set():
+            self.is_connecting_lock.clear()
+            if self.listener:
+                self.listener.cancel()
+
+            self.listener = asyncio.get_event_loop().create_task(self.listen())
+
+        await self.is_connecting_lock.wait()
+
+    async def _connect(self):
+        self.logger.info("%s connecting", self.session.session_key.public_serial()[:4])
+        if self.websocket:
+            await self.websocket.close()
+
+        self.websocket = await websockets.connect(self.url)
+
+        challenge = await self.websocket.recv()
+        t_broker = int.from_bytes(challenge[-4:], "big")
+
+        self.t_offset = int(time.time()) - t_broker
+        signature = self.session.session_key.sign(challenge)
+
+        pk = self.session.session_key.public_serial().encode()
+
+        sent_challenge = os.urandom(32)
+        sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
+        await self.websocket.send(
+            signature + pk + sent_challenge + ujson.dumps(sent_metadata, escape_forward_slashes=False).encode())
+
+        m = await asyncio.wait_for(self.websocket.recv(), 15)
+
+        if m[: len("Incompatible")] == b"Incompatible":
+            raise Exception(m.decode())
+
+        broker_signature, broker_id, metadata = m[:64], m[64:152].decode(), ujson.loads(m[152:].decode())
+        PublicKey(broker_id).verify(broker_signature, sent_challenge)
+
+        self.broker_id = broker_id
+        self.entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
+
+        headers = []
+        for token, prev_token in self.session.issued_tokens.values():
+            headers.append(("token", ("issue", token.encode(), prev_token and prev_token.encode())))
+        for channel in self.session.channels.values():
+            listen_dict = channel.route.to_dict()
+            listen_dict["is_public"] = channel.is_public
+            listen_dict.pop("tokens")
+            headers.append(("listen", listen_dict))
+        await self.send(headers)
+
+        self.is_connecting_lock.set()
+
         return self
-    
-    async def authenticate(self):
-        async with Thread(self) as thread:
-            pubkey = generate_public_serial(self.private_key)
-            timestamp = str(int(time.time()))
-            signature = sign(timestamp, self.private_key)
 
-            await thread.send({
-                'method': 'AUTHENTICATE',
-                'pubkey': pubkey,
-                'timestamp': timestamp,
-                'signature': signature,
-                'role_certificates': self.role_certificates
-            })
-            self.roles = await thread.recv()
+    async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
+        self.logger.info(
+            "%s sending: %s %s", self.session.session_key.public_serial()[:4], " ".join(h[0] for h in header), len(payload),
+        )
 
-    async def add_role_certificate(self, *role_certificates):
-        [self.role_certificates.append(rc) for rc in role_certificates]
-        await self.authenticate()        
+        def encode(header, payload, bundle_id, message_id, retry):
+            h = ujson.dumps(header, escape_forward_slashes=False).encode()
+            r = (retry).to_bytes(1, "big") + (message_id or b"0" * 64)
+            p = hashlib.sha256(payload).digest()
+            m = len(h).to_bytes(2, "big") + len(r + p + payload).to_bytes(3, "big") + h + r + p
+            t = int(time.time() - self.t_offset).to_bytes(4, "big")
+            s = self.session.session_key.sign(t + m)
+            return s, t + m + payload
 
-        self.save_auth_file()
-    
-    def save_auth_file(self, auth_file=None, key_password=None):
-        self.update_auth_file_params(auth_file, key_password)
+        s, mm = encode(header, payload, bundle_id, ack_message_id, 255 if ack_message_id else 0)
+        message_id = s
 
-        if self.auth_file is not None:
-            with open(self.auth_file, 'w') as fp:
-                json.dump({'private_key': serialize_private_key(self.private_key, self.hashed_key_password),
-                           'role_certificates': self.role_certificates}, fp)
+        expect_ack = "send" in set(a for a, _ in header) and not ack_message_id
+        if expect_ack:
+            while True:  # Clearing old messages
+                if self.awaiting_ack:
+                    target = list(self.awaiting_ack.values())[0]
+                    if target[3] < (time.time() - (1 + self.MAX_SEND_RETRIES) * self.RESEND_TIMEOUT):
+                        self.clear(target[1])
+                        continue
+                break
+            lock = asyncio.Event()
+            if not self.awaiting_ack:
+                lock.set()
+            self.awaiting_ack[message_id or s] = (header, bundle_id, lock, time.time())
 
-    def load_auth_file(self, auth_file=None, key_password=None):
-        self.update_auth_file_params(auth_file, key_password)
-
-        if self.auth_file is not None:
-            with open(self.auth_file, 'r') as fp:
-                auth_data = json.load(fp) 
-
-            self.private_key = deserialize_private_key(auth_data['private_key'], self.hashed_key_password)
-            self.role_certificates = auth_data['role_certificates']
-
-    def update_auth_file_params(self, auth_file, key_password):
-        if auth_file is not None:
-            self.auth_file = auth_file
-
-        if key_password is not None:
-            if key_password == True:
-                key_password = getpass('Private Key Password: ')
-            self.hashed_key_password = hashlib.sha256(bytes(key_password, 'utf-8')).hexdigest()
-
-    async def _listen(self):
-        i = 0
-        try:
-            while True:
-                raw_message = await self.websocket.recv()
-                i += 1
-
-                thread_id, message = await decode_message(raw_message, self)
-
-                if message is None:
-                    continue
-
-                if thread_id in self.threads:
-                    self.threads[thread_id].queue.appendleft(message)
-                    self.threads[thread_id].event.set()
+        for retry in range(self.MAX_SEND_RETRIES + 1):
+            if not self.websocket or self.websocket.closed:
+                self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial()[:4], retry)
+                if self.is_connecting_lock.is_set():
+                    await self.reconnect()
                 else:
-                    print(self.public_key[102:107], thread_id, message)
-        except Exception as e:
-            print(self.public_key[102:107], 'connection listen error:', e)
-            if self._retry_connect:
-                await asyncio.sleep(5)
-                asyncio.get_event_loop().create_task(self.connect())
-    
-    async def close(self):
-        for t in self.threads.copy():
-            await self.threads[t].close()
-            await asyncio.sleep(0.001)
+                    await self.is_connecting_lock.wait()
 
-        self._retry_connect = False
-        self.listener.cancel()
+            try:
+                await self.websocket.send(s + mm)
+            except Exception:
+                self.logger.info("%s Connection.send", self.session.session_key.public_serial()[:4], exc_info=True)
+                continue
 
-        # for m in self.pending_messages.copy():
-        #     await asyncio.wait_for(self.pending_messages[m].wait(), 3)
-        #     # await asyncio.sleep(0.001)
+            if not expect_ack or await self.expect_ack(message_id, lock):
+                return
 
-        await self.websocket.close()
+            if retry < (self.MAX_SEND_RETRIES):
+                s, mm = encode(header, payload, bundle_id, message_id, retry+1)
+                self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
-class Request:
-    def __init__(self, connection, function_name):
-        self._function_name = function_name
-        self._thread = Thread(connection)
-        self._private_key = connection.private_key
-        self.call_id = None
-        self.args = None
-        self.kwargs = None
-        self.caller_pubkey = None
+        raise Exception("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
 
-    async def _await_request(self):
-        await self._thread.send({'method': 'SERVE', 'function': self._function_name})
+    async def expect_ack(self, message_id, lock):
+        await lock.wait()
+        if message_id not in self.awaiting_ack:
+            return True
+        lock.clear()
+        try:
+            await asyncio.wait_for(lock.wait(), self.RESEND_TIMEOUT)
+        except asyncio.TimeoutError:
+            lock.set()
+        if message_id not in self.awaiting_ack:
+            return True
+
+        return False
+
+    def clear(self, bundle_id):
+        if bundle_id:
+            self.logger.info("%s clearing %s", self.session.session_key.public_serial()[:4], bundle_id[:4])
+            ks = []
+            for k, v in self.awaiting_ack.items():
+                if v[1] == bundle_id:
+                    ks.append(k)
+            for k in ks:
+                self.awaiting_ack.pop(k)
+
+    async def listen(self):
+        n_tries = 0
         while True:
-            message = await self._thread.recv()
+            try:
+                await self._connect()
+                while True:
+                    await self.recv()
+                    n_tries = 0
+            except Exception:
+                self.logger.info("%s Connection.listen", self.session.session_key.public_serial()[:4], exc_info=True)
 
-            if 'call' in message:
-                call = message['call']
+            self.is_connecting_lock.clear()
+            await asyncio.sleep(1)
 
-                self.call_id = call['call_id']
-                self.args = call['args']
-                self.kwargs = call['kwargs']
-                self.caller_pubkey = call['caller_pubkey']
+            if n_tries > 10:
+                raise Exception("%s Max tries reached" % self.session.session_key.public_serial()[:4])
+            n_tries += 1
 
-                self.shared_secret = derive_shared_key(self._private_key, 
-                                                       call['caller_pubkey'],
-                                                       call['caller_thread'])
-
-                return self
-            elif 'service_removed' in message:
-                print(message['service_removed'])
-                return None
+    async def recv(self):
+        if not self.websocket or self.websocket.closed:
+            if self.is_connecting_lock.is_set():
+                await self.reconnect()
             else:
-                print('Unexpected message:', message)
+                await self.is_connecting_lock.wait()
 
-    async def send_return(self, output):
-        await self.send_update(call_return=output)
-    
-    async def send_update(self, **kwargs):
-        message = kwargs
+        message = await self.websocket.recv()
 
-        message.update({
-            'method': 'RETURN',
-            'call_id': self.call_id,
-        })
-        return await self._thread.send(message)
+        signature, timestamp = message[:64], int.from_bytes(message[64:68], "big")
 
-    async def send_role_extension(self, from_role, sub_role, recipient=None):
-        if recipient is None:
-            recipient = self.caller_pubkey
-        await self.send_update(role_extension=[
-            *get_certificate_dependencies(self._thread.connection.role_certificates, from_role),
-            extend_role(self._thread.connection.private_key, from_role, recipient, sub_role)
-        ])
+        if self.session.check_no_repeat(signature, timestamp + self.t_offset):
 
-    async def send_input_request(self, prompt=None, hashed=False, salt=None):
-        await self.send_update(input_request=prompt, hashed=hashed, salt=salt)
+            len_h, len_p = [int.from_bytes(x, "big") for x in [message[68:70], message[70:73]]]
+            header = ujson.loads(message[73: 73 + len_h])
+            full_payload = message[73 + len_h: 73 + len_h + len_p]
+            self.logger.info(
+                "%s received: %s %s",
+                self.session.session_key.public_serial()[:4],
+                " ".join(h[0] for h in header),
+                len(full_payload),
+            )
+            for action, content in header:
+                if action == "send":
+                    source, destination = Route(**content["source"]), Route(**content["destination"])
+                    PublicKey(source.session).verify(signature, message[64: 73 + len_h + 65 + 32])
+                    if self.session.channels.get(destination.channel):
+                        channel = self.session.channels.get(destination.channel)
+                        if full_payload[0] == 255:
+                            self.ack(source.session, full_payload[1:65])
+                        else:
+                            ret_signature = signature if (full_payload[0] == 0) else full_payload[1:65]
+                            payload = full_payload[65 + 32:]
+                            await self.send(
+                                (("send", {"destination": content["source"], "source": content["destination"]}),),
+                                b"",
+                                None,
+                                ret_signature,
+                            )
+                            # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
+                            if hashlib.sha256(payload).digest() == full_payload[65: 65 + 32]:
+                                if (
+                                    (ret_signature == signature) 
+                                    or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
+                                ):
+                                    channel.handle_message(source, destination, payload)
+                            else:
+                                raise Exception("Authentication Error: message payload does not match signed hash")
 
-        response = await self._thread.recv()
+    def ack(self, source_id, message_id):
+        # print(self.session.session_key.public_serial()[:4], 'received ack', message_id[:4], 'from', source_id[:4])
+        header = self.awaiting_ack.get(message_id, [[]])[0]
+        for action, content in header:
+            if action == "send":
+                if content["destination"]["session"] == source_id:
+                    t = self.awaiting_ack.pop(message_id)
+                    t[2].set()
+                    if self.awaiting_ack:
+                        self.awaiting_ack[list(self.awaiting_ack.keys())[0]][2].set()
 
-        if '_close' in response:
-            await self.close()
-            raise Exception('Client closed call')
+    def __await__(self):
+        async def await_lock():
+            await self.is_connecting_lock.wait()
+            return self
 
-        if 'input_response' in response:
-            return response['input_response']
+        return await_lock().__await__()
 
-    async def close(self):
-        return await self._thread.close()
+
+class Session:
+    def __init__(self, session_key_file=None):
+        self.session_key = PrivateKey(session_key_file)
+        self.channels = {}
+        self.connections = set()
+        self.seen_messages = [set(), set(), 0]
+        self.issued_tokens = {}
+        self.pending_tasks = set()
+
+    def check_no_repeat(self, signature, timestamp):
+        now = int(time.time())
+
+        lead = now // 60
+        if self.seen_messages[2] != lead:
+            self.seen_messages[lead % 2].clear()
+            self.seen_messages[2] = lead
+
+        if (now - 60 + 4) <= timestamp <= now + 4:
+            if signature not in self.seen_messages[0].union(self.seen_messages[1]):
+                self.seen_messages[lead % 2].add(signature)
+                return True
+        return False
+
+    def issue_token(self, target, receiver, max_depth=None):
+        if isinstance(target, Token):
+            token_type = "extension"
+            prev_token = target
+            asset = target.signature
+        else:
+            token_type = "root"
+            prev_token = None
+            asset = target
+
+        for token, prev_token_tmp in self.issued_tokens.values():
+            if (
+                token.asset == asset
+                and token.receiver == receiver
+                and token.token_type == token_type
+                and token.max_depth == max_depth
+                and all([x.broker_id in token.brokers for x in self.connections])
+            ):
+                prev_token = prev_token_tmp
+                break
+        else:
+            token = Token(
+                self.session_key.public_serial(),
+                [x.broker_id for x in self.connections],
+                receiver,
+                asset,
+                token_type,
+                max_depth,
+            )
+            signature = token.sign(self.session_key)
+
+            self.issued_tokens[signature] = token, prev_token
+
+        return ("token", ("issue", token.encode(), prev_token and prev_token.encode()))
+
+    def revoke_tokens(self, asset):
+        children = [tid for tid, t in self.issued_tokens.items() if t[0].asset == asset]
+        headers = [h for hs in [self.revoke_tokens(tid) for tid in children] for h in hs]
+
+        tokens = self.issued_tokens.pop(asset, None)
+        if tokens:
+            return [("token", ("revoke", tokens[0].signature))] + headers
+        return headers
+
+    def extend_route(self, route, receiver, max_depth=None):
+
+        if route.session == self.session_key.public_serial():
+            token_header = self.issue_token(route.channel, receiver, max_depth)
+            route.tokens = [token_header[1][1]]
+            return token_header
+
+        for i, enc_token in enumerate(route.tokens):
+            token = Token.decode(enc_token)
+            if token.receiver == self.session_key.public_serial():
+                route.tokens = route.tokens[: i + 1]
+
+        token = Token.decode(route.tokens[-1], False)
+        token_header = self.issue_token(token, receiver, max_depth)
+        route.tokens.append(token_header[1][1])
+        return token_header
+
+    def clear(self, bundle_id):
+        for connection in self.connections:
+            connection.clear(bundle_id)
+
+    async def send(self, header, payload=b"", bundle_id=None):
+        for connection in self.connections:
+            await connection.send(header, payload, bundle_id)
+
+
+class Channel:
+    def __init__(self, session, channel_key_file=None, is_public=False):
+        self.MAX_PAYLOAD_LEN = 2 ** 19
+        self.MAX_COMPRESSION_LEN = 2 ** 19
+        self.MAX_OUTBOX = 2 ** 4
+
+        self.session = session
+        self.channel_key = PrivateKey(channel_key_file)
+        self.is_public = is_public
+        self.route = Route(
+            list(set(c.broker_id for c in self.session.connections)),
+            self.session.session_key.public_serial(),
+            self.channel_key.public_serial(),
+        )
+        self.header_buffer = []
+        self.chunks = {}
+        self.messages = deque()
+        self.lock = asyncio.Event()
+        session.channels[self.channel_key.public_serial()] = self
+
+        self.telekinesis = None
+
+    def handle_message(self, source, destination, raw_payload):
+        if self.validate_token_chain(source.session, destination.tokens):
+            shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
+            payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
+
+            if payload[:4] == b"\x00" * 4:
+                if payload[4] == 0:
+                    self.messages.appendleft((source, bson.loads(payload[5:])))
+                elif payload[4] == 255:
+                    self.messages.appendleft((source, bson.loads(zlib.decompress(payload[5:]))))
+                else:
+                    raise Exception("Received message with different encoding")
+
+                self.lock.set()
+            else:
+                ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
+                i, n = int.from_bytes(ir, "big"), int.from_bytes(nr, "big")
+                if mid not in self.chunks:
+                    self.chunks[mid] = {}
+                self.chunks[mid][i] = chunk
+
+                if len(self.chunks[mid]) == n:
+                    chunks = self.chunks.pop(mid)
+                    payload = b"".join(chunks[ii] for ii in range(n))
+                    if payload[0] == 0:
+                        self.messages.appendleft((source, bson.loads(payload[1:])))
+                    elif payload[0] == 255:
+                        self.messages.appendleft((source, bson.loads(zlib.decompress(payload[1:]))))
+                    else:
+                        raise Exception("Received message with different encoding")
+                    self.lock.set()
+        else:
+            self.session.logger.error(
+                "Invalid Tokens: %s %s -> %s %s [%s]",
+                source.session[:4],
+                source.channel[:4],
+                destination.session[:4],
+                destination.channel[:4],
+                destination.tokens,
+            )
+
+    async def recv(self):
+        if not self.messages:
+            self.lock.clear()
+            await self.lock.wait()
+
+        return self.messages.pop()
+
+    def listen(self):
+        listen_dict = self.route.to_dict()
+        listen_dict["is_public"] = self.is_public
+        listen_dict.pop("tokens")
+        self.header_buffer.append(("listen", listen_dict))
+
+        return self
+
+    async def send(self, destination, payload_obj):
+        def encrypt_slice(payload, max_payload, shared_key, mid, n, i):
+            if i < n:
+                if n == 1:
+                    chunk = b"\x00" * 4 + payload
+                else:
+                    if n > 2 ** 16:
+                        raise Exception(f"Payload size {len(payload)/2**20} MiB is too large")
+                    chunk = (
+                        i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload: (i + 1) * max_payload]
+                    )
+
+                nonce = os.urandom(16)
+                yield nonce + shared_key.encrypt(chunk, nonce)
+                yield from encrypt_slice(payload, max_payload, shared_key, mid, n, i + 1)
+
+        async def execute(header, encrypted_slice_generator, mid):
+            for encrypted_slice in encrypted_slice_generator:
+                await self.execute(header, encrypted_slice, mid)
+
+        source_route = self.route.clone()
+        self.header_buffer.append(self.session.extend_route(source_route, destination.session))
+        self.listen()
+
+        payload = bson.dumps(payload_obj)
+
+        if len(payload) < self.MAX_COMPRESSION_LEN:
+            payload = b"\xff" + zlib.compress(payload)
+        else:
+            payload = b"\x00" + payload
+
+        mid = os.urandom(4)
+        shared_key = SharedKey(self.channel_key, PublicKey(destination.channel))
+
+        header = ("send", {"source": source_route.to_dict(), "destination": destination.to_dict()})
+
+        n = (len(payload) - 1) // self.MAX_PAYLOAD_LEN + 1
+        n_tasks = min(n, self.MAX_OUTBOX)
+        gen = encrypt_slice(payload, self.MAX_PAYLOAD_LEN, shared_key, mid, n, 0)
+
+        try:
+            await asyncio.gather(*(execute(header, gen, mid) for _ in range(n_tasks)))
+        except asyncio.CancelledError:
+            self.session.clear(mid)
+            raise asyncio.CancelledError
+        finally:
+            self.session.clear(mid)
+
+        return self
+
+    async def execute(self, header=None, payload=b"", bundle_id=None):
+        await self.session.send([h for h in (self.header_buffer + [header]) if h], payload, bundle_id)
+        self.header_buffer = []
+
+        return self
+
+    def __await__(self):
+        return self.execute().__await__()
+
+    def close(self):
+        self.header_buffer.append(("close", self.route.to_dict()))
+        self.header_buffer += self.session.revoke_tokens(self.channel_key.public_serial())
+
+        self.session.channels.pop(self.channel_key.public_serial(), None)
+
+        return self
+
+    def validate_token_chain(self, source_id, tokens):
+        if self.is_public or (source_id == self.session.session_key.public_serial()):
+            return True
+        if not tokens:
+            return False
+
+        asset = self.channel_key.public_serial()
+        last_receiver = self.session.session_key.public_serial()
+        max_depth = None
+
+        for depth, token_string in enumerate(tokens):
+            try:
+                token = Token.decode(token_string)
+            except InvalidSignature:
+                return False
+            if (token.asset == asset) and (token.issuer == last_receiver):
+                if token.issuer == self.session.session_key.public_serial():
+                    if token.signature not in self.session.issued_tokens:
+                        return False
+                if token.max_depth:
+                    if not max_depth or (token.max_depth + depth) < max_depth:
+                        max_depth = token.max_depth + depth
+                if not max_depth or depth < max_depth:
+                    last_receiver = token.receiver
+                    asset = token.signature
+                    if last_receiver == source_id:
+                        return True
+                    continue
+            return False
+        return False
+
+    def __repr__(self):
+        return "Channel %s %s: %s" % (
+            self.session.session_key.public_serial()[:4],
+            self.channel_key.public_serial()[:4],
+            self.telekinesis,
+        )
 
     async def __aenter__(self):
-        return await self._await_request()
+        return self.listen()
 
-    async def __aexit__(self, _, __, ___):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
-class RemoteObject:
-    def __init__(self, connection, function_name, args, kwargs):
-        self._connection = connection
-        self._function_name = function_name
-        self._args = args
-        self._kwargs = kwargs
-        self._thread = None
-        self._call_id = None
+        return isinstance(exc_type, Exception)
 
-    async def _start(self):
-        self._thread = Thread(self._connection)
-        await self._thread.send({
-            'method': 'CALL', 
-            'function': self._function_name, 
-            'args': self._args, 
-            'kwargs': self._kwargs})
 
-        self._call_id = (await self._thread.recv())['call_id']
-        self._worker_id = (await self._thread.recv())['worker_id']
+class Route:
+    def __init__(self, brokers, session, channel, tokens=None):
+        self.brokers = brokers
+        self.session = session
+        self.channel = channel
+        self.tokens = tokens or []
 
-        await self._await_state_update()
-        
-        return self
-    
-    async def _call_method(self, method, *args, **kwargs):
-        await self._thread.send({
-            'method': 'SEND',
-            'call_id': self._call_id,
-            'obj_method': method,
-            'args': args,
-            'kwargs': kwargs
-        })
+    def to_dict(self):
+        return {"brokers": self.brokers, "session": self.session, "channel": self.channel, "tokens": self.tokens}
 
-        return await self._await_state_update()
+    def clone(self):
+        return Route(**self.to_dict())
 
-    async def _await_state_update(self):
-        while True:
-            message = await self._thread.recv()
-
-            if 'call_return' in message:
-                await self._close(False)
-
-            if 'print' in message:
-                print(message['print'])
-
-            if 'props' in message or 'meths' in message:
-                for d in dir(self):
-                    if d[0] != '_':
-                        self.__delattr__(d)
-
-                for p in message['props']:
-                    self.__setattr__(p, message['props'][p])
-                
-                for m in message['meths']:
-                    method = message['meths'][m]
-
-                    func = makefun.create_function(method['signature'], 
-                                                partial(self._call_method, m),
-                                                func_name=m,
-                                                module_name='camarere.client.RemoteObject',
-                                                doc=method['docstring'] if method['docstring'] is not None else "")
-                    self.__setattr__(m, func)
-
-            if 'response' in message:
-                return message['response']
-            
-            if 'call_return' in message:
-                break
-
-            if 'reset' in message:
-                await self._start()
-                break
-    
-    async def __aenter__(self):
-        return await self._start()
-    
-    async def __aexit__(self, _, __, ___):
-        return await self._close()
-
-    async def _close(self, send_close_signal=True):
-        if send_close_signal:
-            await self._thread.send({
-                'method': 'SEND',
-                'call_id': self._call_id,
-                '_close': True
-            })
-        await self._thread.close()
-
-class Call:
-    def __init__(self, connection, function_name, accept_role_extensions=True):
-        self.connection = connection
-        self.function_name = function_name
-        self.accept_role_extensions = accept_role_extensions
-        self.thread = None
-        self.call_id = None
-        self.worker_id = None
-        self.shared_secret = None
-
-    async def call(self, *args, **kwargs):
-        async with Thread(self.connection) as thread:
-            self.thread = thread
-            await thread.send({
-                'method': 'CALL', 
-                'function': self.function_name, 
-                'args': args, 
-                'kwargs': kwargs})
-        
-            while True:
-                try:
-                    message = await thread.recv()
-                    if 'call_id' in message:
-                        self.call_id = message['call_id']
-                    if 'worker_id' in message:
-                        self.worker_id = message['worker_id']
-                        self.shared_secret = derive_shared_key(self.connection.private_key, 
-                                                       self.worker_id,
-                                                       self.thread.thread_id)
-                    if 'input_request' in message:
-                        if message['hashed']:
-                            await self.on_secret_request(message['input_request'], message['salt'])
-                        else:
-                            await self.on_input_request(message['input_request'])
-                    if 'role_extension' in message:
-                        if self.accept_role_extensions:
-                            await self.connection.add_role_certificate(*message['role_extension'])
-                    if 'print' in message:
-                        await self.on_update(message['print'])
-                    if 'call_return' in message:
-                        return message['call_return']
-                except asyncio.CancelledError as e:
-                    await self._send(error=str(e))
-                    raise e
-
-    async def _send(self, **kwargs):
-        kwargs.update({'method': 'SEND', 'call_id': self.call_id})
-
-        return await self.thread.send(kwargs)
-
-    async def on_input_request(self, prompt):
-        x = input(prompt)
-        await self._send(input_response=x)
-
-    async def on_secret_request(self, prompt, salt=None):
-        secret = getpass(prompt)
-
-        x = hashlib.sha256(bytes(secret + (str(salt) if salt is not None else ''), 'utf-8')).hexdigest()
-        
-        await self._send(input_response=x)
-
-    async def on_update(self, content):
-        print(content)
+    def __repr__(self):
+        return f"Route {self.session[:4]} {self.channel[:4]}"

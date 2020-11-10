@@ -1,28 +1,23 @@
 import setuptools
-import warnings
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="telekinesis", 
-    version="0.0.14",
-    author="Elias J Neuman",
-    author_email="elias.j.neuman@gmail.com.com",
-    description="A websockets based RPC to easily develop, deploy and call services online.",
+    name="telekinesis",
+    version="0.1.0",
+    author="Telekinesis, Inc.",
+    author_email="support@telekinesis.cloud",
+    description="Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/e-neuman/telekinesis",
+    url="https://github.com/telekinesis-cloud/telekinesis",
     packages=setuptools.find_packages(),
-    install_requires=[
-        'websockets',
-        'cryptography',
-        'makefun'
-    ],
+    install_requires=["websockets", "cryptography", "makefun", "bson", "ujson"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires='>=3.6',
+    python_requires=">=3.6",
 )
