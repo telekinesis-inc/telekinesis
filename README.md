@@ -43,7 +43,9 @@ user = await authenticate('wss://telekinesis.cloud')
 ```python
 x = np.arange(10) # Define an object
 
-await user.set('x', x)  # Publish the object to a registry
+await user.set('x', x)  # Publish the object
+
+# Note: Be careful who you share numpy objects with, the tofile() method that can affect your stored data
 ```
 
 ###### Computer B: Manipulate the object
