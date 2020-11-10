@@ -69,7 +69,7 @@ export class Connection {
     let sentChallenge = window.crypto.getRandomValues(new Uint8Array(32));
     let sentMetadata = new TextEncoder().encode(
       JSON.stringify({
-        version: '0.1.0a21'
+        version: '0.1.0'
       })
     )
 
