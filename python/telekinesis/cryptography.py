@@ -74,7 +74,7 @@ class SharedKey:
 
 class Token:
     def __init__(
-        self, issuer, brokers, receiver, asset, token_type, max_depth=None, valid_from=None, valid_until=None, 
+        self, issuer, brokers, receiver, asset, token_type, max_depth=None, valid_from=None, valid_until=None,
         fail_mode="CLOSED", metadata=None
     ):
         self.issuer = issuer
@@ -100,7 +100,7 @@ class Token:
     def _to_dict(self):
         return {x: self.__getattribute__(x) for x in [
             "issuer", "brokers", "receiver", "asset", "token_type", "max_depth", "valid_from", "valid_until", "fail_mode",
-            "metadata" 
+            "metadata"
         ]}
 
     def _to_string(self):

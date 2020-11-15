@@ -1,7 +1,6 @@
-import random
 import re
 
-from .client import Session, Connection, Route
+from .client import Session, Connection
 from .telekinesis import Telekinesis
 
 
@@ -14,6 +13,7 @@ async def authenticate(url, print_callback=print, **kwargs):
 
     return user
 
+
 async def PublicUser(url):
     s = Session()
 
@@ -24,5 +24,3 @@ async def PublicUser(url):
     c = await Connection(s, url)
 
     return Telekinesis(c.entrypoint, s)
-
-        

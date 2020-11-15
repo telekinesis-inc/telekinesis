@@ -229,7 +229,7 @@ class Connection:
                             # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
                             if hashlib.sha256(payload).digest() == full_payload[65: 65 + 32]:
                                 if (
-                                    (ret_signature == signature) 
+                                    (ret_signature == signature)
                                     or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
                                 ):
                                     channel.handle_message(source, destination, payload)

@@ -303,7 +303,7 @@ class Broker:
                             destination["session"][:4],
                             destination["channel"][:4],
                             broker_id[:4],
-        )
+                        )
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
@@ -551,10 +551,9 @@ class Peer(Connection):
                 while True:
                     message = await self.websocket.recv()
                     self.tasks.add(asyncio.get_event_loop().create_task(self.broker.handle_message(self, message)))
-                    
+
                     # await asyncio.gather(*(x for x in self.tasks if x.done() and not x.exception()), return_exceptions=True)
                     self.tasks = set(x for x in self.tasks if not x.done())
-
 
             except IncompatibleBrokerException as e:
                 self.logger.error("Peer.listen", exc_info=True)
