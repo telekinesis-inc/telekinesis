@@ -470,7 +470,8 @@ export class Telekinesis extends Function {
         out = {}
         outputStack.set(root, out);
         
-        for (let k in Object.getOwnPropertyNames(obj)) {
+        for (let i in Object.getOwnPropertyNames(obj)) {
+          let k = Object.getOwnPropertyNames(obj)[i];
           out[k] = this._decode(inputStack, callerId, obj[k], outputStack);
         }
         outputStack.set(root, out);
