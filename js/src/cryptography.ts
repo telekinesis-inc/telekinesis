@@ -1,5 +1,7 @@
 import { b64encode, b64decode } from "./helpers"
 
+const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
+
 export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";
   _usage: ["sign", "verify"] | ["deriveKey"];
@@ -16,7 +18,7 @@ export class PrivateKey {
     return
   }
   async generate() {
-    this.key = await crypto.subtle.generateKey({
+    this.key = await webcrypto.subtle.generateKey({
         name: this._algorithm,
         namedCurve: "P-256"
       },
@@ -30,7 +32,7 @@ export class PrivateKey {
       await this.generate()
     }
     if (this.key !== undefined) {
-      let signatureBuf = await crypto.subtle.sign(
+      let signatureBuf = await webcrypto.subtle.sign(
         {
           name: "ECDSA",
           hash: {name: "SHA-256"},
@@ -46,7 +48,7 @@ export class PrivateKey {
       await this.generate()
     }
     if (this.key !== undefined) {
-      let publicKey = (await crypto.subtle.exportKey('raw', this.key.publicKey)).slice(1)
+      let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey)).slice(1)
       return b64encode(new Uint8Array(publicKey))
     }
   }
@@ -74,7 +76,7 @@ export class PublicKey {
   }
   async generate() {
     let decodedPublicSerial = b64decode(this.publicSerial)
-    this.key = await crypto.subtle.importKey(
+    this.key = await webcrypto.subtle.importKey(
       'raw',
       new Uint8Array([4, ...decodedPublicSerial]).buffer,
       {
@@ -91,7 +93,7 @@ export class PublicKey {
       await this.generate()
     }
     if (this.key !== undefined) {
-      if (await crypto.subtle.verify(
+      if (await webcrypto.subtle.verify(
         {
           name: "ECDSA",
           hash: {name: "SHA-256"},
@@ -117,7 +119,7 @@ export class SharedKey {
       await this.privateKey.generate();
     }
     if (this.privateKey.key !== undefined) {
-      this.key = await crypto.subtle.deriveKey(
+      this.key = await webcrypto.subtle.deriveKey(
         {
           name: "ECDH",
           public: (await new PublicKey('derive', this.publicSerial).generate()).key
@@ -138,7 +140,7 @@ export class SharedKey {
       await this.generate()
     }
     if (this.key !== undefined) {
-      let out = await crypto.subtle.encrypt(
+      let out = await webcrypto.subtle.encrypt(
         {
           name: "AES-CTR",
           counter: nonce,
@@ -155,7 +157,7 @@ export class SharedKey {
       await this.generate()
     }
     if (this.key !== undefined) {
-      return await crypto.subtle.encrypt(
+      return await webcrypto.subtle.encrypt(
         {
           name: "AES-CTR",
           counter: nonce,

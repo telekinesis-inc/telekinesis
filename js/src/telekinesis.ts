@@ -1,5 +1,7 @@
 import { Session, Channel, Route, Header } from './client'; 
 import { bytesToInt } from './helpers';
+  
+const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
 
 export class State {
   attributes: string[];
@@ -358,7 +360,7 @@ export class Telekinesis extends Function {
   }
   async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>) {
 
-    let id = bytesToInt(crypto.getRandomValues(new Uint8Array(4))).toString()
+    let id = bytesToInt(webcrypto.getRandomValues(new Uint8Array(4))).toString()
     let outputStack = false;
 
     if (traversalStack === undefined) {

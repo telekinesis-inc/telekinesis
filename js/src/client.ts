@@ -4,6 +4,8 @@ import { bytesToInt, intToBytes  } from "./helpers"
 import { PublicKey, PrivateKey, SharedKey, Token } from "./cryptography"
 import { Telekinesis } from "./telekinesis";
 
+const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
+
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
 
 export class Connection {
@@ -66,7 +68,7 @@ export class Connection {
 
     let pk = new TextEncoder().encode(await this.session.sessionKey.publicSerial());
 
-    let sentChallenge = window.crypto.getRandomValues(new Uint8Array(32));
+    let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
     let sentMetadata = new TextEncoder().encode(
       JSON.stringify({
         version: '0.1.0'
@@ -136,7 +138,7 @@ export class Connection {
                 new Uint8Array([ 255, ...mid ])
               ); // Send ACK 
               let payload = fullPayload.slice(65 + 32)
-              let hash = new Uint8Array(await window.crypto.subtle.digest('SHA-256', payload))
+              let hash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
               if (fullPayload.slice(65, 65+32).reduce((p, v, i) => p && v === hash[i], true)) {
                 if (mid.reduce((p, v, i) => p && v === signature[i], true) 
                 || this.session.checkNoRepeat(mid, timestamp + this.tOffset)) {
@@ -163,7 +165,7 @@ export class Connection {
     if (this.websocket !== undefined) {
       let h = new TextEncoder().encode(JSON.stringify(headers))
       let r = reply ? reply : new Uint8Array(65)
-      let p = new Uint8Array(await window.crypto.subtle.digest('SHA-256', payload))
+      let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
       let m = new Uint8Array([
         ...intToBytes(Date.now()/1000 - this.tOffset, 4),
         ...intToBytes(h.length, 2),
@@ -450,7 +452,7 @@ export class Channel {
               ...payload.slice(i * maxPayload, (i+1) *  maxPayload)
             ]);
           }
-          let nonce = window.crypto.getRandomValues(new Uint8Array(16));
+          let nonce = webcrypto.getRandomValues(new Uint8Array(16));
           yield new Uint8Array([...nonce, ...(await sharedKey.encrypt(chunk, nonce) as Uint8Array)]);
           yield * await encryptSlice(payload, maxPayload, sharedKey, mid, n, i+1);
         }
@@ -475,7 +477,7 @@ export class Channel {
         payload = new Uint8Array([0, ...payload]);
       }
 
-      let mid = window.crypto.getRandomValues(new Uint8Array(4));
+      let mid = webcrypto.getRandomValues(new Uint8Array(4));
 
       let sharedKey = new SharedKey(
         this.channelKey, 

@@ -1,12 +1,14 @@
 import { Connection, Session, Channel, Route} from "./client";
 import { Telekinesis } from "./telekinesis";
 
-export function b64encode(u8: Uint8Array) {
-  return btoa(String.fromCharCode.apply(null, u8 as any));
-}
+const btoa_ = typeof btoa !== 'undefined' ? btoa : require('btoa');
+const atob_ = typeof atob !== 'undefined' ? atob : require('atob');
 
+export function b64encode(u8: Uint8Array) {
+  return btoa_(String.fromCharCode.apply(null, u8 as any));
+}
 export function b64decode(str: string) {
-  return new Uint8Array(atob(str).split('').map(function (c) { return c.charCodeAt(0); }));
+  return new Uint8Array(atob_(str).split('').map(function (c: string) { return c.charCodeAt(0); }));
 }
 export function intToBytes(int: number, len: number) {
   return new Uint8Array(len).map((_, i) => int/256**(len-i-1))
