@@ -76,7 +76,7 @@ export class Connection {
     let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
     let sentMetadata = new TextEncoder().encode(
       JSON.stringify({
-        version: '0.1.0'
+        version: '0.1.1'
       })
     )
 
