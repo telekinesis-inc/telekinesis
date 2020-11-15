@@ -20,7 +20,7 @@ export class Connection {
   entrypoint?: Route;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
-    // this.RESEND_TIMEOUT = 2; // sec
+    // this.RESEND_TIMEOUT = 2; (not implemented yet) // sec
     // this.MAX_SEND_RETRIES = 3;
 
     this.session = session;
@@ -34,7 +34,9 @@ export class Connection {
       this.websocket.close();
       this.websocket = undefined;
     }
-    this.websocket = new WebSocket(this.url)
+    this.websocket = (typeof WebSocket !== 'undefined' ? 
+      new WebSocket(this.url) :
+      new (require('ws'))(this.url)) as WebSocket;
     // this.websocket.onerror = (ev) => {
     //   console.error(ev)
     //   new Promise(async r => {
@@ -50,7 +52,10 @@ export class Connection {
     );
 
     this.websocket.onmessage = async (m: MessageEvent) => {
-      let a = await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
+      let a = typeof URL.createObjectURL === 'undefined' ? 
+        m.data :
+        await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
+
       let data = new Uint8Array(a);
       
       if (waiting.length > 0) {
@@ -107,7 +112,9 @@ export class Connection {
   }
   async recv(messageObj: MessageEvent) {
     
-    let a = await fetch(URL.createObjectURL(messageObj.data)).then(r => r.arrayBuffer());
+    let a = typeof URL.createObjectURL === 'undefined' ? 
+      messageObj.data :
+      await fetch(URL.createObjectURL(messageObj.data)).then(r => r.arrayBuffer());
     
     let message = new Uint8Array(a);
     let signature = message.slice(0, 64);
