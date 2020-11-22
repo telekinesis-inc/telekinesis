@@ -176,11 +176,11 @@ class Channel:
 
 
 class Broker:
-    def __init__(self, broker_key_file=None):
+    def __init__(self, broker_key_file=None, broker_key_pass=None):
         self.sessions = {}
         self.servers = {}
         self.entrypoint = None
-        self.broker_key = PrivateKey(broker_key_file)
+        self.broker_key = PrivateKey(broker_key_file, broker_key_pass)
         self.logger = logging.getLogger(__name__)
         self.seen_messages = [set(), set(), 0]
 

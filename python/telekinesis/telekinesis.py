@@ -124,6 +124,13 @@ class Listener:
             await asyncio.gather(*self.current_tasks)
             await self.channel.close()
 
+    def __getstate__(self):
+        return {'channel': self.channel, 'coro_callback': self.coro_callback}
+
+    def __setstate__(self, state):
+        self.channel = state['channel']
+        self.set_callback(state['coro_callback'])
+
 
 class Telekinesis:
     def __init__(
@@ -536,6 +543,22 @@ class Telekinesis:
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 
         return out
+
+    def __getstate__(self):
+        return {
+            'session': self._session,
+            'target': self._target,
+            'state': self._state,
+            'parent': self._parent,
+            'mask': self._mask,
+            'expose_tb': self._expose_tb,
+            'max_delegation_depth': self._max_delegation_depth,
+            'compile_signatures': self._compile_signatures
+        }
+
+    def __setstate__(self, state):
+        self.__dict__.update(Telekinesis._from_state(**state).__dict__)
+        # self._update_state(state['state'])
 
 
 def check_signature(signature):
