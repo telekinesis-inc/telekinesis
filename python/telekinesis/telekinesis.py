@@ -115,6 +115,8 @@ class Listener:
 
                     await asyncio.gather(*(x for x in self.current_tasks if x.done()))
                     self.current_tasks = set(x for x in self.current_tasks if not x.done())
+            except asyncio.CancelledError:
+                break
             except Exception:
                 logging.getLogger(__name__).error("Listener error", exc_info=True)
 

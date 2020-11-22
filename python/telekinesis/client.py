@@ -8,8 +8,6 @@ from collections import deque, OrderedDict
 from pkg_resources import get_distribution
 import hashlib
 
-# import blake3
-
 import websockets
 import ujson
 
