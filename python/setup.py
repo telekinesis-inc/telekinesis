@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="telekinesis",
-    version="0.1.1",
+    version="0.1.2",
     author="Telekinesis, Inc.",
     author_email="support@telekinesis.cloud",
     description="Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/telekinesis-cloud/telekinesis",
     packages=setuptools.find_packages(),
-    install_requires=["websockets", "cryptography", "makefun", "bson", "ujson"],
+    install_requires=["websockets", "cryptography", "makefun", "bson", "ujson", "packaging"],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",

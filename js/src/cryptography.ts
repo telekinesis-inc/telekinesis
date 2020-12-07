@@ -4,13 +4,15 @@ const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypt
 
 export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";
-  _usage: ["sign", "verify"] | ["deriveKey"];
+  _usage: ["sign"] | ["deriveKey"];
   key?: CryptoKeyPair;
+  exportedKey?: {privateKey: {}, publicKey: {}};
 
-  constructor(use: "sign" | "derive") {
+  constructor(use: "sign" | "derive", importedKey?: {privateKey: {}, publicKey: {}}) {
+    this.exportedKey = importedKey;
     if (use === 'sign') {
       this._algorithm = 'ECDSA'
-      this._usage = ['sign', 'verify']
+      this._usage = ['sign']
       return
     }
     this._algorithm = 'ECDH'
@@ -18,18 +20,37 @@ export class PrivateKey {
     return
   }
   async generate() {
-    this.key = await webcrypto.subtle.generateKey({
-        name: this._algorithm,
-        namedCurve: "P-256"
-      },
-      true,
-      this._usage
-    )
+    if (this.exportedKey !== undefined) {
+      this.key = {
+        privateKey: await webcrypto.subtle.importKey(
+          'jwk',
+          this.exportedKey.privateKey,
+          this._algorithm,
+          true,
+          this._usage
+        ),
+        publicKey: await webcrypto.subtle.importKey(
+          'jwk',
+          this.exportedKey.publicKey,
+          this._algorithm,
+          true,
+          []
+        )
+      }
+    } else {
+      this.key = await webcrypto.subtle.generateKey({
+          name: this._algorithm,
+          namedCurve: "P-256"
+        },
+        true,
+        this._usage
+      )
+    }
     return this
   }
   async sign(message: Uint8Array) {
     if (this.key === undefined) {
-      await this.generate()
+      await this.generate();
     }
     if (this.key !== undefined) {
       let signatureBuf = await webcrypto.subtle.sign(
@@ -45,12 +66,26 @@ export class PrivateKey {
   }
   async publicSerial() {
     if (this.key === undefined) {
-      await this.generate()
+      await this.generate();
     }
     if (this.key !== undefined) {
       let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey)).slice(1)
       return b64encode(new Uint8Array(publicKey))
     }
+  }
+  async exportKey() {
+    if (this.exportedKey == undefined) {
+      if (this.key === undefined) {
+        await this.generate();
+      }
+      if (this.key !== undefined) {
+        this.exportedKey = {
+          privateKey: await webcrypto.subtle.exportKey('jwk', this.key.privateKey),
+          publicKey: await webcrypto.subtle.exportKey('jwk', this.key.publicKey)
+        }
+      }
+    }
+    return this.exportedKey;
   }
 }
 export class PublicKey {

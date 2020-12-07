@@ -196,8 +196,8 @@ export class Session {
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
   issuedTokens: Map<string, [Token, Token?]>;
 
-  constructor() {
-    this.sessionKey = new PrivateKey('sign');
+  constructor(sessionKey?: {privateKey: {}, publicKey: {}}) {
+    this.sessionKey = new PrivateKey('sign', sessionKey);
     this.channels = new Map();
     this.connections = [];
     this.seenMessages = [new Set(), new Set(), 0];
@@ -317,13 +317,13 @@ export class Channel {
 
   then: ((resolve: (ret: any) => void) => void) | undefined;
 
-  constructor(session: Session, isPublic=false) {
+  constructor(session: Session, channelKey?: {privateKey: {}, publicKey: {}}, isPublic=false) {
     this.MAX_PAYLOAD_LEN = 2**19;
     this.MAX_COMPRESSION_LEN = 2**19;
     this.MAX_OUTBOX = 2**4;
 
     this.session = session;
-    this.channelKey = new PrivateKey('derive');
+    this.channelKey = new PrivateKey('derive', channelKey);
     this.isPublic = isPublic;
 
     this.headerBuffer = [];

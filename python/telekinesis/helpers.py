@@ -4,9 +4,9 @@ from .client import Session, Connection
 from .telekinesis import Telekinesis
 
 
-async def authenticate(url, print_callback=print, **kwargs):
+async def authenticate(url, session_key_file=None, print_callback=print, **kwargs):
 
-    user = await (await PublicUser(url)).authenticate._call(print_callback, **kwargs)
+    user = await (await PublicUser(url, session_key_file)).authenticate._call(print_callback, **kwargs)
 
     if not user:
         raise Exception("Failed to authenticate")
@@ -14,8 +14,8 @@ async def authenticate(url, print_callback=print, **kwargs):
     return user
 
 
-async def PublicUser(url):
-    s = Session()
+async def PublicUser(url, session_key_file=None):
+    s = Session(session_key_file)
 
     if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
         i = len(re.findall(r'[\w\d]+:\/\/[\w\d.]+', url)[0])

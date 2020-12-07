@@ -17,9 +17,11 @@ export function bytesToInt(bytes: Uint8Array) {
   return Array.from(bytes).reduce((p, c, i) => p+c*256**(bytes.length-i-1), 0)
 }
 
-export async function authenticate(url: string, printCallback: ((output: any) => void) = console.log) {
+export async function authenticate(url: string, sessionKey?: {privateKey: {}, publicKey: {}}, 
+  printCallback: ((output: any) => void) = console.log) {
 
-  let user = await (await new PublicUser(url) as any).authenticate._call(printCallback, ...Array.from(arguments).slice(2,));
+  let user = await (await new PublicUser(url, sessionKey) as any)
+    .authenticate._call(printCallback, ...Array.from(arguments).slice(3,));
 
   if (!user) {
     throw 'Failed to authenticate';
@@ -28,13 +30,13 @@ export async function authenticate(url: string, printCallback: ((output: any) =>
 }
 
 export class PublicUser {
-  constructor(url: string) {
+  constructor(url: string, sessionKey?: {privateKey: {}, publicKey: {}}) {
     if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
       let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
       url = url.slice(0, i) + ':8776' + url.slice(i);
     }
     return new Promise<any>(async (r) => {
-      let session = new Session();
+      let session = new Session(sessionKey);
       let c = new Connection(session, url);
       await c.connect();
 
