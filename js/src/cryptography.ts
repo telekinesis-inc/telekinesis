@@ -25,14 +25,20 @@ export class PrivateKey {
         privateKey: await webcrypto.subtle.importKey(
           'jwk',
           this.exportedKey.privateKey,
-          this._algorithm,
+          {
+            name: this._algorithm,
+            namedCurve: "P-256"
+          },
           true,
           this._usage
         ),
         publicKey: await webcrypto.subtle.importKey(
           'jwk',
           this.exportedKey.publicKey,
-          this._algorithm,
+          {
+            name: this._algorithm,
+            namedCurve: "P-256"
+          },
           true,
           []
         )

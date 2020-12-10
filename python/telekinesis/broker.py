@@ -3,6 +3,7 @@ import os
 import asyncio
 import time
 from packaging import version
+import re
 from pkg_resources import get_distribution
 
 import ujson
@@ -409,6 +410,10 @@ class Broker:
 
     async def add_broker(self, url, inherit_entrypoint=False):
         peer = Peer(None, self)
+        if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
+            i = len(re.findall(r'[\w\d]+:\/\/[\w\d.]+', url)[0])
+            url = url[:i] + ':8776' + url[i:]
+
         await peer.connect(url, inherit_entrypoint)  # This already adds the peer to self.sessions
 
     async def check_token(self, token):
