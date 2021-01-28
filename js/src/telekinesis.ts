@@ -371,7 +371,7 @@ export class Telekinesis extends Function {
       return out
     }
   }
-  async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>) {
+  async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
 
     let id = bytesToInt(webcrypto.getRandomValues(new Uint8Array(4))).toString()
     let outputStack = false;
@@ -401,13 +401,13 @@ export class Telekinesis extends Function {
       let children: string[] = [];
       let arr = target instanceof Array? target: Array.from(target.values());
       for (let v in arr) {
-        children[v] = await this._encode(arr[v], receiverId, listener, traversalStack)
+        children[v] = await this._encode(arr[v], receiverId, listener, traversalStack, blockRecursion)
       }
       out[1] = [target instanceof Array? 'list': 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
-        (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack);
+        (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack, blockRecursion);
       }
       out[1] = ['dict', children];
     } else {
@@ -416,13 +416,13 @@ export class Telekinesis extends Function {
         obj = target;
       } else {
         obj = new Telekinesis(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, 
-          this._compileSignatures, undefined, this._cacheAttributes && outputStack)
+          this._compileSignatures, undefined, this._cacheAttributes && !blockRecursion)
       }
 
       let route = await obj._delegate(receiverId, (listener as Listener).channel) as Route;
       out[1] = ['obj', [
         route.toObject(), 
-        await this._encode(obj._state.toObject(this._mask), receiverId, listener, traversalStack)
+        await this._encode(obj._state.toObject(this._mask), receiverId, listener, traversalStack, true)
       ]]
 
     }

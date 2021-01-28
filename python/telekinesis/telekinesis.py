@@ -167,6 +167,7 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
+            self._cache_attributes,
         )
 
     def _get_root_state(self):
@@ -260,6 +261,7 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
+            self._cache_attributes,
         )
 
     async def _execute(self, listener=None, reply=None, pipeline=None):
@@ -352,7 +354,7 @@ class Telekinesis:
                 asyncio.get_event_loop().create_task(self._close())
             )
 
-    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None):
+    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None, block_recursion=False):
         i = str(id(arg))
         if traversal_stack is None:
             traversal_stack = {}
@@ -369,22 +371,22 @@ class Telekinesis:
         elif type(arg) in (range, slice):
             tup = (type(arg).__name__, (arg.start, arg.stop, arg.step))
         elif type(arg) in (list, tuple, set):
-            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack) for v in arg])
+            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in arg])
         elif isinstance(arg, dict):
-            tup = ("dict", {x: self._encode(arg[x], receiver_id, listener, traversal_stack) for x in arg})
+            tup = ("dict", {x: self._encode(arg[x], receiver_id, listener, traversal_stack, block_recursion) for x in arg})
         else:
             if isinstance(arg, Telekinesis):
                 obj = arg
             else:
                 obj = Telekinesis(
                     arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
-                    cache_attributes=output_stack and self._cache_attributes
+                    cache_attributes= not block_recursion and self._cache_attributes
                 )
 
             route = obj._delegate(receiver_id, listener.channel)
             tup = (
                 "obj",
-                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack)),
+                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack, block_recursion=True)),
             )
 
         traversal_stack[i] = tup
@@ -441,6 +443,7 @@ class Telekinesis:
                             self._max_delegation_depth,
                             self._compile_signatures,
                             channel.telekinesis,
+                            self._cache_attributes,
                         )
                     out = channel.telekinesis._target
                 else:
@@ -454,6 +457,7 @@ class Telekinesis:
                     self._expose_tb,
                     self._max_delegation_depth,
                     self._compile_signatures,
+                    cache_attributes=self._cache_attributes,
                 )
 
         output_stack[root] = out
