@@ -4,7 +4,7 @@ from .client import Session, Connection
 from .telekinesis import Telekinesis
 
 
-async def authenticate(url, session_key_file=None, print_callback=print, **kwargs):
+async def authenticate(url="ws://localhost:8776", session_key_file=None, print_callback=print, **kwargs):
 
     user = await (await PublicUser(url, session_key_file)).authenticate._call(print_callback, **kwargs)
 
@@ -14,7 +14,7 @@ async def authenticate(url, session_key_file=None, print_callback=print, **kwarg
     return user
 
 
-async def PublicUser(url="ws://127.0.0.1:8776", session_key_file=None):
+async def PublicUser(url="ws://localhost:8776", session_key_file=None):
     s = Session(session_key_file)
 
     if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:

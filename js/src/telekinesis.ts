@@ -189,7 +189,7 @@ export class Telekinesis extends Function {
           target._cacheAttributes)
       },
       apply(target: Telekinesis, that: any, args: any[]) {
-        return target._call(...args);
+        return target._call(args);
       }
     });
   }
@@ -198,6 +198,12 @@ export class Telekinesis extends Function {
       return this._parent._getRootState();
     }
     return this._state;
+  }
+  _last() {
+    if ((this._state.pipeline.length === 1) && (this._state.pipeline[0][0] === 'get') && (this._state.attributes instanceof Map)) {
+      return (this._state.attributes as Map<string, any>).get(this._state.pipeline[0][1] as string);
+    }
+    return undefined;
   }
   async _addListener(channel: Channel) {
     let route = (await (channel as any)).route;
@@ -253,9 +259,9 @@ export class Telekinesis extends Function {
       } finally {}
     }
   }
-  _call(this: Telekinesis, ...args: any[]) {
+  _call(this: Telekinesis, args: any[], kwargs?: any) {
     let state = this._state.clone()
-    state.pipeline.push(['call', [Array.from(arguments), {}]])
+    state.pipeline.push(['call', [args, kwargs || {}]])
 
     return Telekinesis._fromState(
       state, 

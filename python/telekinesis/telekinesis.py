@@ -174,6 +174,10 @@ class Telekinesis:
             return self._parent._get_root_state()
         return self._state
 
+    def _last(self):
+        if (len(self._state.pipeline) == 1) and (self._state.pipeline[0][0] == 'get') and (isinstance(self._state.attributes, dict)):
+            return self._state.attributes[self._state.pipeline[0][1]]
+
     def _update_state(self, state):
         for d in dir(self):
             if d[0] != "_":
