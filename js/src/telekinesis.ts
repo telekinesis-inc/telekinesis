@@ -4,7 +4,7 @@ import { bytesToInt } from './helpers';
 const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
 
 export class State {
-  attributes: string[];
+  attributes: string[] | Map<string, any>;
   methods: Map<string,[string, string]>;
   pipeline: [string, string | [any[], {}]][];
   repr: string;
@@ -12,7 +12,7 @@ export class State {
   lastChange?: number;
 
   constructor(
-    attributes?: string[], methods?: Map<string, [string, string]>, repr?: string, doc?: string,
+    attributes?: string[] | Map<string, any>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
     pipeline?: [string, string | [any[], {}]][], lastChange?: number
   ) {
     this.attributes = attributes || [];
@@ -26,7 +26,10 @@ export class State {
   toObject(mask?: Set<string>) {
     mask = mask || new Set<string>();
     return {
-      attributes: this.attributes.filter(v => !(mask as Set<string>).has(v)),
+      attributes: this.attributes instanceof Map ?
+        Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
+          .reduce((p: any, v: string) => {p[v] = (this.attributes as Map<string, any>).get(v); return p}, {}) :
+        this.attributes.filter(v => !(mask as Set<string>).has(v)),
       methods: Array.from(this.methods.keys()).filter(v => !(mask as Set<string>).has(v))
         .reduce((p: any, v: string) => {p[v] = this.methods.get(v); return p}, {}),
       pipeline: this.pipeline.map(x=>x),
@@ -40,7 +43,8 @@ export class State {
   }
   static fromObject(obj: any) {
     return new State(
-      obj.attributes, 
+      obj.attributes instanceof Array ? obj.attributes : 
+        Object.getOwnPropertyNames(obj.attributes || {}).reduce((p, v) => {p.set(v, obj.attributes[v]); return p}, new Map()),
       Object.getOwnPropertyNames(obj.methods || {}).reduce((p, v) => {p.set(v, obj.methods[v]); return p}, new Map()),
       obj.repr,
       obj.doc,
@@ -49,9 +53,13 @@ export class State {
     );
   }
   
-  static fromTarget(target: Object) {
+  static fromTarget(target: Object, cacheAttributes: boolean) {
     let state = State.fromObject({
-      attributes: Object.getOwnPropertyNames(target),
+      attributes: cacheAttributes ?
+        Object.getOwnPropertyNames(target)
+          .filter(x => x[0] !== '_')
+          .reduce((p, v) => {(p as any)[v] = (target as any)[v]; return p}, {}) :
+        Object.getOwnPropertyNames(target).filter(x => x[0] !== '_'),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
         .reduce((p, v) => {(p as any)[v] = ['(*args)', (target as any)[v].toString()]; return p}, {}),
@@ -119,7 +127,8 @@ export class Telekinesis extends Function {
   _exposeTb: boolean;
   _maxDelegationDepth?: number;
   _compileSignatures: boolean;
-  _parent: Telekinesis;
+  _parent?: Telekinesis;
+  _cacheAttributes: boolean;
 
   _listeners: Map<Route, Listener>;
   _state: State;
@@ -130,7 +139,7 @@ export class Telekinesis extends Function {
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true, 
-    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: any
+    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis, cacheAttributes: boolean = false
   ) {
     super();
     this._target = target;
@@ -141,12 +150,13 @@ export class Telekinesis extends Function {
     this._maxDelegationDepth = maxDelegationDepth;
     this._compileSignatures = compileSignatures;
     this._parent = parent;
+    this._cacheAttributes = cacheAttributes;
 
     this._listeners = new Map();
     if (target instanceof Route) {
       this._state = new State();
     } else {
-      this._state = State.fromTarget(target);
+      this._state = State.fromTarget(target, cacheAttributes);
     }
     this._lastUpdate = Date.now();
     this._blockThen = false;
@@ -158,11 +168,7 @@ export class Telekinesis extends Function {
           return (target as any)[prop];
         }
         if (prop === 'then') {
-          // console.log(target._blockThen, Date.now() - target._lastUpdate);
           if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
-            // console.log('here');
-            // return undefined;
-            // return (r: any) => r(target);
             return new Promise(r => r(target));
           }
           return (async (r: any) => r(await target._execute()))
@@ -179,10 +185,11 @@ export class Telekinesis extends Function {
           target._exposeTb,
           target._maxDelegationDepth,
           target._compileSignatures,
-          target)
+          target,
+          target._cacheAttributes)
       },
       apply(target: Telekinesis, that: any, args: any[]) {
-        return target._call(...args);
+        return target._call(args);
       }
     });
   }
@@ -191,6 +198,12 @@ export class Telekinesis extends Function {
       return this._parent._getRootState();
     }
     return this._state;
+  }
+  _last() {
+    if ((this._state.pipeline.length === 1) && (this._state.pipeline[0][0] === 'get') && (this._state.attributes instanceof Map)) {
+      return (this._state.attributes as Map<string, any>).get(this._state.pipeline[0][1] as string);
+    }
+    return undefined;
   }
   async _addListener(channel: Channel) {
     let route = (await (channel as any)).route;
@@ -246,9 +259,9 @@ export class Telekinesis extends Function {
       } finally {}
     }
   }
-  _call(this: Telekinesis, ...args: any[]) {
+  _call(this: Telekinesis, args: any[], kwargs?: any) {
     let state = this._state.clone()
-    state.pipeline.push(['call', [Array.from(arguments), {}]])
+    state.pipeline.push(['call', [args, kwargs || {}]])
 
     return Telekinesis._fromState(
       state, 
@@ -332,7 +345,7 @@ export class Telekinesis extends Function {
       }
     }
 
-    this._state = State.fromTarget(this._target);
+    this._state = State.fromTarget(this._target, this._cacheAttributes);
     this._state.lastChange = Date.now() / 1000;
 
     return target;
@@ -358,7 +371,7 @@ export class Telekinesis extends Function {
       return out
     }
   }
-  async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>) {
+  async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
 
     let id = bytesToInt(webcrypto.getRandomValues(new Uint8Array(4))).toString()
     let outputStack = false;
@@ -388,13 +401,13 @@ export class Telekinesis extends Function {
       let children: string[] = [];
       let arr = target instanceof Array? target: Array.from(target.values());
       for (let v in arr) {
-        children[v] = await this._encode(arr[v], receiverId, listener, traversalStack)
+        children[v] = await this._encode(arr[v], receiverId, listener, traversalStack, blockRecursion)
       }
       out[1] = [target instanceof Array? 'list': 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
-        (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack);
+        (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack, blockRecursion);
       }
       out[1] = ['dict', children];
     } else {
@@ -403,13 +416,13 @@ export class Telekinesis extends Function {
         obj = target;
       } else {
         obj = new Telekinesis(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, 
-          this._compileSignatures)
+          this._compileSignatures, undefined, this._cacheAttributes && !blockRecursion)
       }
 
       let route = await obj._delegate(receiverId, (listener as Listener).channel) as Route;
       out[1] = ['obj', [
         route.toObject(), 
-        await this._encode(obj._state.toObject(this._mask), receiverId, listener, traversalStack)
+        await this._encode(obj._state.toObject(this._mask), receiverId, listener, traversalStack, true)
       ]]
 
     }
@@ -496,8 +509,8 @@ export class Telekinesis extends Function {
     }
   }
   static _fromState(state: State, target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true, 
-    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: any) {
-    let t = new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent);
+    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis, cacheAttributes: boolean = false) {
+    let t = new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent, cacheAttributes);
     t._state = state;
     return t
   }

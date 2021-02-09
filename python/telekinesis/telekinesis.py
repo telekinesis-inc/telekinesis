@@ -15,7 +15,7 @@ from .client import Route, Channel
 
 class State:
     def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None, last_change=None):
-        self.attributes = attributes or []
+        self.attributes = attributes or {}
         self.methods = methods or {}
         self.pipeline = pipeline or []
         self.repr = repr or ""
@@ -25,7 +25,8 @@ class State:
     def to_dict(self, mask=None):
         mask = mask or set()
         return {
-            "attributes": [x for x in self.attributes if x not in mask],
+            "attributes": {k: v for k, v in self.attributes.items() if k not in mask} if isinstance(self.attributes, dict) else 
+                          [k for k in self.attributes if k not in mask],
             "methods": {k: v for k, v in self.methods.items() if k not in mask},
             "pipeline": self.pipeline,
             "repr": self.repr,
@@ -37,10 +38,10 @@ class State:
         return State(**self.to_dict())
 
     @staticmethod
-    def from_object(target):
+    def from_object(target, cache_attributes):
         logger = logging.getLogger(__name__)
 
-        attributes, methods, repr_ = [], {}, ""
+        attributes, methods, repr_ = {} if cache_attributes else [], {}, ""
 
         for attribute_name in dir(target):
             if attribute_name[0] != "_" or attribute_name in [
@@ -74,7 +75,10 @@ class State:
 
                         methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
-                        attributes.append(attribute_name)
+                        if cache_attributes:
+                            attributes[attribute_name] = target_attribute
+                        else:
+                            attributes.append(attribute_name)
 
                 except Exception as e:
                     logger.error("Could not obtain handle for %s.%s: %s", target, attribute_name, e)
@@ -129,7 +133,7 @@ class Listener:
 
 class Telekinesis:
     def __init__(
-        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None, cache_attributes=False,
     ):
 
         self._logger = logging.getLogger(__name__)
@@ -140,11 +144,12 @@ class Telekinesis:
         self._max_delegation_depth = max_delegation_depth
         self._compile_signatures = compile_signatures
         self._parent = parent
+        self._cache_attributes = cache_attributes
         self._listeners = {}
         if isinstance(target, Route):
             self._state = State()
         else:
-            self._update_state(State.from_object(target))
+            self._update_state(State.from_object(target, cache_attributes))
 
     def __getattribute__(self, attr):
         if attr[0] == "_":  # and (attr != '__call__'):
@@ -162,12 +167,17 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
+            self._cache_attributes,
         )
 
     def _get_root_state(self):
         if self._parent:
             return self._parent._get_root_state()
         return self._state
+
+    def _last(self):
+        if (len(self._state.pipeline) == 1) and (self._state.pipeline[0][0] == 'get') and (isinstance(self._state.attributes, dict)):
+            return self._state.attributes[self._state.pipeline[0][1]]
 
     def _update_state(self, state):
         for d in dir(self):
@@ -251,6 +261,7 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
+            self._cache_attributes,
         )
 
     async def _execute(self, listener=None, reply=None, pipeline=None):
@@ -293,7 +304,7 @@ class Telekinesis:
                 if asyncio.iscoroutine(target):
                     target = await target
 
-        self._update_state(State.from_object(self._target))
+        self._update_state(State.from_object(self._target, self._cache_attributes))
         self._state.last_change = time.time()
         return target
 
@@ -343,7 +354,7 @@ class Telekinesis:
                 asyncio.get_event_loop().create_task(self._close())
             )
 
-    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None):
+    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None, block_recursion=False):
         i = str(id(arg))
         if traversal_stack is None:
             traversal_stack = {}
@@ -360,21 +371,22 @@ class Telekinesis:
         elif type(arg) in (range, slice):
             tup = (type(arg).__name__, (arg.start, arg.stop, arg.step))
         elif type(arg) in (list, tuple, set):
-            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack) for v in arg])
+            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in arg])
         elif isinstance(arg, dict):
-            tup = ("dict", {x: self._encode(arg[x], receiver_id, listener, traversal_stack) for x in arg})
+            tup = ("dict", {x: self._encode(arg[x], receiver_id, listener, traversal_stack, block_recursion) for x in arg})
         else:
             if isinstance(arg, Telekinesis):
                 obj = arg
             else:
                 obj = Telekinesis(
-                    arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures,
+                    arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
+                    cache_attributes= not block_recursion and self._cache_attributes
                 )
 
             route = obj._delegate(receiver_id, listener.channel)
             tup = (
                 "obj",
-                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack)),
+                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack, block_recursion=True)),
             )
 
         traversal_stack[i] = tup
@@ -431,6 +443,7 @@ class Telekinesis:
                             self._max_delegation_depth,
                             self._compile_signatures,
                             channel.telekinesis,
+                            self._cache_attributes,
                         )
                     out = channel.telekinesis._target
                 else:
@@ -444,6 +457,7 @@ class Telekinesis:
                     self._expose_tb,
                     self._max_delegation_depth,
                     self._compile_signatures,
+                    cache_attributes=self._cache_attributes,
                 )
 
         output_stack[root] = out
@@ -451,7 +465,7 @@ class Telekinesis:
 
     @staticmethod
     def _from_state(
-        state, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        state, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None, cache_attributes=False,
     ):
         def callable_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):
@@ -472,7 +486,6 @@ class Telekinesis:
         if method_name in state.methods or reset:
             signature, docstring = (not reset and state.methods.get(method_name)) or (None, None)
             signature = signature or "(*args, **kwargs)"
-            # if not isinstance(target, type):
             signature = signature.replace("(", "(self, ")
 
             stderr = sys.stderr
@@ -507,6 +520,7 @@ class Telekinesis:
                     self._max_delegation_depth,
                     self._compile_signatures,
                     self,
+                    self._cache_attributes,
                 )
 
             def setitem(self, key, value):
@@ -522,6 +536,7 @@ class Telekinesis:
                     self._max_delegation_depth,
                     self._compile_signatures,
                     self,
+                    self._cache_attributes,
                 )
 
             if "__getitem__" in state.methods:
@@ -533,7 +548,7 @@ class Telekinesis:
             if "__setitem__" in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
-        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent)
+        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes)
         out._update_state(state)
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 
