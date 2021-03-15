@@ -1,4 +1,4 @@
-import { Session, Channel, Route, Header } from './client'; 
+import { Session, Channel, Route, Header, RequestMetadata } from './client'; 
 import { bytesToInt } from './helpers';
   
 const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
@@ -83,7 +83,7 @@ export class Listener {
     this.channel = channel;
     this.currentTasks = new Map();
   }
-  setCallback(callback: (listener: Listener, reply: Route, payload: {}) => Promise<void>) {
+  setCallback(callback: (listener: Listener, metadata: RequestMetadata, payload: {}) => Promise<void>) {
     this.listenTask = new Promise(async r => await this.listen());
     return this;
   }
@@ -93,7 +93,7 @@ export class Listener {
       try {
         await (this.channel.listen() as any);
         while (true) {
-          let message = await this.channel.recv() as [Route?, {}?];
+          let message = await this.channel.recv() as [RequestMetadata?, {}?];
           // console.log('message', message)
           if (message[0] === undefined) {
             return;
@@ -103,7 +103,7 @@ export class Listener {
           this.currentTasks.set(
             id,
             new Promise(async r => {
-              await ((this.channel.telekinesis as Telekinesis)._handleRequest)(this, message[0] as Route, message[1] as {})
+              await ((this.channel.telekinesis as Telekinesis)._handleRequest)(this, message[0] as RequestMetadata, message[1] as {})
             }).then(() => {
               this.currentTasks.delete(id);
             })
@@ -232,21 +232,21 @@ export class Telekinesis extends Function {
 
     return route;
   }
-  async _handleRequest(listener: Listener, reply: Route, payload: {}) {
-    // console.log('handleRequest!!', this, listener, reply);
+  async _handleRequest(listener: Listener, metadata: RequestMetadata, payload: {}) {
+    // console.log('handleRequest!!', this, listener, metadata);
     try {
       if ((payload as any)['close'] !== undefined) {
         await listener.close();
       } else if ((payload as any)['ping'] !== undefined) {
-        await listener.channel.send(reply, {repr: this._state.repr, timestamp: this._state.lastChange})
+        await listener.channel.send(metadata.caller, {repr: this._state.repr, timestamp: this._state.lastChange})
       } else if ((payload as any)['pipeline'] !== undefined) {
         let pipeline = this._decode((payload as any)['pipeline']) as [];
-        // console.log(`${reply.session.slice(0, 4)} called ${pipeline.length}`)
+        // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
-        let ret = await this._execute(listener, reply, pipeline);
+        let ret = await this._execute(listener, metadata, pipeline);
 
-        await listener.channel.send(reply, {
-          return: await this._encode(ret, reply.session, listener),
+        await listener.channel.send(metadata.caller, {
+          return: await this._encode(ret, metadata.caller.session, listener),
           repr: this._state.repr,
           timestamp: this._state.lastChange,
         })
@@ -255,7 +255,7 @@ export class Telekinesis extends Function {
       console.error(`Telekinesis request error with payload ${payload}, ${e}`)
       this._state.pipeline = [];
       try {
-        await listener.channel.send(reply, {error: (this._exposeTb? e : e.name )})
+        await listener.channel.send(metadata.caller, {error: (this._exposeTb? e : e.name )})
       } finally {}
     }
   }
@@ -273,7 +273,7 @@ export class Telekinesis extends Function {
       this._compileSignatures,
       this)
   }
-  async _execute(listener?: Listener, reply?: Route, pipeline?: [string, string | [string[], {}]][]) {
+  async _execute(listener?: Listener, metadata?: RequestMetadata, pipeline?: [string, string | [string[], {}]][]) {
     pipeline = pipeline || [];
 
     pipeline = this._state.pipeline.concat(pipeline);
@@ -293,7 +293,7 @@ export class Telekinesis extends Function {
     }
     async function exc(x: any) {
       if (x._blockThen !== undefined && x._lastUpdate && x._state && x._state.pipeline) {
-        return await x._execute(listener, reply);
+        return await x._execute(listener, metadata);
       }
       return x;
     }
@@ -327,7 +327,7 @@ export class Telekinesis extends Function {
         // console.log(args)
 
         if (target._tk_inject_first === true) {
-          args = [reply as Route, ...args];
+          args = [metadata as RequestMetadata, ...args];
         }
         
         const isConstructor = (x: any) => {

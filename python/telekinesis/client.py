@@ -230,7 +230,7 @@ class Connection:
                                     (ret_signature == signature)
                                     or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
                                 ):
-                                    channel.handle_message(source, destination, payload, message[:73 + 65 + 32])
+                                    channel.handle_message(source, destination, payload, message[:73 + len_h + 65 + 32])
                             else:
                                 raise Exception("Authentication Error: message payload does not match signed hash")
 
