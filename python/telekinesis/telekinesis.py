@@ -223,19 +223,19 @@ class Telekinesis:
 
         return route
 
-    async def _handle_request(self, listener, reply, payload):
+    async def _handle_request(self, listener, metadata, payload):
         try:
             if "close" in payload:
                 await listener.close()
             elif "ping" in payload:
-                await listener.channel.send(reply, {"repr": self._state.repr, "timestamp": self._state.last_change})
+                await listener.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
-                pipeline = self._decode(payload.get("pipeline"), reply.session)
-                self._logger.info("%s called %s", reply.session[:4], len(pipeline))
-                ret = await self._execute(listener, reply, pipeline)
+                pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
+                self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
+                ret = await self._execute(listener, metadata, pipeline)
 
-                await listener.channel.send(reply, {
-                    "return": self._encode(ret, reply.session, listener),
+                await listener.channel.send(metadata.caller, {
+                    "return": self._encode(ret, metadata.caller.session, listener),
                     "repr": self._state.repr,
                     "timestamp": self._state.last_change})
 
@@ -244,7 +244,7 @@ class Telekinesis:
 
             self._state.pipeline.clear()
             try:
-                await listener.channel.send(reply, {"error": traceback.format_exc() if self._expose_tb else ""})
+                await listener.channel.send(metadata.caller, {"error": traceback.format_exc() if self._expose_tb else ""})
             finally:
                 pass
 
@@ -264,7 +264,7 @@ class Telekinesis:
             self._cache_attributes,
         )
 
-    async def _execute(self, listener=None, reply=None, pipeline=None):
+    async def _execute(self, listener=None, metadata=None, pipeline=None):
         if not pipeline:
             pipeline = []
 
@@ -280,7 +280,7 @@ class Telekinesis:
 
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
-                return await x._execute(listener, reply)
+                return await x._execute(listener, metadata)
             return x
 
         target = self._target
@@ -298,7 +298,7 @@ class Telekinesis:
                 args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
 
                 if "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg:
-                    target = target(reply, *args, **kwargs)
+                    target = target(metadata, *args, **kwargs)
                 else:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):

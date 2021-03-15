@@ -372,12 +372,13 @@ class Channel:
         if self.validate_token_chain(source.session, destination.tokens):
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
+            metadata = RequestMetadata(self.session, source, [])
 
             if payload[:4] == b"\x00" * 4:
                 if payload[4] == 0:
-                    self.messages.appendleft((source, bson.loads(payload[5:])))
+                    self.messages.appendleft((metadata, bson.loads(payload[5:])))
                 elif payload[4] == 255:
-                    self.messages.appendleft((source, bson.loads(zlib.decompress(payload[5:]))))
+                    self.messages.appendleft((metadata, bson.loads(zlib.decompress(payload[5:]))))
                 else:
                     raise Exception("Received message with different encoding")
 
@@ -393,9 +394,9 @@ class Channel:
                     chunks = self.chunks.pop(mid)
                     payload = b"".join(chunks[ii] for ii in range(n))
                     if payload[0] == 0:
-                        self.messages.appendleft((source, bson.loads(payload[1:])))
+                        self.messages.appendleft((metadata, bson.loads(payload[1:])))
                     elif payload[0] == 255:
-                        self.messages.appendleft((source, bson.loads(zlib.decompress(payload[1:]))))
+                        self.messages.appendleft((metadata, bson.loads(zlib.decompress(payload[1:]))))
                     else:
                         raise Exception("Received message with different encoding")
                     self.lock.set()
@@ -553,3 +554,10 @@ class Route:
 
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
+
+
+class RequestMetadata:
+    def __init__(self, session, caller, raw_messages):
+        self.session = session
+        self.caller = caller
+        self.raw_messages = raw_messages
