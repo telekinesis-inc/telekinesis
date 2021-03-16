@@ -330,17 +330,14 @@ export class Telekinesis extends Function {
           args = [metadata as RequestMetadata, ...args];
         }
         
-        const isConstructor = (x: any) => {
-          try {
-            return !!(new (new Proxy(x, {construct() {return isConstructor}}))())
-          } catch(e) {
-            return false
-          }
-        }
-        if (isConstructor(target)) {
-          target = await new target(...args);
-        } else {
+        try {
           target = await target.call(prevTarget, ...args);
+        } catch(e) {
+          try {
+            target = await new target(...args);
+          } catch(e2) {
+            throw(e)
+          }
         }
       }
     }
@@ -514,4 +511,9 @@ export class Telekinesis extends Function {
     t._state = state;
     return t
   }
+}
+
+export function inject_first_arg(func: any) {
+  func._tk_inject_first = true;
+  return func;
 }

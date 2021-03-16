@@ -309,7 +309,7 @@ export class Channel {
   route?: Route;
 
   headerBuffer: Header[];
-  chunks: Map<number, Map<number, [Uint8Array, RequestMetadata]>>;
+  chunks: Map<string, Map<number, [Uint8Array, RequestMetadata]>>;
   messages: [RequestMetadata, {}][];
   waiting: (([]) => void)[];
   initLocks: ((channel: Channel) => void)[];
@@ -368,7 +368,7 @@ export class Channel {
       } else {
         let i = bytesToInt(rawChunk.slice(0, 2));
         let n = bytesToInt(rawChunk.slice(2, 4));
-        let mid = bytesToInt(rawChunk.slice(4, 8));
+        let mid = source.session + bytesToInt(rawChunk.slice(4, 8));
         let chunk = rawChunk.slice(8);
 
         if (!this.chunks.has(mid)) {
