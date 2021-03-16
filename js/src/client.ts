@@ -153,7 +153,8 @@ export class Connection {
                   channel && await channel.handleMessage(
                     Route.fromObject(body.source),
                     Route.fromObject(body.destination),
-                    payload
+                    payload,
+                    message.slice(0, 73+hLen+65+32)
                   )
                 }
               }
@@ -308,8 +309,8 @@ export class Channel {
   route?: Route;
 
   headerBuffer: Header[];
-  chunks: Map<number, Map<number, Uint8Array>>;
-  messages: [Route, {}][];
+  chunks: Map<string, Map<number, [Uint8Array, RequestMetadata]>>;
+  messages: [RequestMetadata, {}][];
   waiting: (([]) => void)[];
   initLocks: ((channel: Channel) => void)[];
   
@@ -350,12 +351,16 @@ export class Channel {
       })
     })
   }
-  async handleMessage(source: Route, destination: Route, rawPayload: Uint8Array) {
+  async handleMessage(source: Route, destination: Route, rawPayload: Uint8Array, proof: Uint8Array) {
     if (await this.validateTokenChain(source.session, destination.tokens)) {
       let sharedKey = new SharedKey( this.channelKey, source.channel)
       let rawChunk = new Uint8Array(
         await sharedKey.decrypt(rawPayload.slice(16,), rawPayload.slice(0, 16)) as Uint8Array
       )
+      let metadata = new RequestMetadata(
+        this.session,
+        source,
+        [{raw_payload: rawPayload, shared_key: sharedKey.key, proof: proof}]);
 
       let payloadSer = new Uint8Array();
       if (bytesToInt(rawChunk.slice(0,4)) === 0) {
@@ -363,18 +368,22 @@ export class Channel {
       } else {
         let i = bytesToInt(rawChunk.slice(0, 2));
         let n = bytesToInt(rawChunk.slice(2, 4));
-        let mid = bytesToInt(rawChunk.slice(4, 8));
+        let mid = source.session + bytesToInt(rawChunk.slice(4, 8));
         let chunk = rawChunk.slice(8);
 
         if (!this.chunks.has(mid)) {
           this.chunks.set(mid, new Map())
         }
-        let chunksMap = (this.chunks.get(mid) as Map<number, Uint8Array>)
-        chunksMap.set(i, chunk);
+        let chunksMap = (this.chunks.get(mid) as Map<number, [Uint8Array, RequestMetadata]>)
+        chunksMap.set(i, [chunk, metadata]);
 
         if (chunksMap.size === n) {
           for (let ii=0; ii<n; ii++) {
-            payloadSer = new Uint8Array([...payloadSer, ...(chunksMap.get(ii) as Uint8Array)])
+            let ch = (chunksMap.get(ii) as [Uint8Array, RequestMetadata]);
+            payloadSer = new Uint8Array([...payloadSer, ...ch[0]])
+            if (ii != i) {
+              metadata.rawMessages.push(ch[1]);
+            }
           }
           this.chunks.delete(mid);
         } else {
@@ -392,9 +401,9 @@ export class Channel {
       }
       if (this.waiting.length > 0) {
         let resolve = this.waiting.pop(); 
-        resolve && resolve([source, payload]);
+        resolve && resolve([metadata, payload]);
       } else {
-        this.messages.push([source, payload]);
+        this.messages.push([metadata, payload]);
       }
     } else {
       console.error(
@@ -608,5 +617,17 @@ export class Route {
   }
   static fromObject(obj: {brokers: string[], session: string, channel: string, tokens: string[]}) {
     return new Route(obj.brokers, obj.session, obj.channel, obj.tokens)
+  }
+}
+
+export class RequestMetadata {
+  session: Session;
+  caller: Route;
+  rawMessages: {}[];
+
+  constructor(session: Session, caller: Route, rawMessages: {}[]) {
+    this.session = session;
+    this.caller = caller;
+    this.rawMessages = rawMessages;
   }
 }

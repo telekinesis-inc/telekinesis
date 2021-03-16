@@ -230,7 +230,7 @@ class Connection:
                                     (ret_signature == signature)
                                     or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
                                 ):
-                                    channel.handle_message(source, destination, payload)
+                                    channel.handle_message(source, destination, payload, message[:73 + len_h + 65 + 32])
                             else:
                                 raise Exception("Authentication Error: message payload does not match signed hash")
 
@@ -368,34 +368,39 @@ class Channel:
 
         self.telekinesis = None
 
-    def handle_message(self, source, destination, raw_payload):
+    def handle_message(self, source, destination, raw_payload, proof):
         if self.validate_token_chain(source.session, destination.tokens):
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
+            metadata = RequestMetadata(self.session, source, [{'raw_payload': raw_payload, 'shared_key': shared_key.key, 'proof': proof}])
 
             if payload[:4] == b"\x00" * 4:
                 if payload[4] == 0:
-                    self.messages.appendleft((source, bson.loads(payload[5:])))
+                    self.messages.appendleft((metadata, bson.loads(payload[5:])))
                 elif payload[4] == 255:
-                    self.messages.appendleft((source, bson.loads(zlib.decompress(payload[5:]))))
+                    self.messages.appendleft((metadata, bson.loads(zlib.decompress(payload[5:]))))
                 else:
                     raise Exception("Received message with different encoding")
 
                 self.lock.set()
             else:
-                ir, nr, mid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
+                ir, nr, mmid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
                 i, n = int.from_bytes(ir, "big"), int.from_bytes(nr, "big")
+
+                mid = source.session.encode() + mmid
                 if mid not in self.chunks:
                     self.chunks[mid] = {}
-                self.chunks[mid][i] = chunk
+                self.chunks[mid][i] = (chunk, metadata)
 
                 if len(self.chunks[mid]) == n:
                     chunks = self.chunks.pop(mid)
-                    payload = b"".join(chunks[ii] for ii in range(n))
+                    payload = b"".join(chunks[ii][0] for ii in range(n))
+
+                    combined_metadata = RequestMetadata(metadata.session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)])
                     if payload[0] == 0:
-                        self.messages.appendleft((source, bson.loads(payload[1:])))
+                        self.messages.appendleft((combined_metadata, bson.loads(payload[1:])))
                     elif payload[0] == 255:
-                        self.messages.appendleft((source, bson.loads(zlib.decompress(payload[1:]))))
+                        self.messages.appendleft((combined_metadata, bson.loads(zlib.decompress(payload[1:]))))
                     else:
                         raise Exception("Received message with different encoding")
                     self.lock.set()
@@ -553,3 +558,10 @@ class Route:
 
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
+
+
+class RequestMetadata:
+    def __init__(self, session, caller, raw_messages):
+        self.session = session
+        self.caller = caller
+        self.raw_messages = raw_messages
