@@ -9,7 +9,7 @@ from pkg_resources import get_distribution
 import ujson
 import websockets
 
-from .cryptography import PrivateKey, PublicKey, Token
+from .cryptography import PrivateKey, PublicKey, Token, InvalidSignature
 from .client import Route
 
 
@@ -267,6 +267,12 @@ class Broker:
                         destination["session"][:4],
                         destination["channel"][:4],
                     )
+                    if connection.session.session_id != s.session:
+                        try:
+                            len_h = int.from_bytes(message[68:70], 'big')
+                            PublicKey(s.session).verify(message[:64], message[64:73 + len_h + 65 + 32])
+                        except InvalidSignature:
+                            return
 
                     for connection in dest_channel.connections:
                         await connection.websocket.send(message)
