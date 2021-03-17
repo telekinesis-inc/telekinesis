@@ -223,8 +223,7 @@ class Broker:
                 if action == "token":
                     await self.handle_tokens(connection, *args)
                 if action == "broker":
-                    print(args)
-                    self.handle_broker_action(connection, *args)
+                    await self.handle_broker_action(connection, *args)
                 if action == "send":
                     await self.handle_send(connection, message, **args)
                 if action == "close":
@@ -314,7 +313,7 @@ class Broker:
                             )
                     return
             for peer in set().union(*self.topology_cache[0].values()):
-                await peer.send([('broker', ('topology_update',))])
+                await peer.send([('broker', ('topology_update', {'source': self.broker_key.public_serial(), 'destinations': d.brokers, 'counter': 0}))])
         
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
@@ -413,14 +412,47 @@ class Broker:
             )
             connection.session.approve_token(token)
 
-    def handle_broker_action(self, connection, action, params=None):
+    async def handle_broker_action(self, connection, action, params=None):
         if action == "open":
-            connection.session.broker_connections[connection] = Peer(connection.websocket, self)
+            peer = Peer(connection.websocket, self)
+            session_id = connection.session.session_id
+            connection.session.broker_connections[connection] = peer
+            self.topology_cache[0][session_id] = (self.topology_cache[0].get(session_id) or set()).union([peer])
         if action == "close":
             connection.session.broker_sessions.pop(connection, None)
-        if action == "topology_update":
-            self.logger.info("%s: topology %s searches %s", self.broker_key.public_serial()[:4], "X", "Y")
+        if action == "topology_update" and params:
+            self.logger.info("%s: topology %s", self.broker_key.public_serial()[:4], str(params))
+            # if self.check_no_repeat...
+            peer = connection.session.broker_connections[connection]
+            if self.broker_key.public_serial() == params['source']:
+                # if check signature
+                for reply in params['replies']:
+                    peer_set = self.topology_cache[params['replies'][reply]].get(reply) or set()
+                    peer_set = peer_set.union([peer])
+                    self.topology_cache[params['replies'][reply]][reply] = peer_set
+            elif 'replies' in params:
+                for reply in params['replies']:
+                    params['replies'][reply] += 1
+                for depth in self.topology_cache:
+                    source_set = self.topology_cache[depth].get(params['source'])
+                    if source_set:
+                        for conn in source_set:
+                            await conn.send([('broker', ('topology_update', params))])
+                        return
+            else:
+                destination_set = set(params['destinations']).intersection(set(self.topology_cache[0].keys()))
+                if destination_set:
+                    params['replies'] = {d: 0 for d in destination_set}
+                    await peer.send([('broker', ('topology_update', params))])
+                    return
+                params['counter'] += 1
+                source_set = self.topology_cache[params['counter']].get(params['source']) or set()
+                self.topology_cache[params['counter']][params['source']] = source_set.union([peer])
 
+                for forwarded in set().union(self.topology_cache[0].values()):
+                    await peer.send([('broker', ('topology_update', params))])
+
+            
     async def add_broker(self, url, inherit_entrypoint=False):
         peer = Peer(None, self)
         if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
