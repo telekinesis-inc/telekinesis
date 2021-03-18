@@ -60,7 +60,7 @@ async def test_walkthrough():
 
     g_2 = await asyncio.wait_for(Telekinesis(delegator_route, conn_2.session)._call()._execute(), 4)
 
-    assert "Hello, World!!" == await g_2("World!!")
+    assert "Hello, World!!" == await asyncio.wait_for(g_2("World!!"), 4)
 
     class Counter:
         def __init__(self):

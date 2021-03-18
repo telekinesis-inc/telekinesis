@@ -9,7 +9,7 @@ from pkg_resources import get_distribution
 import ujson
 import websockets
 
-from .cryptography import PrivateKey, PublicKey, Token
+from .cryptography import PrivateKey, PublicKey, Token, InvalidSignature
 from .client import Route
 
 
@@ -184,6 +184,7 @@ class Broker:
         self.broker_key = PrivateKey(broker_key_file)
         self.logger = logging.getLogger(__name__)
         self.seen_messages = [set(), set(), 0]
+        self.topology_cache = {0: {}}
 
     async def handle_connection(self, websocket, _):
         connection = None
@@ -222,7 +223,7 @@ class Broker:
                 if action == "token":
                     await self.handle_tokens(connection, *args)
                 if action == "broker":
-                    self.handle_broker_action(connection, args)
+                    await self.handle_broker_action(connection, *args)
                 if action == "send":
                     await self.handle_send(connection, message, **args)
                 if action == "close":
@@ -266,6 +267,12 @@ class Broker:
                         destination["session"][:4],
                         destination["channel"][:4],
                     )
+                    if connection.session.session_id != s.session:
+                        try:
+                            len_h = int.from_bytes(message[68:70], 'big')
+                            PublicKey(s.session).verify(message[:64], message[64:73 + len_h + 65 + 32])
+                        except InvalidSignature:
+                            return
 
                     for connection in dest_channel.connections:
                         await connection.websocket.send(message)
@@ -280,31 +287,40 @@ class Broker:
                         destination["session"][:4],
                         destination["channel"][:4],
                     )
+            else:
+                if self.broker_key.public_serial() in (d.brokers or []):
+                    return
 
         if d.brokers:
-            for broker_id in d.brokers:
-                if broker_id in self.sessions:
-                    for broker_connection in self.sessions[broker_id].broker_connections.values():
-                        for enc_token in d.tokens:
-                            token = Token.decode(enc_token, False)
-                            if (
-                                self.broker_key.public_serial() in token.brokers
-                                and token.issuer in self.sessions
-                                and token.signature in self.sessions[token.issuer].active_tokens
-                                and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode()
-                            ):
-                                await broker_connection.send((("token", ("approve", enc_token)),))
-                        await broker_connection.websocket.send(message)
-                        self.logger.info(
-                            "%s: send %s %s ))) %s ))) %s %s (%s)",
-                            self.broker_key.public_serial()[:4],
-                            source["session"][:4],
-                            source["channel"][:4],
-                            str(len(message) // 2 ** 10),
-                            destination["session"][:4],
-                            destination["channel"][:4],
-                            broker_id[:4],
-                        )
+            for depth in sorted(self.topology_cache):
+                brokers = set(d.brokers).intersection(set(self.topology_cache[depth].keys()))
+                if brokers:
+                    for broker_id in brokers:
+                        for broker_connection in self.topology_cache[depth][broker_id]:
+                            for enc_token in d.tokens:
+                                token = Token.decode(enc_token, False)
+                                if (
+                                    self.broker_key.public_serial() in token.brokers
+                                    and token.issuer in self.sessions
+                                    and token.signature in self.sessions[token.issuer].active_tokens
+                                    and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode()
+                                ):
+                                    await broker_connection.send((("token", ("approve", enc_token)),))
+                            await broker_connection.websocket.send(message)
+                            self.logger.info(
+                                "%s: send %s %s ))) %s ))) %s %s (%s)",
+                                self.broker_key.public_serial()[:4],
+                                source["session"][:4],
+                                source["channel"][:4],
+                                str(len(message) // 2 ** 10),
+                                destination["session"][:4],
+                                destination["channel"][:4],
+                                broker_id[:4],
+                            )
+                    return
+            for peer in set().union(*self.topology_cache[0].values()):
+                await peer.send([('broker', ('topology_update', {'source': self.broker_key.public_serial(), 'destinations': d.brokers, 'counter': 0}))])
+        
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
@@ -402,12 +418,47 @@ class Broker:
             )
             connection.session.approve_token(token)
 
-    def handle_broker_action(self, connection, action):
+    async def handle_broker_action(self, connection, action, params=None):
         if action == "open":
-            connection.session.broker_connections[connection] = Peer(connection.websocket, self)
+            peer = Peer(connection.websocket, self)
+            session_id = connection.session.session_id
+            connection.session.broker_connections[connection] = peer
+            self.topology_cache[0][session_id] = (self.topology_cache[0].get(session_id) or set()).union([peer])
         if action == "close":
             connection.session.broker_sessions.pop(connection, None)
+        if action == "topology_update" and params:
+            self.logger.info("%s: topology %s", self.broker_key.public_serial()[:4], str(params))
+            # if self.check_no_repeat...
+            peer = connection.session.broker_connections[connection]
+            if self.broker_key.public_serial() == params['source']:
+                # if check signature
+                for reply in params['replies']:
+                    peer_set = self.topology_cache[params['replies'][reply]].get(reply) or set()
+                    peer_set = peer_set.union([peer])
+                    self.topology_cache[params['replies'][reply]][reply] = peer_set
+            elif 'replies' in params:
+                for reply in params['replies']:
+                    params['replies'][reply] += 1
+                for depth in self.topology_cache:
+                    source_set = self.topology_cache[depth].get(params['source'])
+                    if source_set:
+                        for conn in source_set:
+                            await conn.send([('broker', ('topology_update', params))])
+                        return
+            else:
+                destination_set = set(params['destinations']).intersection(set(self.topology_cache[0].keys()))
+                if destination_set:
+                    params['replies'] = {d: 0 for d in destination_set}
+                    await peer.send([('broker', ('topology_update', params))])
+                    return
+                params['counter'] += 1
+                source_set = self.topology_cache[params['counter']].get(params['source']) or set()
+                self.topology_cache[params['counter']][params['source']] = source_set.union([peer])
 
+                for forwarded in set().union(self.topology_cache[0].values()):
+                    await peer.send([('broker', ('topology_update', params))])
+
+            
     async def add_broker(self, url, inherit_entrypoint=False):
         peer = Peer(None, self)
         if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
@@ -519,7 +570,7 @@ class Peer(Connection):
 
         entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
 
-        await self.send([("broker", "open")])
+        await self.send([("broker", ("open",))])
 
         return session_id, entrypoint
 
@@ -544,6 +595,7 @@ class Peer(Connection):
 
                 if session_id not in self.broker.sessions:
                     self.broker.sessions[session_id] = Session(session_id)
+                
 
                 if inherit_entrypoint:
                     self.broker.entrypoint = entrypoint
@@ -551,6 +603,7 @@ class Peer(Connection):
                 self.session = self.broker.sessions[session_id]
                 self.session.connections.add(self)
                 self.session.broker_connections[self] = self
+                self.broker.topology_cache[0][session_id] = (self.broker.topology_cache[0].get(session_id) or set()).union([self])
 
                 n_tries = 0
                 while True:
