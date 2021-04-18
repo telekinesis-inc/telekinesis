@@ -354,52 +354,54 @@ class Telekinesis:
                 asyncio.get_event_loop().create_task(self._close())
             )
 
-    def _encode(self, arg, receiver_id=None, listener=None, traversal_stack=None, block_recursion=False):
-        i = str(id(arg))
+    def _encode(self, target, receiver_id=None, listener=None, traversal_stack=None, block_recursion=False):
         if traversal_stack is None:
+            i = 0
             traversal_stack = {}
-            output_stack = True
         else:
-            output_stack = False
-            if i in traversal_stack:
-                return i
+            if id(target) in traversal_stack:
+                return str(traversal_stack[id(target)][0])
+            i = len(traversal_stack)
 
-        traversal_stack[i] = None
+        traversal_stack[id(target)] = [i, None, target]
+        #..  keep a copy of the target so it doesn't get garbage collected - which messes up the id()
 
-        if type(arg) in (int, float, str, bytes, bool, type(None)):
-            tup = (type(arg).__name__, arg)
-        elif type(arg) in (range, slice):
-            tup = (type(arg).__name__, (arg.start, arg.stop, arg.step))
-        elif type(arg) in (list, tuple, set):
-            tup = (type(arg).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in arg])
-        elif isinstance(arg, dict):
-            tup = ("dict", {x: self._encode(arg[x], receiver_id, listener, traversal_stack, block_recursion) for x in arg})
+        if receiver_id is None:
+            receiver_id = self._session.session_key.public_serial()
+
+        if type(target) in (int, float, str, bytes, bool, type(None)):
+            tup = (type(target).__name__, target)
+        elif type(target) in (range, slice):
+            tup = (type(target).__name__, (target.start, target.stop, target.step))
+        elif type(target) in (list, tuple, set):
+            tup = (type(target).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in target])
+        elif isinstance(target, dict):
+            tup = ("dict", {x: self._encode(target[x], receiver_id, listener, traversal_stack, block_recursion) for x in target})
         else:
-            if isinstance(arg, Telekinesis):
-                obj = arg
+            if isinstance(target, Telekinesis):
+                obj = target
             else:
                 obj = Telekinesis(
-                    arg, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
+                    target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
                     cache_attributes= not block_recursion and self._cache_attributes
                 )
 
-            route = obj._delegate(receiver_id, listener.channel)
+            route = obj._delegate(receiver_id, listener and listener.channel)
             tup = (
                 "obj",
                 (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack, block_recursion=True)),
             )
 
-        traversal_stack[i] = tup
+        traversal_stack[id(target)] = [i, tup, target]
 
-        if output_stack:
-            traversal_stack["root"] = i
-            return traversal_stack
-        return i
+        if i == 0:
+            return {str(v[0]): v[1] for v in traversal_stack.values()}
+        return str(i)
 
     def _decode(self, input_stack, caller_id=None, root=None, output_stack=None):
         out = None
         if root is None:
-            root = input_stack["root"]
+            root = "0"
             output_stack = {}
         if root in output_stack:
             return output_stack[root]
