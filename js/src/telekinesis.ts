@@ -370,16 +370,15 @@ export class Telekinesis extends Function {
   }
   async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
 
-    let id = bytesToInt(webcrypto.getRandomValues(new Uint8Array(4))).toString()
-    let outputStack = false;
+    let id = 0;
 
     if (traversalStack === undefined) {
       traversalStack = new Map();
-      outputStack = true;
     } else {
       if (traversalStack.has(target)) {
-        return (traversalStack.get(target) as [string, [string, any]])[0]
+        return (traversalStack.get(target) as [string, [string, any]])[0].toString();
       }
+      id = traversalStack.size;
     }
     let out = [id, ['placeholder', null as any]]
     traversalStack.set(target, out as [string, [string, any]])
@@ -429,18 +428,18 @@ export class Telekinesis extends Function {
 
     // console.log('prelim', id, target, out[1])
 
-    if (outputStack) {
+    if (id === 0) {
       let output = Array.from(traversalStack.values()).reduce((p: any, v:any) => {p[v[0]] = v[1]; return p}, {});
-      output['root'] = id;
       // console.log('encoded', target, output)
       return output
     }
-    return id
+    return id.toString();
   }
   _decode(inputStack: {}, callerId?: string, root?: string, outputStack: Map<string, any> = new Map()) {
     let out: any;
     if (root === undefined) {
-      root = (inputStack as any)["root"];
+      // console.log(inputStack)
+      root = "0";
     }
     if (root !== undefined) {
       if (outputStack.has(root)) {
