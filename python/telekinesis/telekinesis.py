@@ -46,6 +46,7 @@ class State:
         for attribute_name in dir(target):
             if attribute_name[0] != "_" or attribute_name in [
                 "__call__",
+                "__init__",
                 "__getitem__",
                 "__setitem__",
                 "__add__",
@@ -58,7 +59,7 @@ class State:
                         target_attribute = target.__getattribute__(attribute_name)
 
                     if "__call__" in dir(target_attribute):
-                        if attribute_name == "__call__":
+                        if attribute_name in ["__call__", "__init__"]:
                             target_attribute = target
                         signature = None
                         try:
@@ -73,7 +74,10 @@ class State:
                         except Exception:
                             logger.debug("Could not obtain signature from %s.%s", target, attribute_name)
 
-                        methods[attribute_name] = (signature, target_attribute.__doc__)
+                        if attribute_name == '__init__':
+                            methods['__call__'] = (signature, target.__init__.__doc__)
+                        else:
+                            methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
                         if cache_attributes:
                             attributes[attribute_name] = target_attribute
@@ -85,7 +89,6 @@ class State:
 
         if isinstance(target, type):
             repr_ = str(type(target))
-            methods["__call__"] = (str(inspect.signature(target)), target.__init__.__doc__)
             doc = target.__doc__
         else:
             doc = None
