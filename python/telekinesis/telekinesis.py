@@ -227,6 +227,7 @@ class Telekinesis:
         return route
 
     async def _handle_request(self, listener, metadata, payload):
+        pipeline = None
         try:
             if "close" in payload:
                 await listener.close()
@@ -243,7 +244,10 @@ class Telekinesis:
                     "timestamp": self._state.last_change})
 
         except Exception:
-            self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
+            if pipeline is None:
+                self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
+            else:
+                self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
 
             self._state.pipeline.clear()
             try:
