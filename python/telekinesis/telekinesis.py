@@ -248,7 +248,7 @@ class Telekinesis:
             finally:
                 pass
 
-    def _call(self, *args, **kwargs):
+    def __call__(self, *args, **kwargs):
         state = self._state.clone()
         state.pipeline.append(("call", (args, kwargs)))
 
@@ -469,7 +469,7 @@ class Telekinesis:
     def _from_state(
         state, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None, cache_attributes=False,
     ):
-        def callable_subclass(signature, method_name, docstring):
+        def signatured_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):
                 @makefun.with_signature(
                     signature,
@@ -478,7 +478,7 @@ class Telekinesis:
                     module_name="telekinesis.telekinesis",
                 )
                 def __call__(self, *args, **kwargs):
-                    return self._call(*args, **kwargs)
+                    return Telekinesis.__call__(self, *args, **kwargs)
 
             return Telekinesis_
 
@@ -495,11 +495,11 @@ class Telekinesis:
 
             try:
                 if compile_signatures and check_signature(signature):
-                    Telekinesis_ = callable_subclass(signature, method_name, docstring)
+                    Telekinesis_ = signatured_subclass(signature, method_name, docstring)
                 else:
-                    Telekinesis_ = callable_subclass("(self, *args, **kwargs)", method_name, docstring)
+                    Telekinesis_ = signatured_subclass("(self, *args, **kwargs)", method_name, docstring)
             except Exception:
-                Telekinesis_ = callable_subclass("(self, *args, **kwargs)", method_name, docstring)
+                Telekinesis_ = signatured_subclass("(self, *args, **kwargs)", method_name, docstring)
 
             sys.stderr = stderr
 

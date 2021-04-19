@@ -15,7 +15,7 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 async def test_walkthrough():
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
         async def handle_send(self, *args, **kwargs):
-            if random.random() < 0.02:
+            if random.random() < 0.005:
                 self.logger.error("Gotcha!!!")
                 kwargs["message"] = Exception("Random Fault Injection")
             await super().handle_send(*args, **kwargs)
@@ -58,7 +58,7 @@ async def test_walkthrough():
 
     delegator_route = Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
 
-    g_2 = await asyncio.wait_for(Telekinesis(delegator_route, conn_2.session)._call()._execute(), 4)
+    g_2 = await asyncio.wait_for(Telekinesis(delegator_route, conn_2.session)()._execute(), 4)
 
     assert "Hello, World!!" == await asyncio.wait_for(g_2("World!!"), 4)
 
@@ -80,11 +80,11 @@ async def test_walkthrough():
         conn_1.session.session_key.public_serial()
     )  # << Max delegation depth!
 
-    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)._call()._execute(), 4)
+    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)()._execute(), 4)
 
     assert await asyncio.wait_for(counter.increment().increment().value._execute(), 4) == 2
 
-    with pytest.raises(Exception, match=r".*not callable.*"):
+    with pytest.raises(Exception, match=r".*Unauthorized.*"):
         await counter.to_be_masked()
 
     with pytest.raises(Exception, match=r".*Unauthorized.*"):
@@ -102,7 +102,7 @@ async def test_walkthrough():
         conn_2.session.session_key.public_serial()
     )
 
-    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)._call()._execute(), 4)
+    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)()._execute(), 4)
 
     with pytest.raises(asyncio.TimeoutError):  # Max delegation depth doesn't allow it!
         await asyncio.wait_for(counter_2.value._execute(), 4)
