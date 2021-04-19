@@ -375,7 +375,7 @@ class Telekinesis:
             tup = (type(target).__name__, (target.start, target.stop, target.step))
         elif type(target) in (list, tuple, set):
             tup = (type(target).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in target])
-        elif isinstance(target, dict):
+        elif type(target) == dict:
             tup = ("dict", {x: self._encode(target[x], receiver_id, listener, traversal_stack, block_recursion) for x in target})
         else:
             if isinstance(target, Telekinesis):
