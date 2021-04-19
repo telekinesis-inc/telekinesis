@@ -406,6 +406,8 @@ export class Telekinesis extends Function {
         (children as any)[v] = await this._encode(target[v], receiverId, listener, traversalStack, blockRecursion);
       }
       out[1] = ['dict', children];
+    } else if (typeof target !== 'undefined' && target instanceof Route) {
+      out[1] = ['route', target.toObject()];
     } else {
       let obj: Telekinesis;
       if (target._isTelekinesisObject === true) {
@@ -484,6 +486,8 @@ export class Telekinesis extends Function {
           out[k] = this._decode(inputStack, callerId, obj[k], outputStack);
         }
         outputStack.set(root, out);
+      } else if (typ === 'route') {
+        out = Route.fromObject(obj);
       } else {
         // console.log(typ, obj)
         let route = Route.fromObject(obj[0]);
