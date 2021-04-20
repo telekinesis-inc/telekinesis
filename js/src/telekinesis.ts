@@ -6,7 +6,7 @@ const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypt
 export class State {
   attributes: string[] | Map<string, any>;
   methods: Map<string,[string, string]>;
-  pipeline: [string, string | [any[], {}]][];
+  pipeline: [string, Telekinesis | string | [any[], {}]][];
   repr: string;
   doc?: string;
   lastChange?: number;
@@ -133,6 +133,10 @@ export class Telekinesis extends Function {
   _listeners: Map<Route, Listener>;
   _state: State;
 
+  _onUpadateCallback?: any;
+  _subscription?: Telekinesis;
+  _subscribers: Set<Telekinesis>;
+
   _lastUpdate: number;
   _blockThen: boolean;
   _isTelekinesisObject: boolean;
@@ -153,6 +157,10 @@ export class Telekinesis extends Function {
     this._cacheAttributes = cacheAttributes;
 
     this._listeners = new Map();
+    this._subscribers = new Set();
+
+    session.targets.set(target, (session.targets.get(target) || new Set()).add(this))
+
     if (target instanceof Route) {
       this._state = new State();
     } else {
@@ -232,6 +240,15 @@ export class Telekinesis extends Function {
 
     return route;
   }
+  _subscribe(callback?: any) {
+    this._onUpadateCallback = callback;
+    this._subscription = new Telekinesis(
+      (s: any) => {this._state = State.fromObject(s); this._onUpadateCallback && this._onUpadateCallback(this)},
+      this._session, undefined, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+    )
+    this._state.pipeline.push(['subscribe', this._subscription])
+    return this
+  }
   async _handleRequest(listener: Listener, metadata: RequestMetadata, payload: {}) {
     // console.log('handleRequest!!', this, listener, metadata);
     try {
@@ -273,7 +290,7 @@ export class Telekinesis extends Function {
       this._compileSignatures,
       this)
   }
-  async _execute(listener?: Listener, metadata?: RequestMetadata, pipeline?: [string, string | [string[], {}]][]) {
+  async _execute(listener?: Listener, metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][]) {
     pipeline = pipeline || [];
 
     pipeline = this._state.pipeline.concat(pipeline);
@@ -319,7 +336,7 @@ export class Telekinesis extends Function {
       } else if (action === 'call') {
         // console.log(`${action} ${target}`);
         
-        let ar = pipeline[step][1][0] as [];
+        let ar = (pipeline[step][1] as [string[], {}])[0] as [];
         let args: any[] = [];
         for (let i in ar) {
           args[i] = await exc(ar[i]);
