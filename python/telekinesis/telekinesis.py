@@ -295,7 +295,7 @@ class Telekinesis:
             if action == "get":
                 self._logger.info("%s %s %s", action, arg, target)
                 if (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"]) or arg in (
-                    self._mask or []
+                    self._mask or [] ) or (type(target) == dict
                 ):
                     raise Exception("Unauthorized!")
                 target = target.__getattribute__(arg)
