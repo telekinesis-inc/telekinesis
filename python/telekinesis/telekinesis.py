@@ -392,6 +392,11 @@ class Telekinesis:
             self._cache_attributes,
         )
 
+    def __setattr__(self, attribute, value):
+        if attribute[0] != '_':
+            raise Exception('Attributes for Telekinesis objects cannot be set directy')
+        super().__setattr__(attribute, value)
+
     def __await__(self):
         return self._execute().__await__()
 
