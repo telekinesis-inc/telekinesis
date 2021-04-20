@@ -154,7 +154,7 @@ class Telekinesis:
         self._subscription = None
         self._subscribers = set()
 
-        session.targets[target] = (session.targets.get(target) or set()).union(set((self,)))
+        session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
 
         if isinstance(target, Route):
             self._state = State()
@@ -196,11 +196,11 @@ class Telekinesis:
 
         for method_name in state.methods:
             if method_name[0] != "_":
-                self.__setattr__(method_name, None)
+                super().__setattr__(method_name, None)
 
         for attribute_name in state.attributes:
             if attribute_name[0] != "_":
-                self.__setattr__(attribute_name, None)
+                super().__setattr__(attribute_name, None)
 
         self._state = state
 
@@ -312,7 +312,7 @@ class Telekinesis:
                 if asyncio.iscoroutine(target):
                     target = await target
             if action == "subscribe":
-                if tks := self._session.targets.get(target):
+                if tks := self._session.targets.get(id(target)):
                     tk = list(tks)[0]
                     # TODO: pick an tk that has the same security details
                 else:
@@ -329,7 +329,7 @@ class Telekinesis:
                         state = State.from_object(obj, True)
                         if attr[0] != '_':
                             for ses in sessions:
-                                for tk in ses.targets.get(obj):
+                                for tk in ses.targets.get(id(obj)):
                                     if attr not in tk._mask:
                                         for s in tk._subscribers:
                                             asyncio.create_task(s(state.to_dict(tk._mask))._execute())
