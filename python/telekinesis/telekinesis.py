@@ -136,7 +136,8 @@ class Listener:
 
 class Telekinesis:
     def __init__(
-        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None, cache_attributes=False,
+        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        cache_attributes=False,
     ):
 
         self._logger = logging.getLogger(__name__)
@@ -149,13 +150,19 @@ class Telekinesis:
         self._parent = parent
         self._cache_attributes = cache_attributes
         self._listeners = {}
+        self._on_update_callback = None
+        self._subscription = None
+        self._subscribers = set()
+
+        session.targets[target] = (session.targets.get(target) or set()).union(set((self,)))
+
         if isinstance(target, Route):
             self._state = State()
         else:
             self._update_state(State.from_object(target, cache_attributes))
 
     def __getattribute__(self, attr):
-        if attr[0] == "_":  # and (attr != '__call__'):
+        if attr[0] == "_":
             return super().__getattribute__(attr)
 
         state = self._state.clone()
@@ -226,6 +233,16 @@ class Telekinesis:
 
         return route
 
+    def _subscribe(self, callback=None):
+        self._on_update_callback = callback
+        self._subscription = Telekinesis(
+            lambda s: self._update_state(State(**s)) and self._on_update_callback and self._on_update_callback(self), self._session, None,
+            self._expose_tb, self._max_delegation_depth, self._compile_signatures
+        )
+        self._state.pipeline.append(('subscribe', self._subscription))
+
+        return self
+
     async def _handle_request(self, listener, metadata, payload):
         pipeline = None
         try:
@@ -254,22 +271,6 @@ class Telekinesis:
                 await listener.channel.send(metadata.caller, {"error": traceback.format_exc() if self._expose_tb else ""})
             finally:
                 pass
-
-    def __call__(self, *args, **kwargs):
-        state = self._state.clone()
-        state.pipeline.append(("call", (args, kwargs)))
-
-        return Telekinesis._from_state(
-            state,
-            self._target,
-            self._session,
-            self._mask,
-            self._expose_tb,
-            self._max_delegation_depth,
-            self._compile_signatures,
-            self,
-            self._cache_attributes,
-        )
 
     async def _execute(self, listener=None, metadata=None, pipeline=None):
         if not pipeline:
@@ -310,6 +311,32 @@ class Telekinesis:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):
                     target = await target
+            if action == "subscribe":
+                if tks := self._session.targets.get(target):
+                    tk = list(tks)[0]
+                    # TODO: pick an tk that has the same security details
+                else:
+                    tk = Telekinesis(
+                        target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
+                        None, self._cache_attributes
+                    )
+                tk._subscribers.add(arg)
+
+                orig = target.__class__.__setattr__
+                if '_tk_sessions' not in dir(orig):
+                    sessions = set()
+                    def tk_setattr(obj, attr, val):
+                        state = State.from_object(obj, True)
+                        if attr[0] != '_':
+                            for ses in sessions:
+                                for tk in ses.targets.get(obj):
+                                    if attr not in tk._mask:
+                                        for s in tk._subscribers:
+                                            asyncio.create_task(s(state.to_dict(tk._mask))._execute())
+                    target.__class__.__setattr__ = tk_setattr
+                    target.__class__.__setattr__._tk_sessions = sessions
+                target.__class__.__setattr__._tk_sessions.add(self._session)
+
 
         self._update_state(State.from_object(self._target, self._cache_attributes))
         self._state.last_change = time.time()
@@ -348,6 +375,22 @@ class Telekinesis:
                     await listener.close(True)
         except Exception:
             self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
+
+    def __call__(self, *args, **kwargs):
+        state = self._state.clone()
+        state.pipeline.append(("call", (args, kwargs)))
+
+        return Telekinesis._from_state(
+            state,
+            self._target,
+            self._session,
+            self._mask,
+            self._expose_tb,
+            self._max_delegation_depth,
+            self._compile_signatures,
+            self,
+            self._cache_attributes,
+        )
 
     def __await__(self):
         return self._execute().__await__()

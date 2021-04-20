@@ -257,6 +257,7 @@ class Session:
     def __init__(self, session_key_file=None):
         self.session_key = PrivateKey(session_key_file)
         self.channels = {}
+        self.targets = {}
         self.connections = set()
         self.seen_messages = [set(), set(), 0]
         self.issued_tokens = {}
