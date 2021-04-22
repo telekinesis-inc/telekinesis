@@ -326,6 +326,7 @@ class Telekinesis:
                 if '_tk_sessions' not in dir(orig):
                     sessions = set()
                     def tk_setattr(obj, attr, val):
+                        orig(obj, attr, val)
                         state = State.from_object(obj, True)
                         if attr[0] != '_':
                             for ses in sessions:
