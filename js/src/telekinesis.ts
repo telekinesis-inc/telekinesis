@@ -71,6 +71,7 @@ export class State {
     if (target instanceof Function) {
       state.methods.set('__call__', ['(*args)', target.toString()]);
     }
+    state.lastChange = Date.now() / 1000;
     return state;
   }
 }
@@ -356,11 +357,27 @@ export class Telekinesis extends Function {
             throw(e)
           }
         }
+      } else if (action === 'subscribe') {
+        let tk; 
+        if (this._session.targets.has(target)) {
+          tk = Array.from(this._session.targets.get(target) as Set<Telekinesis>)[0];
+          // TODO: pick an tk that has the same security details
+        } else {
+          tk = new Telekinesis(
+            target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+          )
+        }
+        tk._subscribers.add(pipeline[step][1] as Telekinesis)
       }
     }
 
     this._state = State.fromTarget(this._target, this._cacheAttributes);
-    this._state.lastChange = Date.now() / 1000;
+
+    const subscribers = Array.from(this._subscribers)
+    if (subscribers) {
+      const state = State.fromTarget(this._target, true).toObject(this._mask)
+      subscribers.map((s: Telekinesis) => s(state)._execute())
+    }
 
     return target;
 
