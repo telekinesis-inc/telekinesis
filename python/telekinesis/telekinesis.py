@@ -332,7 +332,7 @@ class Telekinesis:
 
         self._update_state(State.from_object(self._target, self._cache_attributes))
 
-        print(touched)
+        # print(touched)
         for tk in touched:
             if tk and tk._subscribers:
                 state_obj = State.from_object(tk._target, True).to_dict(tk._mask)

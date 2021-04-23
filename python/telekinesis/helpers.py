@@ -6,7 +6,7 @@ from .telekinesis import Telekinesis
 
 def authenticate(url="ws://localhost:8776", session_key_file=None, print_callback=print, **kwargs):
 
-    user = PublicUser(url, session_key_file)).authenticate(print_callback, **kwargs)
+    user = PublicUser(url, session_key_file).authenticate(print_callback, **kwargs)
 
     return user
 
