@@ -291,6 +291,16 @@ export class Telekinesis extends Function {
       this)
   }
   async _execute(listener?: Listener, metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][]) {
+    if (this._target instanceof Promise) {
+      const oldTarget = this._target;
+      this._target = await this._target;
+      const set = (this._session.targets.get(oldTarget) as Set<Telekinesis>);
+      set.delete(this)
+      if (!set.size) {
+        this._session.targets.delete(oldTarget)
+      }
+      this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this))
+    }
     pipeline = pipeline || [];
 
     pipeline = this._state.pipeline.concat(pipeline);

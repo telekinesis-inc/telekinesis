@@ -17,15 +17,12 @@ export function bytesToInt(bytes: Uint8Array) {
   return Array.from(bytes).reduce((p, c, i) => p+c*256**(bytes.length-i-1), 0)
 }
 
-export async function authenticate(url: string= 'ws://localhost:8776', sessionKey?: {privateKey: {}, publicKey: {}}, 
+export function authenticate(url: string= 'ws://localhost:8776', sessionKey?: {privateKey: {}, publicKey: {}}, 
   printCallback: ((output: any) => void) = console.log, kwargs?: any) {
 
-  let user = await (await new PublicUser(url, sessionKey) as any)
+  let user = (new PublicUser(url, sessionKey) as any)
     .authenticate._call([printCallback], kwargs);
 
-  if (!user) {
-    throw 'Failed to authenticate';
-  }
   return user;
 }
 
@@ -35,12 +32,16 @@ export class PublicUser {
       let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
       url = url.slice(0, i) + ':8776' + url.slice(i);
     }
-    return new Promise<any>(async (r) => {
-      let session = new Session(sessionKey);
-      let c = new Connection(session, url);
-      await c.connect();
+    const session = new Session(sessionKey);
+    const connection = new Connection(session, url);
 
-      r(new Telekinesis(c.entrypoint as Route, session) as any);
-    })
+    return new Telekinesis(new Promise((r: any) => connection.connect().then(()=> r(connection.entrypoint))), session)
+    // return new Promise<any>(async (r) => {
+    //   let session = new Session(sessionKey);
+    //   let c = new Connection(session, url);
+    //   await c.connect();
+
+    //   r(new Telekinesis(c.entrypoint as Route, session) as any);
+    // })
   }
 }

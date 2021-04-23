@@ -273,6 +273,14 @@ class Telekinesis:
                 pass
 
     async def _execute(self, listener=None, metadata=None, pipeline=None):
+        if asyncio.iscoroutine(self._target):
+            old_id = id(self._target)
+            self._target = await self._target
+            self._session.targets[old_id].remove(self)
+            if not self._session.targets[old_id]:
+                self._session.targets.pop(old_id)
+            self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(set((self,)))
+
         if not pipeline:
             pipeline = []
 
