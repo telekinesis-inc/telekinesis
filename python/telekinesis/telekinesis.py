@@ -292,7 +292,11 @@ class Telekinesis:
             return x
 
         target = self._target
+
+        touched = self._session.targets.get(id(target))
         for action, arg in pipeline:
+            touched = touched.union((self._session.targets.get(id(target))) or set())
+
             if action == "get":
                 self._logger.info("%s %s %s", action, arg, target)
                 if (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"]) or arg in (
@@ -312,35 +316,22 @@ class Telekinesis:
                 if asyncio.iscoroutine(target):
                     target = await target
             if action == "subscribe":
-                if tks := self._session.targets.get(id(target)):
-                    tk = list(tks)[0]
-                    # TODO: pick an tk that has the same security details
-                else:
-                    tk = Telekinesis(
-                        target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
-                        None, self._cache_attributes
-                    )
+                tk = Telekinesis._reuse(
+                    target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
+                    None, self._cache_attributes
+                )
                 tk._subscribers.add(arg)
 
-                orig = target.__class__.__setattr__
-                if '_tk_sessions' not in dir(orig):
-                    sessions = set()
-                    def tk_setattr(obj, attr, val):
-                        orig(obj, attr, val)
-                        state = State.from_object(obj, True)
-                        if attr[0] != '_':
-                            for ses in sessions:
-                                for tk in ses.targets.get(id(obj)):
-                                    if attr not in tk._mask:
-                                        for s in tk._subscribers:
-                                            asyncio.create_task(s(state.to_dict(tk._mask))._execute())
-                    target.__class__.__setattr__ = tk_setattr
-                    target.__class__.__setattr__._tk_sessions = sessions
-                target.__class__.__setattr__._tk_sessions.add(self._session)
-
-
         self._update_state(State.from_object(self._target, self._cache_attributes))
-        self._state.last_change = time.time()
+
+        print(touched)
+        for tk in touched:
+            if tk and tk._subscribers:
+                state_obj = State.from_object(tk._target, True).to_dict(tk._mask)
+                for s in tk._subscribers:
+                    asyncio.create_task(s(state_obj)._execute())
+
+
         return target
 
     async def _send_request(self, channel, **kwargs):
@@ -439,7 +430,7 @@ class Telekinesis:
             if isinstance(target, Telekinesis):
                 obj = target
             else:
-                obj = Telekinesis(
+                obj = Telekinesis._reuse(
                     target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
                     cache_attributes= not block_recursion and self._cache_attributes
                 )
@@ -615,6 +606,18 @@ class Telekinesis:
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 
         return out
+    
+    @staticmethod
+    def _reuse(
+        target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        cache_attributes=False,
+    ):
+        kwargs = locals()
+
+        for tk in (session.targets.get(id(target)) or []):
+            if all((kwargs[x] == tk.__getattribute__('_'+x) for x in kwargs)):
+                return tk
+        return Telekinesis(**kwargs)
 
 
 def check_signature(signature):
