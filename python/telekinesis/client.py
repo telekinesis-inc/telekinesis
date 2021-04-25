@@ -557,6 +557,16 @@ class Route:
     def clone(self):
         return Route(**self.to_dict())
 
+    def validate_token_chain(self, receiver):
+        assert len(self.tokens) > 0
+        for i, raw_token in enumerate(self.tokens):
+            token = Token.decode(raw_token)
+            if i == 0:
+                assert token.asset == self.channel
+                assert token.token_type == "root"
+            if i == (len(self.tokens) - 1):
+                assert token.receiver == receiver
+                    
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
 

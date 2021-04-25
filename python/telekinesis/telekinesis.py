@@ -12,7 +12,6 @@ import makefun
 
 from .client import Route, Channel
 
-
 class State:
     def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None, last_change=None):
         self.attributes = attributes or {}
@@ -245,20 +244,29 @@ class Telekinesis:
 
     async def _handle_request(self, listener, metadata, payload):
         pipeline = None
+        reply_to = metadata.caller
         try:
+            if payload.get('reply_to'):
+                reply_to = Route(**payload['reply_to'])
+                reply_to.validate_token_chain(self._session.session_key.public_serial())
             if "close" in payload:
                 await listener.close()
             elif "ping" in payload:
-                await listener.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
+                await listener.channel.send(reply_to, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
                 ret = await self._execute(listener, metadata, pipeline)
 
-                await listener.channel.send(metadata.caller, {
-                    "return": self._encode(ret, metadata.caller.session, listener),
-                    "repr": self._state.repr,
-                    "timestamp": self._state.last_change})
+                if isinstance(ret, Telekinesis) and isinstance(ret._target, Route) and ret._state.pipeline \
+                and (ret._target.session != self._session.session_key.public_serial()\
+                or ret._target._channel not in self._session.channels):
+                    await ret._forward(ret._state.pipeline, metadata.caller)
+                else:
+                    await listener.channel.send(reply_to, {
+                        "return": self._encode(ret, metadata.caller.session, listener),
+                        "repr": self._state.repr,
+                        "timestamp": self._state.last_change})
 
         except Exception:
             if pipeline is None:
@@ -288,11 +296,7 @@ class Telekinesis:
         self._state.pipeline.clear()
 
         if isinstance(self._target, Route):
-            async with Channel(self._session) as new_channel:
-                return await self._send_request(
-                    new_channel,
-                    pipeline=self._encode(pipeline, self._target.session, Listener(new_channel))
-                )
+            return await self._forward(pipeline)
 
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
@@ -302,7 +306,13 @@ class Telekinesis:
         target = self._target
 
         touched = self._session.targets.get(id(target))
-        for action, arg in pipeline:
+        for i, (action, arg) in enumerate(pipeline):
+            if isinstance(target, Telekinesis) and isinstance(target._target, Route) \
+            and (target._target.session != self._session.session_key.public_serial() \
+            or target._target._channel not in self._session.channels):
+                target._state.pipeline += pipeline[i:]
+                break
+
             touched = touched.union((self._session.targets.get(id(target))) or set())
 
             if action == "get":
@@ -338,7 +348,6 @@ class Telekinesis:
                 state_obj = State.from_object(tk._target, True).to_dict(tk._mask)
                 for s in tk._subscribers:
                     asyncio.create_task(s(state_obj)._execute())
-
 
         return target
 
@@ -376,6 +385,17 @@ class Telekinesis:
         except Exception:
             self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
 
+    async def _forward(self, pipeline, reply_to=None):
+        async with Channel(self._session) as new_channel:
+            if reply_to:
+                token_header = self._session.extend_route(reply_to, self._target.session)
+                new_channel.header_buffer.append(token_header)
+            return await self._send_request(
+                new_channel,
+                reply_to=reply_to and reply_to.to_dict(),
+                pipeline=self._encode(pipeline, self._target.session, Listener(new_channel))
+            )
+        
     def __call__(self, *args, **kwargs):
         state = self._state.clone()
         state.pipeline.append(("call", (args, kwargs)))
