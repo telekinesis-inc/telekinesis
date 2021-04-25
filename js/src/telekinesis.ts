@@ -1,7 +1,4 @@
 import { Session, Channel, Route, Header, RequestMetadata } from './client';
-import { bytesToInt } from './helpers';
-
-const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
 
 export class State {
   attributes: string[] | Map<string, any>;
