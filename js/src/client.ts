@@ -623,12 +623,14 @@ export class Route {
 }
 
 export class RequestMetadata {
-  session: Session;
+  _session: Session;
+  sessionPublicKey: string;
   caller: Route;
   rawMessages: {}[];
 
   constructor(session: Session, caller: Route, rawMessages: {}[]) {
-    this.session = session;
+    this._session = session;
+    this.sessionPublicKey = session.sessionKey.publicSerial().then((s: string) => {this.sessionPublicKey = s}) && "";
     this.caller = caller;
     this.rawMessages = rawMessages;
   }

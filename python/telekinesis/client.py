@@ -397,7 +397,7 @@ class Channel:
                     chunks = self.chunks.pop(mid)
                     payload = b"".join(chunks[ii][0] for ii in range(n))
 
-                    combined_metadata = RequestMetadata(metadata.session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)])
+                    combined_metadata = RequestMetadata(metadata._session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)])
                     if payload[0] == 0:
                         self.messages.appendleft((combined_metadata, bson.loads(payload[1:])))
                     elif payload[0] == 255:
@@ -563,6 +563,7 @@ class Route:
 
 class RequestMetadata:
     def __init__(self, session, caller, raw_messages):
-        self.session = session
+        self._session = session
+        self.session_public_key = session.session_key.public_serial()
         self.caller = caller
         self.raw_messages = raw_messages
