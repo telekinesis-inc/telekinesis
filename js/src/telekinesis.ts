@@ -559,7 +559,7 @@ export class Telekinesis extends Function {
   }
 }
 
-export function inject_first_arg(func: any) {
+export function injectFirstArg(func: any) {
   func._tk_inject_first = true;
   return func;
 }
