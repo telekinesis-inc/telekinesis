@@ -261,7 +261,7 @@ class Telekinesis:
                 if isinstance(ret, Telekinesis) and isinstance(ret._target, Route) and ret._state.pipeline \
                 and (ret._target.session != self._session.session_key.public_serial()\
                 or ret._target._channel not in self._session.channels):
-                    await ret._forward(ret._state.pipeline, metadata.caller)
+                    await ret._forward(ret._state.pipeline, reply_to)
                 else:
                     await listener.channel.send(reply_to, {
                         "return": self._encode(ret, metadata.caller.session, listener),
@@ -309,7 +309,7 @@ class Telekinesis:
         for i, (action, arg) in enumerate(pipeline):
             if isinstance(target, Telekinesis) and isinstance(target._target, Route) \
             and (target._target.session != self._session.session_key.public_serial() \
-            or target._target._channel not in self._session.channels):
+            or target._target.channel not in self._session.channels):
                 target._state.pipeline += pipeline[i:]
                 break
 

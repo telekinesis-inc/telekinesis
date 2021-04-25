@@ -248,30 +248,44 @@ export class Telekinesis extends Function {
   }
   async _handleRequest(listener: Listener, metadata: RequestMetadata, payload: {}) {
     // console.log('handleRequest!!', this, listener, metadata);
-    try {
+    let pipeline;
+    let replyTo = metadata.caller;
+
+    // try {
+      if ((payload as any)['reply_to']) {
+        replyTo = Route.fromObject((payload as any)['reply_to'])
+        await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
+      }
       if ((payload as any)['close'] !== undefined) {
         await listener.close();
       } else if ((payload as any)['ping'] !== undefined) {
-        await listener.channel.send(metadata.caller, { repr: this._state.repr, timestamp: this._state.lastChange })
+        await listener.channel.send(replyTo, { repr: this._state.repr, timestamp: this._state.lastChange })
       } else if ((payload as any)['pipeline'] !== undefined) {
-        let pipeline = this._decode((payload as any)['pipeline']) as [];
+        pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
         let ret = await this._execute(listener, metadata, pipeline);
 
-        await listener.channel.send(metadata.caller, {
-          return: await this._encode(ret, metadata.caller.session, listener),
-          repr: this._state.repr,
-          timestamp: this._state.lastChange,
-        })
+        if (ret instanceof Telekinesis && ret._target instanceof Route && (
+          ret._target.session !== await this._session.sessionKey.publicSerial() ||
+          !this._session.channels.has(ret._target.channel)
+        )) {
+          await (ret as Telekinesis)._forward(ret._state.pipeline, replyTo);
+        } else {
+          await listener.channel.send(replyTo, {
+            return: await this._encode(ret, metadata.caller.session, listener),
+            repr: this._state.repr,
+            timestamp: this._state.lastChange,
+          })
+        }
       }
-    } catch (e) {
-      console.error(`Telekinesis request error with payload ${payload}, ${e}`)
-      this._state.pipeline = [];
-      try {
-        await listener.channel.send(metadata.caller, { error: (this._exposeTb ? e : e.name) })
-      } finally { }
-    }
+    // } catch (e) {
+      // console.error(`Telekinesis request error with payload ${payload}, ${e}`)
+      // this._state.pipeline = [];
+      // try {
+      //   await listener.channel.send(metadata.caller, { error: (this._exposeTb ? e : e.name) })
+      // } finally { }
+    // }
   }
   _call(this: Telekinesis, args: any[], kwargs?: any) {
     let state = this._state.clone()
@@ -305,15 +319,7 @@ export class Telekinesis extends Function {
     this._state.pipeline = [];
 
     if (this._target instanceof Route) {
-      let newChannel = new Channel(this._session);
-      try {
-        return await this._sendRequest(
-          newChannel,
-          { pipeline: await this._encode(pipeline, this._target.session, new Listener(newChannel)) }
-        )
-      } finally {
-        await newChannel.close()
-      }
+      return await this._forward(pipeline);
     }
     async function exc(x: any) {
       if (x._blockThen !== undefined && x._lastUpdate && x._state && x._state.pipeline) {
@@ -325,6 +331,13 @@ export class Telekinesis extends Function {
     let prevTarget = target;
 
     for (let step in pipeline) {
+      if (target instanceof Telekinesis && target._target instanceof Route && (
+        target._target.session !== await this._session.sessionKey.publicSerial() ||
+        !this._session.channels.has(target._target.channel)
+      )) {
+        target._state.pipeline.push(...pipeline.slice(parseInt(step)));
+        break;
+      }
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
@@ -353,13 +366,19 @@ export class Telekinesis extends Function {
         }
 
         try {
-          target = await target.call(prevTarget, ...args);
+          target = target.call(prevTarget, ...args);
         } catch (e) {
           try {
-            target = await new target(...args);
+            target = new target(...args);
           } catch (e2) {
             throw (e)
           }
+        }
+        if (target instanceof Promise) {
+          target = await target;
+        }
+        if (target instanceof Telekinesis) {
+          target._blockThen = true;
         }
       } else if (action === 'subscribe') {
         const tk = Telekinesis._reuse(
@@ -384,20 +403,39 @@ export class Telekinesis extends Function {
     let response = {};
     await channel.send(this._target as Route, request);
 
-    let tup = await channel.recv();
-    response = (tup as any)[1];
+    if ((request as any).reply_to === undefined) {
+      let tup = await channel.recv();
+      response = (tup as any)[1];
 
-
-    // console.log(tup)
-    if (Object.getOwnPropertyNames(response).includes('return')) {
-      // console.log((response as any)['return'])
-      let out = this._decode((response as any)['return'], (this._target as Route).session)
-      if (out && out._isTelekinesisObject === true) {
-        out._lastUpdate = Date.now();
-        out._blockThen = true;
+      if (Object.getOwnPropertyNames(response).includes('return')) {
+        // console.log((response as any)['return'])
+        let out = this._decode((response as any)['return'], (this._target as Route).session)
+        if (out && out._isTelekinesisObject === true) {
+          out._lastUpdate = Date.now();
+          out._blockThen = true;
+        }
+        // console.log(out)
+        return out
       }
-      // console.log(out)
-      return out
+    }
+  }
+  async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route) {
+    let newChannel = new Channel(this._session);
+    try {
+      if (replyTo !== undefined) {
+        const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session)
+        newChannel.headerBuffer.push(tokenHeader as Header)
+        console.log(replyTo)
+      }
+      return await this._sendRequest(
+        newChannel,
+        {
+          reply_to: replyTo && replyTo.toObject(),
+          pipeline: await this._encode(pipeline, (this._target as Route).session, new Listener(newChannel))
+        }
+      )
+    } finally {
+      await newChannel.close()
     }
   }
   async _encode(target: any, receiverId: string, listener?: Listener, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {

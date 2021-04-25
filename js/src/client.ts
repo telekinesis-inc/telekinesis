@@ -280,10 +280,10 @@ export class Session {
           route.tokens = route.tokens.slice(0, parseInt(i)+1);
         }
       }
-      let token = await Token.decode(route.tokens[-1]) as Token;
+      let token = await Token.decode(route.tokens[route.tokens.length-1]) as Token;
       tokenHeader = await this.issueToken(token, receiver, maxDepth);
     }
-    route.tokens = [tokenHeader[1][1] as string];
+    route.tokens.push(tokenHeader[1][1] as string);
     return tokenHeader;
   }
   clear(bundleId: Uint8Array) {
@@ -616,6 +616,20 @@ export class Route {
   }
   clone() {
     return Route.fromObject(this.toObject());
+  }
+  async validateTokenChain(receiver: string) {
+    if (!(this.tokens.length > 0)) {
+      throw 'Invalid token chain';
+    }
+    for (let i in this.tokens) {
+      let token = await Token.decode(this.tokens[i]) as Token;
+      if (
+        (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root'))) || 
+        (i === (this.tokens.length - 1).toString()) && (!(token.receiver === receiver))
+      ) {
+          throw 'Invalid token chain';
+      }
+    }
   }
   static fromObject(obj: {brokers: string[], session: string, channel: string, tokens: string[]}) {
     return new Route(obj.brokers, obj.session, obj.channel, obj.tokens)
