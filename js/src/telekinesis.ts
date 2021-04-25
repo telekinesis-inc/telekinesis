@@ -249,18 +249,18 @@ export class Telekinesis extends Function {
   async _handleRequest(listener: Listener, metadata: RequestMetadata, payload: {}) {
     // console.log('handleRequest!!', this, listener, metadata);
     let pipeline;
-    let replyTo = metadata.caller;
+    let replyTo;
 
-    // try {
-      if ((payload as any)['reply_to']) {
-        replyTo = Route.fromObject((payload as any)['reply_to'])
-        await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
-      }
+    try {
       if ((payload as any)['close'] !== undefined) {
         await listener.close();
       } else if ((payload as any)['ping'] !== undefined) {
-        await listener.channel.send(replyTo, { repr: this._state.repr, timestamp: this._state.lastChange })
+        await listener.channel.send(metadata.caller, { repr: this._state.repr, timestamp: this._state.lastChange })
       } else if ((payload as any)['pipeline'] !== undefined) {
+        if ((payload as any)['reply_to']) {
+          replyTo = Route.fromObject((payload as any)['reply_to'])
+          await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
+        }
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
@@ -270,22 +270,45 @@ export class Telekinesis extends Function {
           ret._target.session !== await this._session.sessionKey.publicSerial() ||
           !this._session.channels.has(ret._target.channel)
         )) {
-          await (ret as Telekinesis)._forward(ret._state.pipeline, replyTo);
+          await (ret as Telekinesis)._forward(ret._state.pipeline, replyTo || metadata.caller);
         } else {
-          await listener.channel.send(replyTo, {
-            return: await this._encode(ret, metadata.caller.session, listener),
-            repr: this._state.repr,
-            timestamp: this._state.lastChange,
-          })
+          if (replyTo !== undefined) {
+            const newChannel = new Channel(this._session)
+            try {
+              await newChannel.send(replyTo, {
+                return: await this._encode(ret, replyTo.session, new Listener(newChannel)),
+                repr: this._state.repr,
+                timestamp: this._state.lastChange,
+              })
+            } finally {
+              await newChannel.close();
+            }
+          } else {
+            await listener.channel.send(metadata.caller, {
+              return: await this._encode(ret, metadata.caller.session, listener),
+              repr: this._state.repr,
+              timestamp: this._state.lastChange,
+            })
+          }
         }
       }
-    // } catch (e) {
-      // console.error(`Telekinesis request error with payload ${payload}, ${e}`)
-      // this._state.pipeline = [];
-      // try {
-      //   await listener.channel.send(metadata.caller, { error: (this._exposeTb ? e : e.name) })
-      // } finally { }
-    // }
+    } catch (e) {
+      console.error(`Telekinesis request error with payload ${payload}, ${e}`)
+      this._state.pipeline = [];
+      try {
+        const errMessage = { error: (this._exposeTb ? e : e.name) };
+        if (replyTo !== undefined) {
+          const newChannel = new Channel(this._session)
+          try {
+            await newChannel.send(replyTo, errMessage);
+          } finally {
+            await newChannel.close();
+          }
+        } else {
+          await listener.channel.send(metadata.caller, errMessage);
+        }
+      } finally { }
+    }
   }
   _call(this: Telekinesis, args: any[], kwargs?: any) {
     let state = this._state.clone()
@@ -416,6 +439,8 @@ export class Telekinesis extends Function {
         }
         // console.log(out)
         return out
+      } else if (Object.getOwnPropertyNames(response).includes('error')) {
+        throw (response as any).error;
       }
     }
   }

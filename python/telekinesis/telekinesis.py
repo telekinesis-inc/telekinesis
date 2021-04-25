@@ -244,29 +244,37 @@ class Telekinesis:
 
     async def _handle_request(self, listener, metadata, payload):
         pipeline = None
-        reply_to = metadata.caller
+        reply_to = None
         try:
-            if payload.get('reply_to'):
-                reply_to = Route(**payload['reply_to'])
-                reply_to.validate_token_chain(self._session.session_key.public_serial())
             if "close" in payload:
                 await listener.close()
             elif "ping" in payload:
-                await listener.channel.send(reply_to, {"repr": self._state.repr, "timestamp": self._state.last_change})
+                await listener.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
                 ret = await self._execute(listener, metadata, pipeline)
 
+                if payload.get('reply_to'):
+                    reply_to = Route(**payload['reply_to'])
+                    reply_to.validate_token_chain(self._session.session_key.public_serial())
+
                 if isinstance(ret, Telekinesis) and isinstance(ret._target, Route) and ret._state.pipeline \
                 and (ret._target.session != self._session.session_key.public_serial()\
                 or ret._target._channel not in self._session.channels):
-                    await ret._forward(ret._state.pipeline, reply_to)
+                    await ret._forward(ret._state.pipeline, reply_to or metadata.caller)
                 else:
-                    await listener.channel.send(reply_to, {
-                        "return": self._encode(ret, metadata.caller.session, listener),
-                        "repr": self._state.repr,
-                        "timestamp": self._state.last_change})
+                    if reply_to:
+                        with Channel(self._session) as new_channel:
+                            await new_channel.send(reply_to, {
+                                "return": self._encode(ret, reply_to.session, Listener(new_channel)),
+                                "repr": self._state.repr,
+                                "timestamp": self._state.last_change})
+                    else:
+                        await listener.channel.send(metadata.caller, {
+                            "return": self._encode(ret, metadata.caller.session, listener),
+                            "repr": self._state.repr,
+                            "timestamp": self._state.last_change})
 
         except Exception:
             if pipeline is None:
@@ -276,7 +284,12 @@ class Telekinesis:
 
             self._state.pipeline.clear()
             try:
-                await listener.channel.send(metadata.caller, {"error": traceback.format_exc() if self._expose_tb else ""})
+                err_message = {"error": traceback.format_exc() if self._expose_tb else ""}
+                if reply_to:
+                    with Channel(self._session) as new_channel:
+                        await new_channel.send(reply_to, err_message)
+                else:
+                    await listener.channel.send(metadata.caller, err_message)
             finally:
                 pass
 
@@ -355,24 +368,25 @@ class Telekinesis:
         response = {}
         await channel.send(self._target, kwargs)
 
-        _, response = await channel.recv()
+        if not kwargs.get('reply_to'):
+            _, response = await channel.recv()
 
-        state = self._get_root_state()
-        if "repr" in response and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
-            state.last_change = response.get("timestamp") or time.time()
-            state.repr = response["repr"]
-
-        if "repr" in response:
             state = self._get_root_state()
+            if "repr" in response and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
+                state.last_change = response.get("timestamp") or time.time()
+                state.repr = response["repr"]
 
-        if "error" in response:
-            raise Exception(response["error"])
+            if "repr" in response:
+                state = self._get_root_state()
 
-        if "return" in response:
-            return self._decode(response["return"], self._target.session)
+            if "error" in response:
+                raise Exception(response["error"])
 
-        if "repr" not in response:
-            raise Exception("Telekinesis communication error: received unrecognized message schema %s" % response)
+            if "return" in response:
+                return self._decode(response["return"], self._target.session)
+
+            if "repr" not in response:
+                raise Exception("Telekinesis communication error: received unrecognized message schema %s" % response)
 
     async def _close(self):
         try:
