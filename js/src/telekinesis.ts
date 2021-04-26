@@ -422,6 +422,9 @@ export class Telekinesis extends Function {
     return target;
 
   }
+  _timeout(seconds: number) {
+    return new Promise((res: any, rej: any) => {setTimeout(() => rej('Timeout'), seconds*1000); this._execute().then(res)}) 
+  }
   async _sendRequest(channel: Channel, request: {}) {
     let response = {};
     await channel.send(this._target as Route, request);
