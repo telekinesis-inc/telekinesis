@@ -364,6 +364,9 @@ class Telekinesis:
 
         return target
 
+    async def _timeout(self, seconds):
+        return await asyncio.wait_for(self._execute(), seconds)
+
     async def _send_request(self, channel, **kwargs):
         response = {}
         await channel.send(self._target, kwargs)

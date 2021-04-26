@@ -563,7 +563,6 @@ export class Telekinesis extends Function {
         outputStack.set(root, out);
 
       } else if (['range', 'slice'].includes(typ)) {
-        // TODO: Handle slice more gracefully! (maybe TK.Slice object?)
         let n = Math.ceil((obj[1] - obj[0]) / obj[2])
         if (n <= 0) {
           out = [];

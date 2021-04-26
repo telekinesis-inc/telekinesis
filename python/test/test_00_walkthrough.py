@@ -36,14 +36,14 @@ async def test_walkthrough():
     conn_1 = await Connection(Session(), "ws://localhost:8778")
     conn_1.RESEND_TIMEOUT = 1
 
-    f = await asyncio.wait_for(Telekinesis(conn_1.entrypoint, conn_1.session), 4)
-    g = await asyncio.wait_for(f("Hello, "), 4)  # Telekinesis objects that return Telekinesis objects are welcome
+    f = await Telekinesis(conn_1.entrypoint, conn_1.session)._timeout(4)
+    g = await f("Hello, ")._timeout(4)  # Telekinesis objects that return Telekinesis objects are welcome
 
-    assert "Hello, World" == await asyncio.wait_for(g("World"), 5)
+    assert "Hello, World" == await g("World")._timeout(5)
 
     long_message = "a" * 2 ** 20
 
-    assert "Hello, " + long_message == await asyncio.wait_for(g(long_message), 20)  # Telekinesis should handle big messages
+    assert "Hello, " + long_message == await g(long_message)._timeout(20)  # Telekinesis should handle big messages
 
     broker_2 = await FaultyBroker().serve(port=8779)  # Yet another Broker!
     await broker_2.add_broker("ws://localhost:8777", True)
@@ -54,13 +54,13 @@ async def test_walkthrough():
     conn_2.RESEND_TIMEOUT = 1
 
     with pytest.raises(asyncio.TimeoutError):
-        g_2 = await asyncio.wait_for(Telekinesis(g._target, conn_2.session)._execute(), 4)
+        g_2 = await Telekinesis(g._target, conn_2.session)._timeout(4)
 
     delegator_route = Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
 
-    g_2 = await asyncio.wait_for(Telekinesis(delegator_route, conn_2.session)()._execute(), 4)
+    g_2 = await Telekinesis(delegator_route, conn_2.session)()._timeout(4)
 
-    assert "Hello, World!!" == await asyncio.wait_for(g_2("World!!"), 4)
+    assert "Hello, World!!" == await g_2("World!!")._timeout(4)
 
     class Counter:
         def __init__(self):
