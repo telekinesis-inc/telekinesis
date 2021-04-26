@@ -80,9 +80,9 @@ async def test_walkthrough():
         conn_1.session.session_key.public_serial()
     )  # << Max delegation depth!
 
-    counter = await asyncio.wait_for(Telekinesis(route_counter, conn_1.session)()._execute(), 4)
+    counter = await Telekinesis(route_counter, conn_1.session)()._timeout(4)
 
-    assert await asyncio.wait_for(counter.increment().increment().value._execute(), 4) == 2
+    assert await counter.increment().increment().value._timeout(4) == 2
 
     with pytest.raises(Exception, match=r".*Unauthorized.*"):
         await counter.to_be_masked()
@@ -102,7 +102,7 @@ async def test_walkthrough():
         conn_2.session.session_key.public_serial()
     )
 
-    counter_2 = await asyncio.wait_for(Telekinesis(counter_delegator_route, conn_2.session)()._execute(), 4)
+    counter_2 = await Telekinesis(counter_delegator_route, conn_2.session)()._timeout(4)
 
     with pytest.raises(asyncio.TimeoutError):  # Max delegation depth doesn't allow it!
-        await asyncio.wait_for(counter_2.value._execute(), 4)
+        await counter_2.value._timeout(4)
