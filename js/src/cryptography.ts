@@ -1,6 +1,6 @@
 import { b64encode, b64decode } from "./helpers"
 
-const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
+const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
 
 export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";

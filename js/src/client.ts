@@ -4,7 +4,7 @@ import { bytesToInt, intToBytes  } from "./helpers"
 import { PublicKey, PrivateKey, SharedKey, Token } from "./cryptography"
 import { Telekinesis } from "./telekinesis";
 
-const webcrypto = typeof crypto.subtle !== 'undefined' ? crypto : require('crypto').webcrypto;
+const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
 
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
 
