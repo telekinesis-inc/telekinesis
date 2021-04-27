@@ -34,7 +34,7 @@ export class Connection {
       this.websocket.close();
       this.websocket = undefined;
     }
-    this.websocket = (typeof WebSocket !== 'undefined' ? 
+    this.websocket = (typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? 
       new WebSocket(this.url) :
       new (require('ws'))(this.url)) as WebSocket;
     // this.websocket.onerror = (ev) => {
