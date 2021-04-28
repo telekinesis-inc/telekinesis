@@ -85,7 +85,7 @@ export class Listener {
     return this;
   }
   async listen() {
-    console.log('Started Listening')
+    // console.log('Started Listening')
     while (true) {
       try {
         await (this.channel.listen() as any);
@@ -293,7 +293,7 @@ export class Telekinesis extends Function {
         }
       }
     } catch (e) {
-      console.error(`Telekinesis request error with payload ${payload}, ${e}`)
+      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${e}`)
       this._state.pipeline = [];
       try {
         const errMessage = { error: (this._exposeTb ? e : e.name) };

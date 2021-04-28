@@ -145,7 +145,10 @@ export class Connection {
           try {
             await publicKey.verify(signature, message.slice(64, 73+hLen+65+32))
             if (this.session.channels.has(body.destination.channel)) {
-              if (fullPayload[0] == 255) {console.log('ACK');return} // Ignore ACKs
+              if (fullPayload[0] == 255) {
+                // console.log('ACK');
+                return
+              } // Ignore ACKs
               let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(1, 65)
               await this.send(
                 [['send', {source: body.destination, destination: body.source}]],
