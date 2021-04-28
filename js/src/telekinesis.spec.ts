@@ -44,7 +44,7 @@ describe("Telekinesis", () => {
   });
   it('handles large messages', async () => {
     const echo = await new PublicUser(HOST) as any;
-    const largeMessage = Array(10000).fill(() => Math.random().toString(36).slice(3)).reduce((p,c) => p+c(), "")
+    const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p,c) => p+c(), "")
     expect(await echo(largeMessage)).toEqual(largeMessage);
   })
 });
