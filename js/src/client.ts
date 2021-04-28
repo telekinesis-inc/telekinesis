@@ -9,8 +9,8 @@ const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'un
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
 
 export class Connection {
-  // RESEND_TIMEOUT: number;
-  // MAX_SEND_RETRIES: number;
+  RESEND_TIMEOUT: number;
+  MAX_SEND_RETRIES: number;
 
   session: Session;
   url: string;
@@ -20,8 +20,8 @@ export class Connection {
   entrypoint?: Route;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
-    // this.RESEND_TIMEOUT = 2; (not implemented yet) // sec
-    // this.MAX_SEND_RETRIES = 3;
+    this.RESEND_TIMEOUT = 2; // sec
+    this.MAX_SEND_RETRIES = 3;
 
     this.session = session;
     this.url = url;
@@ -29,86 +29,95 @@ export class Connection {
 
     session.connections.push(this);
   }
-  async connect() {
-    if (this.websocket !== undefined) {
-      this.websocket.close();
-      this.websocket = undefined;
-    }
-    this.websocket = (typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? 
-      new WebSocket(this.url) :
-      new (require('ws'))(this.url)) as WebSocket;
-    // this.websocket.onerror = (ev) => {
-    //   console.error(ev)
-    //   new Promise(async r => {
-    //     await new Promise(r => setTimeout(r, 1000));
-    //     await this.connect(); r()}).then(() => console.log('Reconnected'))
-    // }
-    // this.websocket.onclose = this.websocket.onerror;
-    let queue: Uint8Array[] = [];
-    let waiting: ((data: Uint8Array) => void)[] = [];
-
-    let recv = () => new Promise((r: (data: Uint8Array) => void) => 
-      queue.length > 0 ? r(queue.splice(0,1)[0]) : waiting.push(r)
-    );
-
-    this.websocket.onmessage = async (m: MessageEvent) => {
-      let a = typeof URL.createObjectURL === 'undefined' ? 
-        m.data :
-        await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
-
-      let data = new Uint8Array(a);
-      
-      if (waiting.length > 0) {
-        for (var i in waiting) {
-          let res = waiting.pop();
-          res && res(data);
-        }
-      } else {
-        queue.push(data);
+  connect(retryCount: number = 0): Promise<Connection|undefined> {
+    return new Promise(async (resolve, reject) => {
+      if (this.websocket !== undefined) {
+        this.websocket.close();
+        this.websocket = undefined;
       }
-    }
+      const WS = typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? WebSocket : (require('ws'));
+      this.websocket = new WS(this.url) as WebSocket;
+      this.websocket.onerror = e => {
+        if (retryCount < this.MAX_SEND_RETRIES) {
+          console.warn(`Failed connecting to ${this.url}. Retrying: ${retryCount+1} of ${this.MAX_SEND_RETRIES}`)
+          setTimeout(async () => resolve(await this.connect(retryCount+1)), this.RESEND_TIMEOUT * 1000);
+        } else {
+          reject(e);
+        }
+      }
+      let queue: Uint8Array[] = [];
+      let waiting: ((data: Uint8Array) => void)[] = [];
 
-    let challenge = await recv();
-    let signature = await this.session.sessionKey.sign(challenge) as Uint8Array;
+      let recv = () => new Promise((r: (data: Uint8Array) => void) => 
+        queue.length > 0 ? r(queue.splice(0,1)[0]) : waiting.push(r)
+      );
 
-    let pk = new TextEncoder().encode(await this.session.sessionKey.publicSerial());
+      this.websocket.onmessage = async (m: MessageEvent) => {
+        let a = typeof URL.createObjectURL === 'undefined' ? 
+          m.data :
+          await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
 
-    let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
-    let sentMetadata = new TextEncoder().encode(
-      JSON.stringify({
-        version: '0.1.1'
-      })
-    )
+        let data = new Uint8Array(a);
+        
+        if (waiting.length > 0) {
+          for (var i in waiting) {
+            let res = waiting.pop();
+            res && res(data);
+          }
+        } else {
+          queue.push(data);
+        }
+      }
 
-    this.websocket.send(new Uint8Array([
-      ...signature,
-      ...pk,
-      ...sentChallenge,
-      ...sentMetadata
-    ]));
-    
-    this.tOffset = Date.now()/1000 - bytesToInt(challenge.slice(32,36))
-    let m: Uint8Array = await recv()
+      let challenge = await recv();
+      let signature = await this.session.sessionKey.sign(challenge) as Uint8Array;
 
-    let brokerId = new TextDecoder().decode(m.slice(64,152))
-    let publicKey = new PublicKey('verify', brokerId)
-    
-    let metadata = JSON.parse(new TextDecoder().decode(m.slice(152))) as {};
+      let pk = new TextEncoder().encode(await this.session.sessionKey.publicSerial());
 
-    // console.log(metadata)
-    if (metadata.hasOwnProperty('entrypoint') && (metadata as any).entrypoint) {
-      this.entrypoint = Route.fromObject((metadata as any).entrypoint as any);
-    }
+      let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
+      let sentMetadata = new TextEncoder().encode(
+        JSON.stringify({
+          version: '0.1.1'
+        })
+      )
 
-    try {
-      await publicKey.verify(m.slice(0, 64), sentChallenge)
+      this.websocket.send(new Uint8Array([
+        ...signature,
+        ...pk,
+        ...sentChallenge,
+        ...sentMetadata
+      ]));
+      
+      this.tOffset = Date.now()/1000 - bytesToInt(challenge.slice(32,36))
+      let m: Uint8Array = await recv()
+
+      let brokerId = new TextDecoder().decode(m.slice(64,152))
+      let publicKey = new PublicKey('verify', brokerId)
+      
+      let metadata = JSON.parse(new TextDecoder().decode(m.slice(152))) as {};
+
+      // console.log(metadata)
+      if (metadata.hasOwnProperty('entrypoint') && (metadata as any).entrypoint) {
+        this.entrypoint = Route.fromObject((metadata as any).entrypoint as any);
+      }
+
+      try {
+        await publicKey.verify(m.slice(0, 64), sentChallenge)
+      } catch(e) {
+        this.websocket.close()
+        delete this.websocket
+        reject(e);
+        return;
+      }
       this.websocket.onmessage = async m => this.recv(m);
       this.brokerId = brokerId;
-      // console.log('connected to ' + this.brokerId)
-    } catch {
-      this.websocket.close()
-      delete this.websocket
-    }
+      // this.websocket.onerror = console.warn;
+      this.websocket.onerror = e => {
+        console.warn(`Connection to ${this.url} closed: ${JSON.stringify(e, undefined, 2)}. Reconnecting...`)
+        setTimeout(() => this.connect(), this.RESEND_TIMEOUT * 1000);
+      }
+      resolve(this);
+    })
   }
   async recv(messageObj: MessageEvent) {
     
@@ -188,6 +197,12 @@ export class Connection {
     }
   }
   clear(bundleId: Uint8Array) {}
+  close() {
+    if (this.websocket) {
+      this.websocket.onerror = () => undefined;
+      this.websocket.close(1000);
+    }
+  }
 }
 
 export class Session {

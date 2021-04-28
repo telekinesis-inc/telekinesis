@@ -21,7 +21,7 @@ beforeAll(() => new Promise((resolve, reject) => {
   subprocess.stderr.on('data', (data: any) => {
     throw `${data}`;
   });
-  setTimeout(() => resolve(true), 800)
+  setTimeout(() => resolve(true), 1000)
 }))
 afterAll(() => {
   subprocess.kill()
