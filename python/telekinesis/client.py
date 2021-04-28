@@ -377,13 +377,11 @@ class Channel:
 
             if payload[:4] == b"\x00" * 4:
                 if payload[4] == 0:
-                    self.messages.appendleft((metadata, bson.loads(payload[5:])))
+                    message_tuple = (metadata, bson.loads(payload[5:]))
                 elif payload[4] == 255:
-                    self.messages.appendleft((metadata, bson.loads(zlib.decompress(payload[5:]))))
+                    message_tuple = (metadata, bson.loads(zlib.decompress(payload[5:])))
                 else:
                     raise Exception("Received message with different encoding")
-
-                self.lock.set()
             else:
                 ir, nr, mmid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
                 i, n = int.from_bytes(ir, "big"), int.from_bytes(nr, "big")
@@ -399,12 +397,17 @@ class Channel:
 
                     combined_metadata = RequestMetadata(metadata._session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)])
                     if payload[0] == 0:
-                        self.messages.appendleft((combined_metadata, bson.loads(payload[1:])))
+                        message_tuple = (combined_metadata, bson.loads(payload[1:]))
                     elif payload[0] == 255:
-                        self.messages.appendleft((combined_metadata, bson.loads(zlib.decompress(payload[1:]))))
+                        message_tuple = (combined_metadata, bson.loads(zlib.decompress(payload[1:])))
                     else:
                         raise Exception("Received message with different encoding")
-                    self.lock.set()
+                
+            if not self.telekinesis:
+                self.messages.appendleft(message_tuple)
+                self.lock.set()
+            else:
+                asyncio.get_event_loop().create_task(self.telekinesis._handle_request(self, *message_tuple))
         else:
             self.session.logger.error(
                 "Invalid Tokens: %s %s -> %s %s [%s]",

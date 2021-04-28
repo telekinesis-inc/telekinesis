@@ -96,41 +96,41 @@ class State:
         return State(attributes, methods, repr_, doc, None, time.time())
 
 
-class Listener:
-    def __init__(self, channel):
-        self.channel = channel
-        self.coro_callback = None
-        self.listen_task = None
-        self.current_tasks = set()
+# class Listener:
+#     def __init__(self, channel):
+#         self.channel = channel
+#         self.coro_callback = None
+#         self.listen_task = None
+#         self.current_tasks = set()
 
-    def set_callback(self, coro_callback):
-        self.coro_callback = coro_callback
-        self.listen_task = asyncio.get_event_loop().create_task(self.listen())
-        return self
+#     def set_callback(self, coro_callback):
+#         self.coro_callback = coro_callback
+#         self.listen_task = asyncio.get_event_loop().create_task(self.listen())
+#         return self
 
-    async def listen(self):
-        while True:
-            try:
-                await self.channel.listen()
-                while True:
-                    message = await self.channel.recv()
+#     async def listen(self):
+#         while True:
+#             try:
+#                 await self.channel.listen()
+#                 while True:
+#                     message = await self.channel.recv()
 
-                    self.current_tasks.add(
-                        asyncio.get_event_loop().create_task(self.coro_callback(self, *message))
-                    )
+#                     self.current_tasks.add(
+#                         asyncio.get_event_loop().create_task(self.coro_callback(self, *message))
+#                     )
 
-                    await asyncio.gather(*(x for x in self.current_tasks if x.done()))
-                    self.current_tasks = set(x for x in self.current_tasks if not x.done())
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logging.getLogger(__name__).error("Listener error", exc_info=True)
+#                     await asyncio.gather(*(x for x in self.current_tasks if x.done()))
+#                     self.current_tasks = set(x for x in self.current_tasks if not x.done())
+#             except asyncio.CancelledError:
+#                 break
+#             except Exception:
+#                 logging.getLogger(__name__).error("Listener error", exc_info=True)
 
-    async def close(self, close_public=False):
-        if close_public or not self.channel.is_public:
-            self.listen_task and self.listen_task.cancel()
-            await asyncio.gather(*self.current_tasks)
-            await self.channel.close()
+#     async def close(self, close_public=False):
+#         if close_public or not self.channel.is_public:
+#             self.listen_task and self.listen_task.cancel()
+#             await asyncio.gather(*self.current_tasks)
+#             await self.channel.close()
 
 
 class Telekinesis:
@@ -148,7 +148,8 @@ class Telekinesis:
         self._compile_signatures = compile_signatures
         self._parent = parent
         self._cache_attributes = cache_attributes
-        self._listeners = {}
+        # self._listeners = {}
+        self._channel = None
         self._on_update_callback = None
         self._subscription = None
         self._subscribers = set()
@@ -205,30 +206,44 @@ class Telekinesis:
 
         return self
 
-    def _add_listener(self, channel):
-        route = channel.route
+    # def _add_listener(self, channel):
+    #     route = channel.route
 
-        channel.telekinesis = self
+    #     channel.telekinesis = self
 
-        self._listeners[route] = Listener(channel).set_callback(self._handle_request)
+    #     self._listeners[route] = Listener(channel).set_callback(self._handle_request)
 
-        return route
+    #     return route
 
     def _delegate(self, receiver_id, parent_channel=None):
+        token_header = []
+
         if isinstance(self._target, Route):
             route = self._target.clone()
             max_delegation_depth = None
+            if receiver_id == '*':
+                raise Exception('Cannot delegate remote Channel to public.')
 
         else:
-            route = self._add_listener(Channel(self._session))
-            listener = self._listeners[route]
+            # route = self._add_listener(Channel(self._session))
+            # listener = self._listeners[route]
+            if not self._channel:
+                self._channel = Channel(self._session, is_public=receiver_id=='*')
+                self._channel.telekinesis = self
+                self._channel.listen()
+                token_header += [self._channel.header_buffer.pop()]
+
             max_delegation_depth = self._max_delegation_depth
+            route = self._channel.route
+            if receiver_id == '*' and not self._channel.is_public:
+                self._channel.is_public = True
+                self._channel.listen()
+                token_header += [self._channel.header_buffer.pop()]
 
-            if not parent_channel:
-                parent_channel = listener.channel
-
-        token_header = self._session.extend_route(route, receiver_id, max_delegation_depth)
-        parent_channel.header_buffer.append(token_header)
+        if route != self._channel.route or not self._channel.is_public:
+            token_header += [self._session.extend_route(route, receiver_id, max_delegation_depth)]
+        
+        [(parent_channel or self._channel).header_buffer.append(th) for th in token_header]
 
         return route
 
@@ -242,18 +257,19 @@ class Telekinesis:
 
         return self
 
-    async def _handle_request(self, listener, metadata, payload):
+    async def _handle_request(self, channel, metadata, payload):
         pipeline = None
         reply_to = None
         try:
             if "close" in payload:
-                await listener.close()
+                # await channel.close()
+                pass
             elif "ping" in payload:
-                await listener.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
+                await channel.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
-                ret = await self._execute(listener, metadata, pipeline)
+                ret = await self._execute(metadata, pipeline)
 
                 if payload.get('reply_to'):
                     reply_to = Route(**payload['reply_to'])
@@ -267,12 +283,12 @@ class Telekinesis:
                     if reply_to:
                         with Channel(self._session) as new_channel:
                             await new_channel.send(reply_to, {
-                                "return": self._encode(ret, reply_to.session, Listener(new_channel)),
+                                "return": self._encode(ret, reply_to.session, new_channel),
                                 "repr": self._state.repr,
                                 "timestamp": self._state.last_change})
                     else:
-                        await listener.channel.send(metadata.caller, {
-                            "return": self._encode(ret, metadata.caller.session, listener),
+                        await channel.send(metadata.caller, {
+                            "return": self._encode(ret, metadata.caller.session),
                             "repr": self._state.repr,
                             "timestamp": self._state.last_change})
 
@@ -289,11 +305,11 @@ class Telekinesis:
                     with Channel(self._session) as new_channel:
                         await new_channel.send(reply_to, err_message)
                 else:
-                    await listener.channel.send(metadata.caller, err_message)
+                    await channel.send(metadata.caller, err_message)
             finally:
                 pass
 
-    async def _execute(self, listener=None, metadata=None, pipeline=None):
+    async def _execute(self, metadata=None, pipeline=None):
         if asyncio.iscoroutine(self._target):
             old_id = id(self._target)
             self._target = await self._target
@@ -313,7 +329,7 @@ class Telekinesis:
 
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
-                return await x._execute(listener, metadata)
+                return await x._execute(metadata)
             return x
 
         target = self._target
@@ -397,8 +413,9 @@ class Telekinesis:
                 async with Channel(self._session) as new_channel:
                     await new_channel.send(self._target, {"close": True})
             else:
-                for listener in self._listeners:
-                    await listener.close(True)
+                # for listener in self._listeners:
+                #     await listener.close(True)
+                self._channel and await self._channel.close()
         except Exception:
             self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
 
@@ -410,7 +427,7 @@ class Telekinesis:
             return await self._send_request(
                 new_channel,
                 reply_to=reply_to and reply_to.to_dict(),
-                pipeline=self._encode(pipeline, self._target.session, Listener(new_channel))
+                pipeline=self._encode(pipeline, self._target.session, new_channel)
             )
         
     def __call__(self, *args, **kwargs):
@@ -446,7 +463,7 @@ class Telekinesis:
                 asyncio.get_event_loop().create_task(self._close())
             )
 
-    def _encode(self, target, receiver_id=None, listener=None, traversal_stack=None, block_recursion=False):
+    def _encode(self, target, receiver_id=None, channel=None, traversal_stack=None, block_recursion=False):
         if traversal_stack is None:
             i = 0
             traversal_stack = {}
@@ -466,9 +483,9 @@ class Telekinesis:
         elif type(target) in (range, slice):
             tup = (type(target).__name__, (target.start, target.stop, target.step))
         elif type(target) in (list, tuple, set):
-            tup = (type(target).__name__, [self._encode(v, receiver_id, listener, traversal_stack, block_recursion) for v in target])
+            tup = (type(target).__name__, [self._encode(v, receiver_id, channel, traversal_stack, block_recursion) for v in target])
         elif type(target) == dict:
-            tup = ("dict", {x: self._encode(target[x], receiver_id, listener, traversal_stack, block_recursion) for x in target})
+            tup = ("dict", {x: self._encode(target[x], receiver_id, channel, traversal_stack, block_recursion) for x in target})
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
         else:
@@ -480,10 +497,10 @@ class Telekinesis:
                     cache_attributes= not block_recursion and self._cache_attributes
                 )
 
-            route = obj._delegate(receiver_id, listener and listener.channel)
+            route = obj._delegate(receiver_id, channel)
             tup = (
                 "obj",
-                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, listener, traversal_stack, block_recursion=True)),
+                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True)),
             )
 
         traversal_stack[id(target)] = [i, tup, target]
