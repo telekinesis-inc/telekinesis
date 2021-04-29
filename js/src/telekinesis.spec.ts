@@ -10,7 +10,7 @@ import asyncio
 async def main():
     broker = await tk.Broker().serve(port=${HOST.split(':')[2]})
     c = tk.Connection(tk.Session(), '${HOST}')
-    broker.entrypoint = tk.Telekinesis(lambda x: x, c.session)._add_listener(tk.Channel(c.session, is_public=True))
+    broker.entrypoint = await tk.Telekinesis(lambda x: x, c.session)._delegate('*')
     lock = asyncio.Event()
     await lock.wait()
 
