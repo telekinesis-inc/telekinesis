@@ -419,7 +419,9 @@ export class Channel {
           inflate(payloadSer.slice(1), (err, buff) => err ? rej(err) : r(new Uint8Array(buff)))
         }) as Uint8Array);
       }
-      if (this.waiting.length > 0) {
+      if (this.telekinesis instanceof Telekinesis) {
+        this.telekinesis._handleRequest(this, metadata, payload)
+      } else if(this.waiting.length > 0) {
         let resolve = this.waiting.pop(); 
         resolve && resolve([metadata, payload]);
       } else {
@@ -617,12 +619,14 @@ export class Route {
   session: string;
   channel: string;
   tokens: string[];
+  _parentChannel?: Channel;
 
-  constructor(brokers: string[], session: string, channel: string, tokens: string[]) { // 
+  constructor(brokers: string[], session: string, channel: string, tokens: string[], parentChannel?: Channel) { // 
     this.brokers = brokers;
     this.session = session;
     this.channel = channel;
     this.tokens = tokens;
+    this._parentChannel = parentChannel;
   }
   toObject() {
     return {
