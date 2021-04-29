@@ -96,43 +96,6 @@ class State:
         return State(attributes, methods, repr_, doc, None, time.time())
 
 
-# class Listener:
-#     def __init__(self, channel):
-#         self.channel = channel
-#         self.coro_callback = None
-#         self.listen_task = None
-#         self.current_tasks = set()
-
-#     def set_callback(self, coro_callback):
-#         self.coro_callback = coro_callback
-#         self.listen_task = asyncio.get_event_loop().create_task(self.listen())
-#         return self
-
-#     async def listen(self):
-#         while True:
-#             try:
-#                 await self.channel.listen()
-#                 while True:
-#                     message = await self.channel.recv()
-
-#                     self.current_tasks.add(
-#                         asyncio.get_event_loop().create_task(self.coro_callback(self, *message))
-#                     )
-
-#                     await asyncio.gather(*(x for x in self.current_tasks if x.done()))
-#                     self.current_tasks = set(x for x in self.current_tasks if not x.done())
-#             except asyncio.CancelledError:
-#                 break
-#             except Exception:
-#                 logging.getLogger(__name__).error("Listener error", exc_info=True)
-
-#     async def close(self, close_public=False):
-#         if close_public or not self.channel.is_public:
-#             self.listen_task and self.listen_task.cancel()
-#             await asyncio.gather(*self.current_tasks)
-#             await self.channel.close()
-
-
 class Telekinesis:
     def __init__(
         self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
@@ -148,7 +111,6 @@ class Telekinesis:
         self._compile_signatures = compile_signatures
         self._parent = parent
         self._cache_attributes = cache_attributes
-        # self._listeners = {}
         self._channel = None
         self._on_update_callback = None
         self._subscription = None
@@ -206,15 +168,6 @@ class Telekinesis:
 
         return self
 
-    # def _add_listener(self, channel):
-    #     route = channel.route
-
-    #     channel.telekinesis = self
-
-    #     self._listeners[route] = Listener(channel).set_callback(self._handle_request)
-
-    #     return route
-
     def _delegate(self, receiver_id, parent_channel=None):
         token_header = []
         extend_route = True
@@ -226,8 +179,6 @@ class Telekinesis:
                 raise Exception('Cannot delegate remote Channel to public.')
 
         else:
-            # route = self._add_listener(Channel(self._session))
-            # listener = self._listeners[route]
             if not self._channel:
                 self._channel = Channel(self._session, is_public=receiver_id=='*')
                 self._channel.telekinesis = self
@@ -375,7 +326,6 @@ class Telekinesis:
 
         self._update_state(State.from_object(self._target, self._cache_attributes))
 
-        # print(touched)
         for tk in touched:
             if tk and tk._subscribers:
                 state_obj = State.from_object(tk._target, True).to_dict(tk._mask)
@@ -417,8 +367,6 @@ class Telekinesis:
                 async with Channel(self._session) as new_channel:
                     await new_channel.send(self._target, {"close": True})
             else:
-                # for listener in self._listeners:
-                #     await listener.close(True)
                 self._channel and await self._channel.close()
         except Exception:
             self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
