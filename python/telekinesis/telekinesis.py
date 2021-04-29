@@ -245,7 +245,7 @@ class Telekinesis:
         
         [(parent_channel or self._channel).header_buffer.append(th) for th in token_header]
 
-        return route
+        return self._channel
 
     def _subscribe(self, callback=None):
         self._on_update_callback = callback
@@ -497,7 +497,7 @@ class Telekinesis:
                     cache_attributes= not block_recursion and self._cache_attributes
                 )
 
-            route = obj._delegate(receiver_id, channel)
+            route = obj._delegate(receiver_id, channel).route
             tup = (
                 "obj",
                 (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True)),
