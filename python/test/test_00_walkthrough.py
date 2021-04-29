@@ -53,7 +53,7 @@ async def test_walkthrough():
     conn_2.RESEND_TIMEOUT = 1
 
     with pytest.raises(asyncio.TimeoutError):
-        g_2 = await Telekinesis(g._target, conn_2.session)._timeout(4)
+        g_2 = await Telekinesis(g._target, conn_2.session)._timeout(2)
 
     delegator_route = await Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
 
@@ -104,4 +104,4 @@ async def test_walkthrough():
     counter_2 = await Telekinesis(counter_delegator_route, conn_2.session)()._timeout(4)
 
     with pytest.raises(asyncio.TimeoutError):  # Max delegation depth doesn't allow it!
-        await counter_2.value._timeout(4)
+        await counter_2.value._timeout(2)

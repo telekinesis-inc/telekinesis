@@ -176,12 +176,13 @@ class Connection:
                     await self.recv()
                     n_tries = 0
             except Exception:
-                self.logger.info("%s Connection.listen", self.session.session_key.public_serial()[:4], exc_info=True)
+                self.logger.warning("%s Connection.listen", self.session.session_key.public_serial()[:4], exc_info=True)
 
             self.is_connecting_lock.clear()
             await asyncio.sleep(1)
 
-            if n_tries > 10:
+            if n_tries > self.MAX_SEND_RETRIES:
+                self.is_connecting_lock.set()
                 raise Exception("%s Max tries reached" % self.session.session_key.public_serial()[:4])
             n_tries += 1
 
@@ -247,7 +248,15 @@ class Connection:
 
     def __await__(self):
         async def await_lock():
-            await self.is_connecting_lock.wait()
+            if self.listener:
+                await self.is_connecting_lock.wait()
+                if self.listener.done():
+                    old_listener = self.listener
+                    self.listener = None
+                    await old_listener
+            else:
+                await self.reconnect()
+
             return self
 
         return await_lock().__await__()
@@ -582,6 +591,7 @@ class Route:
             return self
 
         return self._parent_channel and await_parent_channel().__await__() 
+
 
 class RequestMetadata:
     def __init__(self, session, caller, raw_messages):
