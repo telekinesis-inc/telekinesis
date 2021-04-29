@@ -217,6 +217,7 @@ class Telekinesis:
 
     def _delegate(self, receiver_id, parent_channel=None):
         token_header = []
+        extend_route = True
 
         if isinstance(self._target, Route):
             route = self._target.clone()
@@ -232,6 +233,8 @@ class Telekinesis:
                 self._channel.telekinesis = self
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
+            if self._channel.is_public:
+                extend_route = False
 
             max_delegation_depth = self._max_delegation_depth
             route = self._channel.route
@@ -240,12 +243,13 @@ class Telekinesis:
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
 
-        if route != self._channel.route or not self._channel.is_public:
+        if extend_route:
             token_header += [self._session.extend_route(route, receiver_id, max_delegation_depth)]
         
-        [(parent_channel or self._channel).header_buffer.append(th) for th in token_header]
+        route._parent_channel = parent_channel or self._channel
+        [route._parent_channel.header_buffer.append(th) for th in token_header]
 
-        return self._channel
+        return route
 
     def _subscribe(self, callback=None):
         self._on_update_callback = callback
@@ -497,7 +501,7 @@ class Telekinesis:
                     cache_attributes= not block_recursion and self._cache_attributes
                 )
 
-            route = obj._delegate(receiver_id, channel).route
+            route = obj._delegate(receiver_id, channel or self._channel)
             tup = (
                 "obj",
                 (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True)),

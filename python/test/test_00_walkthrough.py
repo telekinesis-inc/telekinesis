@@ -15,7 +15,7 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 async def test_walkthrough():
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
         async def handle_send(self, *args, **kwargs):
-            if random.random() < 0.005:
+            if random.random() < 0.00:
                 self.logger.error("Gotcha!!!")
                 kwargs["message"] = Exception("Random Fault Injection")
             await super().handle_send(*args, **kwargs)
@@ -25,7 +25,7 @@ async def test_walkthrough():
     conn_0 = await Connection(Session(), "ws://localhost:8777")
     conn_0.RESEND_TIMEOUT = 1
 
-    broker_0.entrypoint = (await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate('*')).route
+    broker_0.entrypoint = await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate('*')
 
     broker_1 = await FaultyBroker().serve(port=8778)  # Telekinesis works with clusters of Brokers
     await broker_1.add_broker("ws://localhost:8777", True)
@@ -54,7 +54,7 @@ async def test_walkthrough():
     with pytest.raises(asyncio.TimeoutError):
         g_2 = await Telekinesis(g._target, conn_2.session)._timeout(4)
 
-    delegator_route = Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
+    delegator_route = await Telekinesis(lambda: g, conn_1.session)._delegate(conn_2.session.session_key.public_serial())
 
     g_2 = await Telekinesis(delegator_route, conn_2.session)()._timeout(4)
 
@@ -74,9 +74,9 @@ async def test_walkthrough():
         def _private(self):
             return "Sensitive stuff"
 
-    route_counter = (await Telekinesis(Counter, conn_0.session, ["to_be_masked"], max_delegation_depth=1)._delegate(
+    route_counter = await Telekinesis(Counter, conn_0.session, ["to_be_masked"], max_delegation_depth=1)._delegate(
         conn_1.session.session_key.public_serial()
-    )).route  # << Max delegation depth!
+    )  # << Max delegation depth!
 
     counter = await Telekinesis(route_counter, conn_1.session)()._timeout(4)
 
@@ -96,9 +96,9 @@ async def test_walkthrough():
         await c
 
     # Try to delegate
-    counter_delegator_route = (await Telekinesis(lambda: counter, conn_1.session)._delegate(
+    counter_delegator_route = await Telekinesis(lambda: counter, conn_1.session)._delegate(
         conn_2.session.session_key.public_serial()
-    )).route
+    )
 
     counter_2 = await Telekinesis(counter_delegator_route, conn_2.session)()._timeout(4)
 

@@ -548,11 +548,12 @@ class Channel:
 
 
 class Route:
-    def __init__(self, brokers, session, channel, tokens=None):
+    def __init__(self, brokers, session, channel, tokens=None, parent_channel=None):
         self.brokers = brokers
         self.session = session
         self.channel = channel
         self.tokens = tokens or []
+        self._parent_channel = parent_channel
 
     def to_dict(self):
         return {"brokers": self.brokers, "session": self.session, "channel": self.channel, "tokens": self.tokens}
@@ -573,6 +574,12 @@ class Route:
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
 
+    def __await__(self):
+        async def await_parent_channel():
+            await self._parent_channel
+            return self
+
+        return self._parent_channel and await_parent_channel().__await__() 
 
 class RequestMetadata:
     def __init__(self, session, caller, raw_messages):
