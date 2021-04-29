@@ -25,9 +25,7 @@ async def test_walkthrough():
     conn_0 = await Connection(Session(), "ws://localhost:8777")
     conn_0.RESEND_TIMEOUT = 1
 
-    broker_0.entrypoint = Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._add_listener(
-        Channel(conn_0.session, is_public=True)
-    )
+    broker_0.entrypoint = (await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate('*')).route
 
     broker_1 = await FaultyBroker().serve(port=8778)  # Telekinesis works with clusters of Brokers
     await broker_1.add_broker("ws://localhost:8777", True)
@@ -76,9 +74,9 @@ async def test_walkthrough():
         def _private(self):
             return "Sensitive stuff"
 
-    route_counter = Telekinesis(Counter, conn_0.session, ["to_be_masked"], max_delegation_depth=1)._delegate(
+    route_counter = (await Telekinesis(Counter, conn_0.session, ["to_be_masked"], max_delegation_depth=1)._delegate(
         conn_1.session.session_key.public_serial()
-    )  # << Max delegation depth!
+    )).route  # << Max delegation depth!
 
     counter = await Telekinesis(route_counter, conn_1.session)()._timeout(4)
 
@@ -98,9 +96,9 @@ async def test_walkthrough():
         await c
 
     # Try to delegate
-    counter_delegator_route = Telekinesis(lambda: counter, conn_1.session)._delegate(
+    counter_delegator_route = (await Telekinesis(lambda: counter, conn_1.session)._delegate(
         conn_2.session.session_key.public_serial()
-    )
+    )).route
 
     counter_2 = await Telekinesis(counter_delegator_route, conn_2.session)()._timeout(4)
 
