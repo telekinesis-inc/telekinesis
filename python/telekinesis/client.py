@@ -371,6 +371,7 @@ class Channel:
 
     def handle_message(self, source, destination, raw_payload, proof):
         if self.validate_token_chain(source.session, destination.tokens):
+            message_tuple = None
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
             metadata = RequestMetadata(self.session, source, [{'raw_payload': raw_payload, 'shared_key': shared_key.key, 'proof': proof}])
@@ -403,11 +404,12 @@ class Channel:
                     else:
                         raise Exception("Received message with different encoding")
                 
-            if not self.telekinesis:
-                self.messages.appendleft(message_tuple)
-                self.lock.set()
-            else:
-                asyncio.get_event_loop().create_task(self.telekinesis._handle_request(self, *message_tuple))
+            if message_tuple:
+                if not self.telekinesis:
+                    self.messages.appendleft(message_tuple)
+                    self.lock.set()
+                else:
+                    asyncio.get_event_loop().create_task(self.telekinesis._handle_request(self, *message_tuple))
         else:
             self.session.logger.error(
                 "Invalid Tokens: %s %s -> %s %s [%s]",

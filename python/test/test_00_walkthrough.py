@@ -2,6 +2,7 @@ from telekinesis import Broker, Telekinesis, Connection, Session, Channel
 import random
 import asyncio
 import pytest
+import os
 
 pytestmark = pytest.mark.asyncio
 random.seed(42)
@@ -35,13 +36,13 @@ async def test_walkthrough():
     conn_1.RESEND_TIMEOUT = 1
 
     f = await Telekinesis(conn_1.entrypoint, conn_1.session)._timeout(4)
-    g = await f("Hello, ")._timeout(4)  # Telekinesis objects that return Telekinesis objects are welcome
+    g = await f(b"Hello, ")._timeout(4)  # Telekinesis objects that return Telekinesis objects are welcome
 
-    assert "Hello, World" == await g("World")._timeout(5)
+    assert b"Hello, World" == await g(b"World")._timeout(5)
 
-    long_message = "a" * 2 ** 20
+    long_message = os.urandom(2**20)
 
-    assert "Hello, " + long_message == await g(long_message)._timeout(20)  # Telekinesis should handle big messages
+    assert b"Hello, " + long_message == await g(long_message)._timeout(20)  # Telekinesis should handle big messages
 
     broker_2 = await FaultyBroker().serve(port=8779)  # Yet another Broker!
     await broker_2.add_broker("ws://localhost:8777", True)
@@ -58,7 +59,7 @@ async def test_walkthrough():
 
     g_2 = await Telekinesis(delegator_route, conn_2.session)()._timeout(4)
 
-    assert "Hello, World!!" == await g_2("World!!")._timeout(4)
+    assert b"Hello, World!!" == await g_2(b"World!!")._timeout(4)
 
     class Counter:
         def __init__(self):
