@@ -116,11 +116,10 @@ class Telekinesis:
         self._subscription = None
         self._subscribers = set()
 
-        session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
-
         if isinstance(target, Route):
             self._state = State()
         else:
+            session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
             self._update_state(State.from_object(target, cache_attributes))
 
     def __getattribute__(self, attr):
@@ -271,7 +270,8 @@ class Telekinesis:
             self._session.targets[old_id].remove(self)
             if not self._session.targets[old_id]:
                 self._session.targets.pop(old_id)
-            self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(set((self,)))
+            if not isinstance(self._target, Route):
+                self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(set((self,)))
 
         if not pipeline:
             pipeline = []
