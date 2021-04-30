@@ -115,6 +115,7 @@ class Telekinesis:
         self._on_update_callback = None
         self._subscription = None
         self._subscribers = set()
+        self._state = None
 
         if isinstance(target, Route):
             self._state = State()
@@ -151,19 +152,20 @@ class Telekinesis:
             return self._state.attributes[self._state.pipeline[0][1]]
 
     def _update_state(self, state):
-        for d in dir(self):
-            if d[0] != "_":
-                self.__delattr__(d)
+        if not self._state or not self._state.last_change or (state.last_change > self._state.last_change):
+            for d in dir(self):
+                if d[0] != "_":
+                    self.__delattr__(d)
 
-        for method_name in state.methods:
-            if method_name[0] != "_":
-                super().__setattr__(method_name, None)
+            for method_name in state.methods:
+                if method_name[0] != "_":
+                    super().__setattr__(method_name, None)
 
-        for attribute_name in state.attributes:
-            if attribute_name[0] != "_":
-                super().__setattr__(attribute_name, None)
+            for attribute_name in state.attributes:
+                if attribute_name[0] != "_":
+                    super().__setattr__(attribute_name, None)
 
-        self._state = state
+            self._state = state
 
         return self
 
@@ -324,9 +326,8 @@ class Telekinesis:
                 )
                 tk._subscribers.add(arg)
 
-        self._update_state(State.from_object(self._target, self._cache_attributes))
-
         for tk in touched:
+            tk._update_state(State.from_object(tk._target, tk._cache_attributes))
             if tk and tk._subscribers:
                 state_obj = State.from_object(tk._target, True).to_dict(tk._mask)
                 for s in tk._subscribers:
@@ -356,7 +357,8 @@ class Telekinesis:
                 raise Exception(response["error"])
 
             if "return" in response:
-                return self._decode(response["return"], self._target.session)
+                ret = self._decode(response["return"], self._target.session)
+                return ret
 
             if "repr" not in response:
                 raise Exception("Telekinesis communication error: received unrecognized message schema %s" % response)
@@ -515,6 +517,11 @@ class Telekinesis:
                     out = channel.telekinesis._target
                 else:
                     raise Exception(f"Unauthorized! {caller_id} {route.tokens}")
+            elif self._parent and (('__call__' not in self._state.methods) 
+            or (self._state.methods['__call__'] == state.methods.get('__call__'))):
+                self._target = route
+                self._update_state(state)
+                out = self
             else:
                 out = Telekinesis._from_state(
                     state,

@@ -585,6 +585,9 @@ class Route:
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
 
+    def __eq__(self, route):
+        return self.to_dict() == route.to_dict()
+
     def __await__(self):
         async def await_parent_channel():
             await self._parent_channel
