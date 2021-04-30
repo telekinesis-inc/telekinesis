@@ -236,7 +236,7 @@ class Telekinesis:
                     await ret._forward(ret._state.pipeline, reply_to or metadata.caller)
                 else:
                     if reply_to:
-                        with Channel(self._session) as new_channel:
+                        async with Channel(self._session) as new_channel:
                             await new_channel.send(reply_to, {
                                 "return": self._encode(ret, reply_to.session, new_channel),
                                 "repr": self._state.repr,
