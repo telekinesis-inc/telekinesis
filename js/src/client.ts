@@ -1,7 +1,7 @@
-import { serialize, deserialize } from "bson";
-import { deflate, inflate } from 'zlib'
-import { bytesToInt, intToBytes  } from "./helpers"
-import { PublicKey, PrivateKey, SharedKey, Token } from "./cryptography"
+import { deserialize, serialize } from "bson";
+import { deflate, inflate } from 'zlib';
+import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
+import { bytesToInt, intToBytes } from "./helpers";
 import { Telekinesis } from "./telekinesis";
 
 const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
@@ -29,7 +29,7 @@ export class Connection {
 
     session.connections.push(this);
   }
-  connect(retryCount: number = 0): Promise<Connection|undefined> {
+  connect(retryCount: number = 0): Promise<Connection | undefined> {
     return new Promise(async (resolve, reject) => {
       if (this.websocket !== undefined) {
         this.websocket.close();
@@ -39,8 +39,8 @@ export class Connection {
       this.websocket = new WS(this.url) as WebSocket;
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
-          console.warn(`Failed connecting to ${this.url}. Retrying: ${retryCount+1} of ${this.MAX_SEND_RETRIES}`)
-          setTimeout(async () => resolve(await this.connect(retryCount+1)), this.RESEND_TIMEOUT * 1000);
+          console.warn(`Failed connecting to ${this.url}. Retrying: ${retryCount + 1} of ${this.MAX_SEND_RETRIES}`)
+          setTimeout(async () => resolve(await this.connect(retryCount + 1)), this.RESEND_TIMEOUT * 1000);
         } else {
           reject(e);
         }
@@ -48,17 +48,17 @@ export class Connection {
       let queue: Uint8Array[] = [];
       let waiting: ((data: Uint8Array) => void)[] = [];
 
-      let recv = () => new Promise((r: (data: Uint8Array) => void) => 
-        queue.length > 0 ? r(queue.splice(0,1)[0]) : waiting.push(r)
+      let recv = () => new Promise((r: (data: Uint8Array) => void) =>
+        queue.length > 0 ? r(queue.splice(0, 1)[0]) : waiting.push(r)
       );
 
       this.websocket.onmessage = async (m: MessageEvent) => {
-        let a = typeof URL.createObjectURL === 'undefined' ? 
+        let a = typeof URL.createObjectURL === 'undefined' ?
           m.data :
           await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
 
         let data = new Uint8Array(a);
-        
+
         if (waiting.length > 0) {
           for (var i in waiting) {
             let res = waiting.pop();
@@ -87,13 +87,13 @@ export class Connection {
         ...sentChallenge,
         ...sentMetadata
       ]));
-      
-      this.tOffset = Date.now()/1000 - bytesToInt(challenge.slice(32,36))
+
+      this.tOffset = Date.now() / 1000 - bytesToInt(challenge.slice(32, 36))
       let m: Uint8Array = await recv()
 
-      let brokerId = new TextDecoder().decode(m.slice(64,152))
+      let brokerId = new TextDecoder().decode(m.slice(64, 152))
       let publicKey = new PublicKey('verify', brokerId)
-      
+
       let metadata = JSON.parse(new TextDecoder().decode(m.slice(152))) as {};
 
       // console.log(metadata)
@@ -103,7 +103,7 @@ export class Connection {
 
       try {
         await publicKey.verify(m.slice(0, 64), sentChallenge)
-      } catch(e) {
+      } catch (e) {
         this.websocket.close()
         delete this.websocket
         reject(e);
@@ -120,21 +120,21 @@ export class Connection {
     })
   }
   async recv(messageObj: MessageEvent) {
-    
-    let a = typeof URL.createObjectURL === 'undefined' ? 
+
+    let a = typeof URL.createObjectURL === 'undefined' ?
       messageObj.data :
       await fetch(URL.createObjectURL(messageObj.data)).then(r => r.arrayBuffer());
-    
+
     let message = new Uint8Array(a);
     let signature = message.slice(0, 64);
     let timestamp = bytesToInt(message.slice(64, 68));
 
     if (this.session.checkNoRepeat(signature, timestamp + this.tOffset)) {
-      let hLen = bytesToInt(message.slice(68,70));
-      let pLen = bytesToInt(message.slice(70,73));
-      
-      let headers = JSON.parse(new TextDecoder().decode(message.slice(73, 73+hLen))) as Header[];
-      let fullPayload = message.slice(73+hLen, 73+hLen+pLen);
+      let hLen = bytesToInt(message.slice(68, 70));
+      let pLen = bytesToInt(message.slice(70, 73));
+
+      let headers = JSON.parse(new TextDecoder().decode(message.slice(73, 73 + hLen))) as Header[];
+      let fullPayload = message.slice(73 + hLen, 73 + hLen + pLen);
 
       for (let i in headers) {
         if (headers[i][0] === 'send') {
@@ -143,7 +143,7 @@ export class Connection {
           let publicKey = new PublicKey('verify', body.source.session);
 
           try {
-            await publicKey.verify(signature, message.slice(64, 73+hLen+65+32))
+            await publicKey.verify(signature, message.slice(64, 73 + hLen + 65 + 32))
             if (this.session.channels.has(body.destination.channel)) {
               if (fullPayload[0] == 255) {
                 // console.log('ACK');
@@ -151,27 +151,27 @@ export class Connection {
               } // Ignore ACKs
               let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(1, 65)
               await this.send(
-                [['send', {source: body.destination, destination: body.source}]],
+                [['send', { source: body.destination, destination: body.source }]],
                 undefined,
                 undefined,
-                new Uint8Array([ 255, ...mid ])
+                new Uint8Array([255, ...mid])
               ); // Send ACK 
               let payload = fullPayload.slice(65 + 32)
               let hash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
-              if (fullPayload.slice(65, 65+32).reduce((p, v, i) => p && v === hash[i], true)) {
-                if (mid.reduce((p, v, i) => p && v === signature[i], true) 
-                || this.session.checkNoRepeat(mid, timestamp + this.tOffset)) {
+              if (fullPayload.slice(65, 65 + 32).reduce((p, v, i) => p && v === hash[i], true)) {
+                if (mid.reduce((p, v, i) => p && v === signature[i], true)
+                  || this.session.checkNoRepeat(mid, timestamp + this.tOffset)) {
                   let channel = this.session.channels.get(body.destination.channel)
                   channel && await channel.handleMessage(
                     Route.fromObject(body.source),
                     Route.fromObject(body.destination),
                     payload,
-                    message.slice(0, 73+hLen+65+32)
+                    message.slice(0, 73 + hLen + 65 + 32)
                   )
                 }
               }
             }
-          } catch(e) {console.error('On receive message error: ' + e)}
+          } catch (e) { console.error('On receive message error: ' + e) }
         }
       }
     }
@@ -187,19 +187,19 @@ export class Connection {
       let r = reply ? reply : new Uint8Array(65)
       let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
       let m = new Uint8Array([
-        ...intToBytes(Date.now()/1000 - this.tOffset, 4),
+        ...intToBytes(Date.now() / 1000 - this.tOffset, 4),
         ...intToBytes(h.length, 2),
-        ...intToBytes(payload.length+32+65, 3),
+        ...intToBytes(payload.length + 32 + 65, 3),
         ...h,
         ...r,
         ...p
       ])
-    
+
       let s = await this.session.sessionKey.sign(m) as Uint8Array;
       this.websocket.send(new Uint8Array([...s, ...m, ...payload]));
     }
   }
-  clear(bundleId: Uint8Array) {}
+  clear(bundleId: Uint8Array) { }
   close() {
     if (this.websocket) {
       this.websocket.onerror = () => undefined;
@@ -216,7 +216,7 @@ export class Session {
   issuedTokens: Map<string, [Token, Token?]>;
   targets: Map<any, Set<Telekinesis>>
 
-  constructor(sessionKey?: {privateKey: {}, publicKey: {}}) {
+  constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
     this.channels = new Map();
     this.connections = [];
@@ -227,7 +227,7 @@ export class Session {
   checkNoRepeat(signature: Uint8Array, timestamp: number) {
     let now = Date.now() / 1000;
     let lead = Math.floor(now / 60);
-    
+
     if (this.seenMessages[2] != lead) {
       this.seenMessages[lead % 2] = new Set();
       this.seenMessages[2] = lead;
@@ -242,7 +242,7 @@ export class Session {
     return false
   }
   async issueToken(target: Token | string, receiver: string, maxDepth?: number) {
-    let tokenType: 'root'|'extension';
+    let tokenType: 'root' | 'extension';
     let prevToken;
     let asset;
     let token;
@@ -295,10 +295,10 @@ export class Session {
       for (var i in route.tokens) {
         let token = await Token.decode(route.tokens[i]) as Token;
         if (token.receiver === await this.sessionKey.publicSerial()) {
-          route.tokens = route.tokens.slice(0, parseInt(i)+1);
+          route.tokens = route.tokens.slice(0, parseInt(i) + 1);
         }
       }
-      let token = await Token.decode(route.tokens[route.tokens.length-1]) as Token;
+      let token = await Token.decode(route.tokens[route.tokens.length - 1]) as Token;
       tokenHeader = await this.issueToken(token, receiver, maxDepth);
     }
     route.tokens.push(tokenHeader[1][1] as string);
@@ -333,15 +333,15 @@ export class Channel {
   messages: [RequestMetadata, {}][];
   waiting: (([]) => void)[];
   initLocks: ((channel: Channel) => void)[];
-  
+
   telekinesis?: Telekinesis;
 
   then: ((resolve: (ret: any) => void) => void) | undefined;
 
-  constructor(session: Session, channelKey?: {privateKey: {}, publicKey: {}}, isPublic=false) {
-    this.MAX_PAYLOAD_LEN = 2**19;
-    this.MAX_COMPRESSION_LEN = 2**19;
-    this.MAX_OUTBOX = 2**4;
+  constructor(session: Session, channelKey?: { privateKey: {}, publicKey: {} }, isPublic = false) {
+    this.MAX_PAYLOAD_LEN = 2 ** 19;
+    this.MAX_COMPRESSION_LEN = 2 ** 19;
+    this.MAX_OUTBOX = 2 ** 4;
 
     this.session = session;
     this.channelKey = new PrivateKey('derive', channelKey);
@@ -353,7 +353,7 @@ export class Channel {
     this.messages = [];
     this.waiting = [];
     this.initLocks = [];
-    
+
     this.then = this._then;
 
     this.channelKey.publicSerial().then(channelId => {
@@ -373,17 +373,17 @@ export class Channel {
   }
   async handleMessage(source: Route, destination: Route, rawPayload: Uint8Array, proof: Uint8Array) {
     if (await this.validateTokenChain(source.session, destination.tokens)) {
-      let sharedKey = new SharedKey( this.channelKey, source.channel)
+      let sharedKey = new SharedKey(this.channelKey, source.channel)
       let rawChunk = new Uint8Array(
         await sharedKey.decrypt(rawPayload.slice(16,), rawPayload.slice(0, 16)) as Uint8Array
       )
       let metadata = new RequestMetadata(
         this.session,
         source,
-        [{raw_payload: rawPayload, shared_key: sharedKey.key, proof: proof}]);
+        [{ raw_payload: rawPayload, shared_key: sharedKey.key, proof: proof }]);
 
       let payloadSer = new Uint8Array();
-      if (bytesToInt(rawChunk.slice(0,4)) === 0) {
+      if (bytesToInt(rawChunk.slice(0, 4)) === 0) {
         payloadSer = rawChunk.slice(4,);
       } else {
         let i = bytesToInt(rawChunk.slice(0, 2));
@@ -398,7 +398,7 @@ export class Channel {
         chunksMap.set(i, [chunk, metadata]);
 
         if (chunksMap.size === n) {
-          for (let ii=0; ii<n; ii++) {
+          for (let ii = 0; ii < n; ii++) {
             let ch = (chunksMap.get(ii) as [Uint8Array, RequestMetadata]);
             payloadSer = new Uint8Array([...payloadSer, ...ch[0]])
             if (ii != i) {
@@ -421,8 +421,8 @@ export class Channel {
       }
       if (this.telekinesis instanceof Telekinesis) {
         this.telekinesis._handleRequest(this, metadata, payload)
-      } else if(this.waiting.length > 0) {
-        let resolve = this.waiting.pop(); 
+      } else if (this.waiting.length > 0) {
+        let resolve = this.waiting.pop();
         resolve && resolve([metadata, payload]);
       } else {
         this.messages.push([metadata, payload]);
@@ -430,13 +430,13 @@ export class Channel {
     } else {
       console.error(
         `Invalid Tokens: ${source.session.slice(0, 4)} ${source.channel.slice(0, 4)} ||| ` +
-        `${destination.session.slice(0, 4)} ${destination.channel.slice(0, 4)} ` + 
+        `${destination.session.slice(0, 4)} ${destination.channel.slice(0, 4)} ` +
         `[${destination.tokens}]`
       );
     }
   }
   async recv() {
-    return new Promise(resolve => 
+    return new Promise(resolve =>
       this.messages.length > 0 ?
         resolve(this.messages.splice(0, 1)[0]) :
         this.waiting.push(resolve))
@@ -468,31 +468,30 @@ export class Channel {
     }
     if (this.route !== undefined) {
       async function* encryptSlice(
-        payload: Uint8Array, 
-        maxPayload: number, 
-        sharedKey: SharedKey, 
-        mid: Uint8Array, 
-        n: number, 
-        i:number): any
-      {
+        payload: Uint8Array,
+        maxPayload: number,
+        sharedKey: SharedKey,
+        mid: Uint8Array,
+        n: number,
+        i: number): any {
         let chunk = new Uint8Array();
         if (i < n) {
           if (n === 1) {
             chunk = new Uint8Array([...[0, 0, 0, 0], ...payload]);
           } else {
             if (n > 2 ** 16) {
-              throw `Payload size ${payload.length / 2**20} MiB is too large`;
+              throw `Payload size ${payload.length / 2 ** 20} MiB is too large`;
             }
             chunk = new Uint8Array([
               ...intToBytes(i, 2),
               ...intToBytes(n, 2),
               ...mid,
-              ...payload.slice(i * maxPayload, (i+1) *  maxPayload)
+              ...payload.slice(i * maxPayload, (i + 1) * maxPayload)
             ]);
           }
           let nonce = webcrypto.getRandomValues(new Uint8Array(16));
           yield new Uint8Array([...nonce, ...(await sharedKey.encrypt(chunk, nonce) as Uint8Array)]);
-          yield * await encryptSlice(payload, maxPayload, sharedKey, mid, n, i+1);
+          yield* await encryptSlice(payload, maxPayload, sharedKey, mid, n, i + 1);
         }
       }
       async function execute(channel: Channel, header: Header, sliceGenerator: any, mid: Uint8Array) {
@@ -518,7 +517,7 @@ export class Channel {
       let mid = webcrypto.getRandomValues(new Uint8Array(4));
 
       let sharedKey = new SharedKey(
-        this.channelKey, 
+        this.channelKey,
         destination.channel)
 
       let header = [
@@ -532,13 +531,13 @@ export class Channel {
       let nTasks = Math.min(n, this.MAX_OUTBOX);
 
       let gen = encryptSlice(payload, this.MAX_PAYLOAD_LEN, sharedKey, mid, n, 0);
-      
+
       try {
         await Promise.all(Array(nTasks).fill(0).map(() => new Promise(r => { execute(this, header, gen, mid).then(r) })))
       } catch {
         this.session.clear(mid);
       }
-      return new Promise(r=> r(this));
+      return new Promise(r => r(this));
     }
   }
   async execute(header?: Header, payload: Uint8Array = new Uint8Array(), bundleId?: Uint8Array) {
@@ -548,17 +547,17 @@ export class Channel {
     if (this.route !== undefined) {
       if (this.headerBuffer.length > 0 || header !== undefined) {
         await this.session.send(
-          header !== undefined ? this.headerBuffer.concat([header]): this.headerBuffer,
+          header !== undefined ? this.headerBuffer.concat([header]) : this.headerBuffer,
           payload,
           bundleId)
         this.headerBuffer = [];
       }
     }
     this.then = undefined;
-    return new Promise(r=> r(this));
+    return new Promise(r => r(this));
   }
   _then(resolve: ((ret: any) => void)) {
-    if (this.headerBuffer.length === 0 && this.route !== undefined) { 
+    if (this.headerBuffer.length === 0 && this.route !== undefined) {
       this.then = undefined;
       resolve(this);
     } else {
@@ -588,7 +587,7 @@ export class Channel {
       let token;
       try {
         token = await Token.decode(tokens[depth]) as Token;
-      } catch(e) {
+      } catch (e) {
         if (e === 'Invalid Signature') { return false }
         throw e;
       }
@@ -646,14 +645,14 @@ export class Route {
     for (let i in this.tokens) {
       let token = await Token.decode(this.tokens[i]) as Token;
       if (
-        (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root'))) || 
+        (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root'))) ||
         (i === (this.tokens.length - 1).toString()) && (!(token.receiver === receiver))
       ) {
-          throw 'Invalid token chain';
+        throw 'Invalid token chain';
       }
     }
   }
-  static fromObject(obj: {brokers: string[], session: string, channel: string, tokens: string[]}) {
+  static fromObject(obj: { brokers: string[], session: string, channel: string, tokens: string[] }) {
     return new Route(obj.brokers, obj.session, obj.channel, obj.tokens)
   }
 }
@@ -666,7 +665,7 @@ export class RequestMetadata {
 
   constructor(session: Session, caller: Route, rawMessages: {}[]) {
     this._session = session;
-    this.sessionPublicKey = session.sessionKey.publicSerial().then((s: string) => {this.sessionPublicKey = s}) && "";
+    this.sessionPublicKey = session.sessionKey.publicSerial().then((s: string) => { this.sessionPublicKey = s }) && "";
     this.caller = caller;
     this.rawMessages = rawMessages;
   }

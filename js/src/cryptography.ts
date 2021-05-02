@@ -1,4 +1,4 @@
-import { b64encode, b64decode } from "./helpers"
+import { b64decode, b64encode } from "./helpers";
 
 const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
 
@@ -6,9 +6,9 @@ export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";
   _usage: ["sign"] | ["deriveKey"];
   key?: CryptoKeyPair;
-  exportedKey?: {privateKey: {}, publicKey: {}};
+  exportedKey?: { privateKey: {}, publicKey: {} };
 
-  constructor(use: "sign" | "derive", importedKey?: {privateKey: {}, publicKey: {}}) {
+  constructor(use: "sign" | "derive", importedKey?: { privateKey: {}, publicKey: {} }) {
     this.exportedKey = importedKey;
     if (use === 'sign') {
       this._algorithm = 'ECDSA'
@@ -45,9 +45,9 @@ export class PrivateKey {
       }
     } else {
       this.key = await webcrypto.subtle.generateKey({
-          name: this._algorithm,
-          namedCurve: "P-256"
-        },
+        name: this._algorithm,
+        namedCurve: "P-256"
+      },
         true,
         this._usage
       )
@@ -62,7 +62,7 @@ export class PrivateKey {
       let signatureBuf = await webcrypto.subtle.sign(
         {
           name: "ECDSA",
-          hash: {name: "SHA-256"},
+          hash: { name: "SHA-256" },
         },
         this.key.privateKey,
         message
@@ -100,20 +100,20 @@ export class PublicKey {
   publicSerial: string;
   key?: CryptoKey;
 
-  constructor(use: "verify" | "derive" , publicSerial: string) {
+  constructor(use: "verify" | "derive", publicSerial: string) {
     this.publicSerial = publicSerial
     if (use === 'verify') {
       this._algorithm = 'ECDSA'
       this._usage = ['verify']
       return
-    } 
+    }
     if (use === 'derive') {
       this._algorithm = 'ECDH'
       this._usage = []
       return
     }
     throw "expected input 'use' should be 'verify' or 'derive'"
-    
+
   }
   async generate() {
     let decodedPublicSerial = b64decode(this.publicSerial)
@@ -137,12 +137,12 @@ export class PublicKey {
       if (await webcrypto.subtle.verify(
         {
           name: "ECDSA",
-          hash: {name: "SHA-256"},
+          hash: { name: "SHA-256" },
         },
         this.key,
         signature,
         message
-      )) { return; } else { throw 'Invalid Signature';}
+      )) { return; } else { throw 'Invalid Signature'; }
     }
   }
 }
@@ -215,24 +215,24 @@ export class Token {
   brokers: string[];
   receiver: string;
   asset: string;
-  tokenType: "root"|"extension";
+  tokenType: "root" | "extension";
   maxDepth: number | null;
   validFrom: number;
   validUntil: number | null;
-  failMode: 'CLOSED'|'OPEN';
+  failMode: 'CLOSED' | 'OPEN';
   metadata: {};
   signature?: string;
-  
+
   constructor(
-    issuer: string, brokers: string[], receiver: string, asset: string, tokenType: 'root'|'extension', maxDepth?: number,
-    validFrom?: number, validUntil?: number, failMode: 'CLOSED'|'OPEN' = 'CLOSED', metadata: {} = {}) {
+    issuer: string, brokers: string[], receiver: string, asset: string, tokenType: 'root' | 'extension', maxDepth?: number,
+    validFrom?: number, validUntil?: number, failMode: 'CLOSED' | 'OPEN' = 'CLOSED', metadata: {} = {}) {
     this.issuer = issuer;
     this.brokers = brokers;
     this.receiver = receiver;
     this.asset = asset;
     this.tokenType = tokenType;
     this.maxDepth = maxDepth || null;
-    this.validFrom = validFrom || Date.now()/1000;
+    this.validFrom = validFrom || Date.now() / 1000;
     this.validUntil = validUntil || null;
     this.failMode = failMode;
     this.metadata = metadata;

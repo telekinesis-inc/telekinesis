@@ -12,6 +12,7 @@ import makefun
 
 from .client import Route, Channel
 
+
 class State:
     def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None, last_change=None):
         self.attributes = attributes or {}
@@ -24,8 +25,9 @@ class State:
     def to_dict(self, mask=None):
         mask = mask or set()
         return {
-            "attributes": {k: v for k, v in self.attributes.items() if k not in mask} if isinstance(self.attributes, dict) else 
-                          [k for k in self.attributes if k not in mask],
+            "attributes": {k: v for k, v in self.attributes.items() if k not in mask}
+            if isinstance(self.attributes, dict)
+            else [k for k in self.attributes if k not in mask],
             "methods": {k: v for k, v in self.methods.items() if k not in mask},
             "pipeline": self.pipeline,
             "repr": self.repr,
@@ -73,8 +75,8 @@ class State:
                         except Exception:
                             logger.debug("Could not obtain signature from %s.%s", target, attribute_name)
 
-                        if attribute_name == '__init__':
-                            methods['__call__'] = (signature, target.__init__.__doc__)
+                        if attribute_name == "__init__":
+                            methods["__call__"] = (signature, target.__init__.__doc__)
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
@@ -98,7 +100,14 @@ class State:
 
 class Telekinesis:
     def __init__(
-        self, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        self,
+        target,
+        session,
+        mask=None,
+        expose_tb=True,
+        max_delegation_depth=None,
+        compile_signatures=True,
+        parent=None,
         cache_attributes=False,
     ):
 
@@ -148,7 +157,11 @@ class Telekinesis:
         return self._state
 
     def _last(self):
-        if (len(self._state.pipeline) == 1) and (self._state.pipeline[0][0] == 'get') and (isinstance(self._state.attributes, dict)):
+        if (
+            (len(self._state.pipeline) == 1)
+            and (self._state.pipeline[0][0] == "get")
+            and (isinstance(self._state.attributes, dict))
+        ):
             return self._state.attributes[self._state.pipeline[0][1]]
 
     def _update_state(self, state):
@@ -176,12 +189,12 @@ class Telekinesis:
         if isinstance(self._target, Route):
             route = self._target.clone()
             max_delegation_depth = None
-            if receiver_id == '*':
-                raise Exception('Cannot delegate remote Channel to public.')
+            if receiver_id == "*":
+                raise Exception("Cannot delegate remote Channel to public.")
 
         else:
             if not self._channel:
-                self._channel = Channel(self._session, is_public=receiver_id=='*')
+                self._channel = Channel(self._session, is_public=receiver_id == "*")
                 self._channel.telekinesis = self
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
@@ -190,14 +203,14 @@ class Telekinesis:
 
             max_delegation_depth = self._max_delegation_depth
             route = self._channel.route
-            if receiver_id == '*' and not self._channel.is_public:
+            if receiver_id == "*" and not self._channel.is_public:
                 self._channel.is_public = True
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
 
         if extend_route:
             token_header += [self._session.extend_route(route, receiver_id, max_delegation_depth)]
-        
+
         route._parent_channel = parent_channel or self._channel
         [route._parent_channel.header_buffer.append(th) for th in token_header]
 
@@ -206,10 +219,14 @@ class Telekinesis:
     def _subscribe(self, callback=None):
         self._on_update_callback = callback
         self._subscription = Telekinesis(
-            lambda s: self._update_state(State(**s)) and self._on_update_callback and self._on_update_callback(self), self._session, None,
-            self._expose_tb, self._max_delegation_depth, self._compile_signatures
+            lambda s: self._update_state(State(**s)) and self._on_update_callback and self._on_update_callback(self),
+            self._session,
+            None,
+            self._expose_tb,
+            self._max_delegation_depth,
+            self._compile_signatures,
         )
-        self._state.pipeline.append(('subscribe', self._subscription))
+        self._state.pipeline.append(("subscribe", self._subscription))
 
         return self
 
@@ -227,26 +244,40 @@ class Telekinesis:
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
                 ret = await self._execute(metadata, pipeline)
 
-                if payload.get('reply_to'):
-                    reply_to = Route(**payload['reply_to'])
+                if payload.get("reply_to"):
+                    reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
 
-                if isinstance(ret, Telekinesis) and isinstance(ret._target, Route) and ret._state.pipeline \
-                and (ret._target.session != self._session.session_key.public_serial()\
-                or ret._target._channel not in self._session.channels):
+                if (
+                    isinstance(ret, Telekinesis)
+                    and isinstance(ret._target, Route)
+                    and ret._state.pipeline
+                    and (
+                        ret._target.session != self._session.session_key.public_serial()
+                        or ret._target._channel not in self._session.channels
+                    )
+                ):
                     await ret._forward(ret._state.pipeline, reply_to or metadata.caller)
                 else:
                     if reply_to:
                         async with Channel(self._session) as new_channel:
-                            await new_channel.send(reply_to, {
-                                "return": self._encode(ret, reply_to.session, new_channel),
-                                "repr": self._state.repr,
-                                "timestamp": self._state.last_change})
+                            await new_channel.send(
+                                reply_to,
+                                {
+                                    "return": self._encode(ret, reply_to.session, new_channel),
+                                    "repr": self._state.repr,
+                                    "timestamp": self._state.last_change,
+                                },
+                            )
                     else:
-                        await channel.send(metadata.caller, {
-                            "return": self._encode(ret, metadata.caller.session),
-                            "repr": self._state.repr,
-                            "timestamp": self._state.last_change})
+                        await channel.send(
+                            metadata.caller,
+                            {
+                                "return": self._encode(ret, metadata.caller.session),
+                                "repr": self._state.repr,
+                                "timestamp": self._state.last_change,
+                            },
+                        )
 
         except Exception:
             if pipeline is None:
@@ -273,7 +304,9 @@ class Telekinesis:
             if not self._session.targets[old_id]:
                 self._session.targets.pop(old_id)
             if not isinstance(self._target, Route):
-                self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(set((self,)))
+                self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(
+                    set((self,))
+                )
 
         if not pipeline:
             pipeline = []
@@ -293,9 +326,14 @@ class Telekinesis:
 
         touched = self._session.targets.get(id(target))
         for i, (action, arg) in enumerate(pipeline):
-            if isinstance(target, Telekinesis) and isinstance(target._target, Route) \
-            and (target._target.session != self._session.session_key.public_serial() \
-            or target._target.channel not in self._session.channels):
+            if (
+                isinstance(target, Telekinesis)
+                and isinstance(target._target, Route)
+                and (
+                    target._target.session != self._session.session_key.public_serial()
+                    or target._target.channel not in self._session.channels
+                )
+            ):
                 target._state.pipeline += pipeline[i:]
                 break
 
@@ -303,8 +341,10 @@ class Telekinesis:
 
             if action == "get":
                 self._logger.info("%s %s %s", action, arg, target)
-                if (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"]) or arg in (
-                    self._mask or [] ) or (type(target) == dict
+                if (
+                    (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"])
+                    or arg in (self._mask or [])
+                    or (type(target) == dict)
                 ):
                     raise Exception("Unauthorized!")
                 target = target.__getattribute__(arg)
@@ -321,8 +361,14 @@ class Telekinesis:
                     target = await target
             if action == "subscribe":
                 tk = Telekinesis._reuse(
-                    target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
-                    None, self._cache_attributes
+                    target,
+                    self._session,
+                    self._mask,
+                    self._expose_tb,
+                    self._max_delegation_depth,
+                    self._compile_signatures,
+                    None,
+                    self._cache_attributes,
                 )
                 tk._subscribers.add(arg)
 
@@ -342,7 +388,7 @@ class Telekinesis:
         response = {}
         await channel.send(self._target, kwargs)
 
-        if not kwargs.get('reply_to'):
+        if not kwargs.get("reply_to"):
             _, response = await channel.recv()
 
             state = self._get_root_state()
@@ -371,7 +417,7 @@ class Telekinesis:
             else:
                 self._channel and await self._channel.close()
         except Exception:
-            self._session.logger('Error closing Telekinesis Object: %s', self._target, exc_info=True)
+            self._session.logger("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
     async def _forward(self, pipeline, reply_to=None):
         async with Channel(self._session) as new_channel:
@@ -381,9 +427,9 @@ class Telekinesis:
             return await self._send_request(
                 new_channel,
                 reply_to=reply_to and reply_to.to_dict(),
-                pipeline=self._encode(pipeline, self._target.session, new_channel)
+                pipeline=self._encode(pipeline, self._target.session, new_channel),
             )
-        
+
     def __call__(self, *args, **kwargs):
         state = self._state.clone()
         state.pipeline.append(("call", (args, kwargs)))
@@ -401,8 +447,8 @@ class Telekinesis:
         )
 
     def __setattr__(self, attribute, value):
-        if attribute[0] != '_':
-            raise Exception('Attributes for Telekinesis objects cannot be set directy')
+        if attribute[0] != "_":
+            raise Exception("Attributes for Telekinesis objects cannot be set directy")
         super().__setattr__(attribute, value)
 
     def __await__(self):
@@ -413,9 +459,7 @@ class Telekinesis:
 
     def __del__(self):
         if self._parent is None:
-            self._session.pending_tasks.add(
-                asyncio.get_event_loop().create_task(self._close())
-            )
+            self._session.pending_tasks.add(asyncio.get_event_loop().create_task(self._close()))
 
     def _encode(self, target, receiver_id=None, channel=None, traversal_stack=None, block_recursion=False):
         if traversal_stack is None:
@@ -427,7 +471,7 @@ class Telekinesis:
             i = len(traversal_stack)
 
         traversal_stack[id(target)] = [i, None, target]
-        #..  keep a copy of the target so it doesn't get garbage collected - which messes up the id()
+        # ..  keep a copy of the target so it doesn't get garbage collected - which messes up the id()
 
         if receiver_id is None:
             receiver_id = self._session.session_key.public_serial()
@@ -437,9 +481,15 @@ class Telekinesis:
         elif type(target) in (range, slice):
             tup = (type(target).__name__, (target.start, target.stop, target.step))
         elif type(target) in (list, tuple, set):
-            tup = (type(target).__name__, [self._encode(v, receiver_id, channel, traversal_stack, block_recursion) for v in target])
+            tup = (
+                type(target).__name__,
+                [self._encode(v, receiver_id, channel, traversal_stack, block_recursion) for v in target],
+            )
         elif type(target) == dict:
-            tup = ("dict", {x: self._encode(target[x], receiver_id, channel, traversal_stack, block_recursion) for x in target})
+            tup = (
+                "dict",
+                {x: self._encode(target[x], receiver_id, channel, traversal_stack, block_recursion) for x in target},
+            )
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
         else:
@@ -447,14 +497,22 @@ class Telekinesis:
                 obj = target
             else:
                 obj = Telekinesis._reuse(
-                    target, self._session, self._mask, self._expose_tb, self._max_delegation_depth, self._compile_signatures, 
-                    cache_attributes= not block_recursion and self._cache_attributes
+                    target,
+                    self._session,
+                    self._mask,
+                    self._expose_tb,
+                    self._max_delegation_depth,
+                    self._compile_signatures,
+                    cache_attributes=not block_recursion and self._cache_attributes,
                 )
 
             route = obj._delegate(receiver_id, channel or self._channel)
             tup = (
                 "obj",
-                (route.to_dict(), self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True)),
+                (
+                    route.to_dict(),
+                    self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True),
+                ),
             )
 
         traversal_stack[id(target)] = [i, tup, target]
@@ -517,8 +575,9 @@ class Telekinesis:
                     out = channel.telekinesis._target
                 else:
                     raise Exception(f"Unauthorized! {caller_id} {route.tokens}")
-            elif self._parent and (('__call__' not in self._state.methods) 
-            or (self._state.methods['__call__'] == state.methods.get('__call__'))):
+            elif self._parent and (
+                ("__call__" not in self._state.methods) or (self._state.methods["__call__"] == state.methods.get("__call__"))
+            ):
                 self._target = route
                 self._update_state(state)
                 out = self
@@ -539,7 +598,15 @@ class Telekinesis:
 
     @staticmethod
     def _from_state(
-        state, target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None, cache_attributes=False,
+        state,
+        target,
+        session,
+        mask=None,
+        expose_tb=True,
+        max_delegation_depth=None,
+        compile_signatures=True,
+        parent=None,
+        cache_attributes=False,
     ):
         def signatured_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):
@@ -622,21 +689,29 @@ class Telekinesis:
             if "__setitem__" in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
-        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes)
+        out = Telekinesis_(
+            target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes
+        )
         out._update_state(state)
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 
         return out
-    
+
     @staticmethod
     def _reuse(
-        target, session, mask=None, expose_tb=True, max_delegation_depth=None, compile_signatures=True, parent=None,
+        target,
+        session,
+        mask=None,
+        expose_tb=True,
+        max_delegation_depth=None,
+        compile_signatures=True,
+        parent=None,
         cache_attributes=False,
     ):
         kwargs = locals()
 
-        for tk in (session.targets.get(id(target)) or []):
-            if all((kwargs[x] == tk.__getattribute__('_'+x) for x in kwargs)):
+        for tk in session.targets.get(id(target)) or []:
+            if all((kwargs[x] == tk.__getattribute__("_" + x) for x in kwargs)):
                 return tk
         return Telekinesis(**kwargs)
 

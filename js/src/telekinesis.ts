@@ -1,4 +1,4 @@
-import { Session, Channel, Route, Header, RequestMetadata } from './client';
+import { Channel, Header, RequestMetadata, Route, Session } from './client';
 
 export class State {
   attributes: string[] | Map<string, any>;
@@ -387,7 +387,7 @@ export class Telekinesis extends Function {
 
   }
   _timeout(seconds: number) {
-    return new Promise((res: any, rej: any) => {setTimeout(() => rej('Timeout'), seconds*1000); this._execute().then(res)}) 
+    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then(res) })
   }
   async _sendRequest(channel: Channel, request: {}) {
     let response = {};
@@ -584,7 +584,6 @@ export class Telekinesis extends Function {
       new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent, cacheAttributes)
   }
 }
-
 export function injectFirstArg(func: any) {
   func._tk_inject_first = true;
   return func;

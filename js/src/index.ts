@@ -1,7 +1,9 @@
-import { PublicUser, authenticate } from './helpers';
+import { Channel, Connection, Route, Session } from './client';
 import { PrivateKey, PublicKey, SharedKey, Token } from './cryptography';
-import { Connection, Session, Channel, Route } from './client';
-import { Telekinesis, State, injectFirstArg } from './telekinesis';
+import { authenticate, PublicUser } from './helpers';
+import { injectFirstArg, State, Telekinesis } from './telekinesis';
 
-export { PrivateKey, PublicKey, SharedKey, Token, Connection, Session, Channel, Route, State, 
-         Telekinesis, injectFirstArg, PublicUser, authenticate };
+export {
+  PrivateKey, PublicKey, SharedKey, Token, Connection, Session, Channel, Route, State,
+  Telekinesis, injectFirstArg, PublicUser, authenticate
+};

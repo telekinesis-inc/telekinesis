@@ -62,7 +62,8 @@ class Connection:
         sent_challenge = os.urandom(32)
         sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
         await self.websocket.send(
-            signature + pk + sent_challenge + ujson.dumps(sent_metadata, escape_forward_slashes=False).encode())
+            signature + pk + sent_challenge + ujson.dumps(sent_metadata, escape_forward_slashes=False).encode()
+        )
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)
 
@@ -91,7 +92,10 @@ class Connection:
 
     async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
         self.logger.info(
-            "%s sending: %s %s", self.session.session_key.public_serial()[:4], " ".join(h[0] for h in header), len(payload),
+            "%s sending: %s %s",
+            self.session.session_key.public_serial()[:4],
+            " ".join(h[0] for h in header),
+            len(payload),
         )
 
         def encode(header, payload, bundle_id, message_id, retry):
@@ -138,7 +142,7 @@ class Connection:
                 return
 
             if retry < (self.MAX_SEND_RETRIES):
-                s, mm = encode(header, payload, bundle_id, message_id, retry+1)
+                s, mm = encode(header, payload, bundle_id, message_id, retry + 1)
                 self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
         raise Exception("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
@@ -200,8 +204,8 @@ class Connection:
         if self.session.check_no_repeat(signature, timestamp + self.t_offset):
 
             len_h, len_p = [int.from_bytes(x, "big") for x in [message[68:70], message[70:73]]]
-            header = ujson.loads(message[73: 73 + len_h])
-            full_payload = message[73 + len_h: 73 + len_h + len_p]
+            header = ujson.loads(message[73 : 73 + len_h])
+            full_payload = message[73 + len_h : 73 + len_h + len_p]
             self.logger.info(
                 "%s received: %s %s",
                 self.session.session_key.public_serial()[:4],
@@ -211,14 +215,14 @@ class Connection:
             for action, content in header:
                 if action == "send":
                     source, destination = Route(**content["source"]), Route(**content["destination"])
-                    PublicKey(source.session).verify(signature, message[64: 73 + len_h + 65 + 32])
+                    PublicKey(source.session).verify(signature, message[64 : 73 + len_h + 65 + 32])
                     if self.session.channels.get(destination.channel):
                         channel = self.session.channels.get(destination.channel)
                         if full_payload[0] == 255:
                             self.ack(source.session, full_payload[1:65])
                         else:
                             ret_signature = signature if (full_payload[0] == 0) else full_payload[1:65]
-                            payload = full_payload[65 + 32:]
+                            payload = full_payload[65 + 32 :]
                             await self.send(
                                 (("send", {"destination": content["source"], "source": content["destination"]}),),
                                 b"",
@@ -226,12 +230,11 @@ class Connection:
                                 ret_signature,
                             )
                             # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
-                            if hashlib.sha256(payload).digest() == full_payload[65: 65 + 32]:
-                                if (
-                                    (ret_signature == signature)
-                                    or self.session.check_no_repeat(ret_signature, timestamp + self.t_offset)
+                            if hashlib.sha256(payload).digest() == full_payload[65 : 65 + 32]:
+                                if (ret_signature == signature) or self.session.check_no_repeat(
+                                    ret_signature, timestamp + self.t_offset
                                 ):
-                                    channel.handle_message(source, destination, payload, message[:73 + len_h + 65 + 32])
+                                    channel.handle_message(source, destination, payload, message[: 73 + len_h + 65 + 32])
                             else:
                                 raise Exception("Authentication Error: message payload does not match signed hash")
 
@@ -383,7 +386,9 @@ class Channel:
             message_tuple = None
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
-            metadata = RequestMetadata(self.session, source, [{'raw_payload': raw_payload, 'shared_key': shared_key.key, 'proof': proof}])
+            metadata = RequestMetadata(
+                self.session, source, [{"raw_payload": raw_payload, "shared_key": shared_key.key, "proof": proof}]
+            )
 
             if payload[:4] == b"\x00" * 4:
                 if payload[4] == 0:
@@ -405,14 +410,16 @@ class Channel:
                     chunks = self.chunks.pop(mid)
                     payload = b"".join(chunks[ii][0] for ii in range(n))
 
-                    combined_metadata = RequestMetadata(metadata._session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)])
+                    combined_metadata = RequestMetadata(
+                        metadata._session, metadata.caller, [chunks[ii][1].raw_messages[0] for ii in range(n)]
+                    )
                     if payload[0] == 0:
                         message_tuple = (combined_metadata, bson.loads(payload[1:]))
                     elif payload[0] == 255:
                         message_tuple = (combined_metadata, bson.loads(zlib.decompress(payload[1:])))
                     else:
                         raise Exception("Received message with different encoding")
-                
+
             if message_tuple:
                 if not self.telekinesis:
                     self.messages.appendleft(message_tuple)
@@ -453,7 +460,7 @@ class Channel:
                     if n > 2 ** 16:
                         raise Exception(f"Payload size {len(payload)/2**20} MiB is too large")
                     chunk = (
-                        i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload: (i + 1) * max_payload]
+                        i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload : (i + 1) * max_payload]
                     )
 
                 nonce = os.urandom(16)
@@ -581,7 +588,7 @@ class Route:
                 assert token.token_type == "root"
             if i == (len(self.tokens) - 1):
                 assert token.receiver == receiver
-                    
+
     def __repr__(self):
         return f"Route {self.session[:4]} {self.channel[:4]}"
 
@@ -593,7 +600,7 @@ class Route:
             await self._parent_channel
             return self
 
-        return self._parent_channel and await_parent_channel().__await__() 
+        return self._parent_channel and await_parent_channel().__await__()
 
 
 class RequestMetadata:

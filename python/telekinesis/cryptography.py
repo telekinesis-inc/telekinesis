@@ -30,7 +30,9 @@ class PrivateKey:
                     else serialization.BestAvailableEncryption(password.encode())
                 )
                 data = self.key.private_bytes(
-                    encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=enc,
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=enc,
                 )
                 kf.write(data)
 
@@ -74,8 +76,17 @@ class SharedKey:
 
 class Token:
     def __init__(
-        self, issuer, brokers, receiver, asset, token_type, max_depth=None, valid_from=None, valid_until=None,
-        fail_mode="CLOSED", metadata=None
+        self,
+        issuer,
+        brokers,
+        receiver,
+        asset,
+        token_type,
+        max_depth=None,
+        valid_from=None,
+        valid_until=None,
+        fail_mode="CLOSED",
+        metadata=None,
     ):
         self.issuer = issuer
         self.brokers = brokers
@@ -98,10 +109,21 @@ class Token:
             return False
 
     def _to_dict(self):
-        return {x: self.__getattribute__(x) for x in [
-            "issuer", "brokers", "receiver", "asset", "token_type", "max_depth", "valid_from", "valid_until", "fail_mode",
-            "metadata"
-        ]}
+        return {
+            x: self.__getattribute__(x)
+            for x in [
+                "issuer",
+                "brokers",
+                "receiver",
+                "asset",
+                "token_type",
+                "max_depth",
+                "valid_from",
+                "valid_until",
+                "fail_mode",
+                "metadata",
+            ]
+        }
 
     def _to_string(self):
         return ujson.dumps(self._to_dict(), escape_forward_slashes=False)
@@ -116,11 +138,11 @@ class Token:
         return self.signature
 
     def __repr__(self):
-        return f'{self.issuer[:4]} - {self.signature and self.signature[:4]}: {self.receiver[:4]} ({self.asset[:4]})'
+        return f"{self.issuer[:4]} - {self.signature and self.signature[:4]}: {self.receiver[:4]} ({self.asset[:4]})"
 
     @staticmethod
     def decode(string, verify=True):
-        token = Token(**ujson.loads(string[string.find(".") + 1:]))
+        token = Token(**ujson.loads(string[string.find(".") + 1 :]))
         if not verify:
             token.signature = string.split(".")[0]
             return token

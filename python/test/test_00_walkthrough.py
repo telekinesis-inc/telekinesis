@@ -26,7 +26,7 @@ async def test_walkthrough():
     conn_0 = await Connection(Session(), "ws://localhost:8777")
     conn_0.RESEND_TIMEOUT = 1
 
-    broker_0.entrypoint = await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate('*')
+    broker_0.entrypoint = await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate("*")
 
     broker_1 = await FaultyBroker().serve(port=8778)  # Telekinesis works with clusters of Brokers
     await broker_1.add_broker("ws://localhost:8777", True)
@@ -40,7 +40,7 @@ async def test_walkthrough():
 
     assert b"Hello, World" == await g(b"World")._timeout(5)
 
-    long_message = os.urandom(2**20)
+    long_message = os.urandom(2 ** 20)
 
     assert b"Hello, " + long_message == await g(long_message)._timeout(20)  # Telekinesis should handle big messages
 

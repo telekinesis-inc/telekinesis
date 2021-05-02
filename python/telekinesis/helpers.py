@@ -14,9 +14,9 @@ def authenticate(url="ws://localhost:8776", session_key_file=None, print_callbac
 def PublicUser(url="ws://localhost:8776", session_key_file=None):
     s = Session(session_key_file)
 
-    if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
-        i = len(re.findall(r'[\w\d]+:\/\/[\w\d.]+', url)[0])
-        url = url[:i] + ':8776' + url[i:]
+    if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
+        i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
+        url = url[:i] + ":8776" + url[i:]
 
     c = Connection(s, url)
 

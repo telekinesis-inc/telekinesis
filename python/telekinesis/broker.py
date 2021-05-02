@@ -269,8 +269,8 @@ class Broker:
                     )
                     if connection.session.session_id != s.session:
                         try:
-                            len_h = int.from_bytes(message[68:70], 'big')
-                            PublicKey(s.session).verify(message[:64], message[64:73 + len_h + 65 + 32])
+                            len_h = int.from_bytes(message[68:70], "big")
+                            PublicKey(s.session).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
                         except InvalidSignature:
                             return
 
@@ -319,8 +319,17 @@ class Broker:
                             )
                     return
             for peer in set().union(*self.topology_cache[0].values()):
-                await peer.send([('broker', ('topology_update', {'source': self.broker_key.public_serial(), 'destinations': d.brokers, 'counter': 0}))])
-        
+                await peer.send(
+                    [
+                        (
+                            "broker",
+                            (
+                                "topology_update",
+                                {"source": self.broker_key.public_serial(), "destinations": d.brokers, "counter": 0},
+                            ),
+                        )
+                    ]
+                )
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
         if session == connection.session.session_id:
@@ -430,40 +439,39 @@ class Broker:
             self.logger.info("%s: topology %s", self.broker_key.public_serial()[:4], str(params))
             # if self.check_no_repeat...
             peer = connection.session.broker_connections[connection]
-            if self.broker_key.public_serial() == params['source']:
+            if self.broker_key.public_serial() == params["source"]:
                 # if check signature
-                for reply in params['replies']:
-                    peer_set = self.topology_cache[params['replies'][reply]].get(reply) or set()
+                for reply in params["replies"]:
+                    peer_set = self.topology_cache[params["replies"][reply]].get(reply) or set()
                     peer_set = peer_set.union([peer])
-                    self.topology_cache[params['replies'][reply]][reply] = peer_set
-            elif 'replies' in params:
-                for reply in params['replies']:
-                    params['replies'][reply] += 1
+                    self.topology_cache[params["replies"][reply]][reply] = peer_set
+            elif "replies" in params:
+                for reply in params["replies"]:
+                    params["replies"][reply] += 1
                 for depth in self.topology_cache:
-                    source_set = self.topology_cache[depth].get(params['source'])
+                    source_set = self.topology_cache[depth].get(params["source"])
                     if source_set:
                         for conn in source_set:
-                            await conn.send([('broker', ('topology_update', params))])
+                            await conn.send([("broker", ("topology_update", params))])
                         return
             else:
-                destination_set = set(params['destinations']).intersection(set(self.topology_cache[0].keys()))
+                destination_set = set(params["destinations"]).intersection(set(self.topology_cache[0].keys()))
                 if destination_set:
-                    params['replies'] = {d: 0 for d in destination_set}
-                    await peer.send([('broker', ('topology_update', params))])
+                    params["replies"] = {d: 0 for d in destination_set}
+                    await peer.send([("broker", ("topology_update", params))])
                     return
-                params['counter'] += 1
-                source_set = self.topology_cache[params['counter']].get(params['source']) or set()
-                self.topology_cache[params['counter']][params['source']] = source_set.union([peer])
+                params["counter"] += 1
+                source_set = self.topology_cache[params["counter"]].get(params["source"]) or set()
+                self.topology_cache[params["counter"]][params["source"]] = source_set.union([peer])
 
                 for forwarded in set().union(self.topology_cache[0].values()):
-                    await peer.send([('broker', ('topology_update', params))])
+                    await peer.send([("broker", ("topology_update", params))])
 
-            
     async def add_broker(self, url, inherit_entrypoint=False):
         peer = Peer(None, self)
-        if re.sub(r'(?![\w\d]+:\/\/[\w\d.]+):[\d]+', '', url) == url:
-            i = len(re.findall(r'[\w\d]+:\/\/[\w\d.]+', url)[0])
-            url = url[:i] + ':8776' + url[i:]
+        if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
+            i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
+            url = url[:i] + ":8776" + url[i:]
 
         await peer.connect(url, inherit_entrypoint)  # This already adds the peer to self.sessions
 
@@ -508,7 +516,7 @@ class Broker:
         return False
 
     def decode_header(self, m):
-        header = ujson.loads(m[73: 73 + int.from_bytes(m[68:70], "big")])
+        header = ujson.loads(m[73 : 73 + int.from_bytes(m[68:70], "big")])
         return header
 
     async def serve(self, host="127.0.0.1", port=8776, **kwargs):
@@ -578,7 +586,9 @@ class Peer(Connection):
         h = ujson.dumps(header).encode()
         m = len(h).to_bytes(2, "big") + (0).to_bytes(3, "big") + h
         t = int(time.time() - self.t_offset - 4).to_bytes(4, "big")
-        s = self.broker.broker_key.sign(t + m,)
+        s = self.broker.broker_key.sign(
+            t + m,
+        )
 
         await self.websocket.send(s + t + m)
 
@@ -590,12 +600,11 @@ class Peer(Connection):
                 session_id, entrypoint = await self.reconnect()
 
                 if not (-15 < self.t_offset < 2):
-                    raise IncompatibleBrokerException(f'Unix time difference too large: {self.t_offset} seconds.')
+                    raise IncompatibleBrokerException(f"Unix time difference too large: {self.t_offset} seconds.")
                 self.lock.set()
 
                 if session_id not in self.broker.sessions:
                     self.broker.sessions[session_id] = Session(session_id)
-                
 
                 if inherit_entrypoint:
                     self.broker.entrypoint = entrypoint
@@ -603,7 +612,9 @@ class Peer(Connection):
                 self.session = self.broker.sessions[session_id]
                 self.session.connections.add(self)
                 self.session.broker_connections[self] = self
-                self.broker.topology_cache[0][session_id] = (self.broker.topology_cache[0].get(session_id) or set()).union([self])
+                self.broker.topology_cache[0][session_id] = (self.broker.topology_cache[0].get(session_id) or set()).union(
+                    [self]
+                )
 
                 n_tries = 0
                 while True:
