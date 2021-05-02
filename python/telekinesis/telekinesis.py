@@ -334,6 +334,10 @@ class Telekinesis:
                     or target._target.channel not in self._session.channels
                 )
             ):
+                new_state = State(**target._state.to_dict())
+                target = Telekinesis(target._target, target._session, target._mask, target._expose_tb, target._max_delegation_depth, target._compile_signatures,
+                    target._parent, target._cache_attributes)
+                target._state = new_state
                 target._state.pipeline += pipeline[i:]
                 break
 
