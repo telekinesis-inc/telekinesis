@@ -242,11 +242,12 @@ class Telekinesis:
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
-                ret = await self._execute(metadata, pipeline)
 
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
+
+                ret = await self._execute(metadata, pipeline)
 
                 if (
                     isinstance(ret, Telekinesis)
