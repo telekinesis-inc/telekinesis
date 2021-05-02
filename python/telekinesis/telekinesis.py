@@ -242,7 +242,6 @@ class Telekinesis:
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
-
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
@@ -290,7 +289,7 @@ class Telekinesis:
             try:
                 err_message = {"error": traceback.format_exc() if self._expose_tb else ""}
                 if reply_to:
-                    with Channel(self._session) as new_channel:
+                    async with Channel(self._session) as new_channel:
                         await new_channel.send(reply_to, err_message)
                 else:
                     await channel.send(metadata.caller, err_message)
