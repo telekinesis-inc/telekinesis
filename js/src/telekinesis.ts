@@ -306,7 +306,6 @@ export class Telekinesis extends Function {
     this._state.pipeline = [];
 
     if (this._target instanceof Route) {
-      console.log('exc', this._state.repr, pipeline)
       return await this._forward(pipeline);
     }
     function exc(x: any) {
@@ -323,7 +322,11 @@ export class Telekinesis extends Function {
         target._target.session !== await this._session.sessionKey.publicSerial() ||
         !this._session.channels.has(target._target.channel)
       )) {
+        const oldState = target._state;
+        target = new Telekinesis(target._target, target._session, target._mask, target._exposeTb, target._maxDelegationDepth, target._compileSignatures, target._parent, target._cacheAttributes);
+        target._state = oldState.clone();
         target._state.pipeline.push(...pipeline.slice(parseInt(step)));
+        target._blockThen = true;
         break;
       }
       let action = pipeline[step][0];
@@ -367,9 +370,6 @@ export class Telekinesis extends Function {
         }
         if (target instanceof Promise) {
           target = await target;
-        }
-        if (target instanceof Telekinesis && breakOnTelekinesis) {
-          target._blockThen = true;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
           target = await target._execute();
