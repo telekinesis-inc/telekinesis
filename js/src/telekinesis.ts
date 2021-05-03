@@ -316,6 +316,7 @@ export class Telekinesis extends Function {
     }
     let target: any = this._target;
     let prevTarget = target;
+    let touched: Set<Telekinesis> = this._session.targets.get(this._target) || new Set();
 
     for (let step in pipeline) {
       if (breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && (
@@ -329,6 +330,7 @@ export class Telekinesis extends Function {
         target._blockThen = true;
         break;
       }
+      touched = new Set([...touched, ...(this._session.targets.get(target) || [])])
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
@@ -382,12 +384,14 @@ export class Telekinesis extends Function {
       }
     }
 
-    this._state = State.fromTarget(this._target, this._cacheAttributes);
+    for (const tk of touched) {
+      tk._state = State.fromTarget(tk._target, this._cacheAttributes);
 
-    const subscribers = Array.from(this._subscribers)
-    if (subscribers) {
-      const state = State.fromTarget(this._target, true).toObject(this._mask)
-      subscribers.map((s: Telekinesis) => s(state)._execute())
+      const subscribers = Array.from(tk._subscribers)
+      if (subscribers) {
+        const state = State.fromTarget(tk._target, true).toObject(tk._mask)
+        subscribers.map((s: Telekinesis) => s(state)._execute())
+      }
     }
 
     return target;
