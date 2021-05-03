@@ -109,11 +109,10 @@ export class Telekinesis extends Function {
 
     this._subscribers = new Set();
 
-    session.targets.set(target, (session.targets.get(target) || new Set()).add(this))
-
     if (target instanceof Route) {
       this._state = new State();
     } else {
+      session.targets.set(target, (session.targets.get(target) || new Set()).add(this))
       this._state = State.fromTarget(target, cacheAttributes);
     }
     this._lastUpdate = Date.now();
@@ -211,7 +210,6 @@ export class Telekinesis extends Function {
     return this
   }
   async _handleRequest(channel: Channel, metadata: RequestMetadata, payload: {}) {
-    // console.log('handleRequest!!', this, listener, metadata);
     let pipeline;
     let replyTo;
 
@@ -297,7 +295,9 @@ export class Telekinesis extends Function {
       if (!set.size) {
         this._session.targets.delete(oldTarget)
       }
-      this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this))
+      if (!(this._target instanceof Route)) {
+        this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this))
+      }
     }
     pipeline = pipeline || [];
 
