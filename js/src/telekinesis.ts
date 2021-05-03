@@ -309,9 +309,9 @@ export class Telekinesis extends Function {
       console.log('exc', this._state.repr, pipeline)
       return await this._forward(pipeline);
     }
-    async function exc(x: any) {
-      if (x._blockThen !== undefined && x._lastUpdate && x._state && x._state.pipeline) {
-        return await x._execute(metadata);
+    function exc(x: any) {
+      if (x._blockThen !== undefined && x._lastUpdate && x._state && x._state.pipeline.length) {
+        return new Promise(r => x._execute(metadata).then(r));
       }
       return x;
     }
@@ -346,7 +346,10 @@ export class Telekinesis extends Function {
         let ar = (pipeline[step][1] as [string[], {}])[0] as [];
         let args: any[] = [];
         for (let i in ar) {
-          args[i] = await exc(ar[i]);
+          args[i] = exc(ar[i]);
+          if (args[i] instanceof Promise) {
+            args[i] = await args[i];
+          }
         }
 
         if (target._tk_inject_first === true) {
@@ -368,7 +371,7 @@ export class Telekinesis extends Function {
         if (target instanceof Telekinesis && breakOnTelekinesis) {
           target._blockThen = true;
         }
-        if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route) {
+        if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
           target = await target._execute();
         }
       } else if (action === 'subscribe') {
