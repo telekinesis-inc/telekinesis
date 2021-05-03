@@ -592,6 +592,7 @@ class Telekinesis:
             ):
                 self._target = route
                 self._update_state(state)
+                self._parent = None
                 out = self
             else:
                 out = Telekinesis._from_state(
