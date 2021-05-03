@@ -49,7 +49,7 @@ describe("Telekinesis", () => {
   })
   it('sends telekinesis objects', async () => {
     const echo = await new PublicUser(HOST) as any;
-    const func = () => null;
-    expect(await echo(func)).toEqual(func);
+    const func = (x : number) => x+1;
+    expect(await echo(func)(1)).toEqual(2);
   })
 });

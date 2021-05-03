@@ -180,7 +180,7 @@ export class Telekinesis extends Function {
         if (this._channel) {
           this._channel.isPublic = true;
         } else {
-          this._channel = new Channel(this._session, undefined, receiverId === '*');
+          this._channel = await (new Channel(this._session, undefined, receiverId === '*') as any) as Channel;
           this._channel.telekinesis = this;
         }
         this._channel.listen();
