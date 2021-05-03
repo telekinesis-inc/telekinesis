@@ -228,7 +228,7 @@ export class Telekinesis extends Function {
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
-        let ret = await this._execute(metadata, pipeline);
+        let ret = await this._execute(metadata, pipeline, true);
 
         if (ret instanceof Telekinesis && ret._target instanceof Route && (
           ret._target.session !== await this._session.sessionKey.publicSerial() ||
@@ -288,7 +288,7 @@ export class Telekinesis extends Function {
       this._compileSignatures,
       this)
   }
-  async _execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][]) {
+  async _execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][], breakOnTelekinesis: boolean = false) {
     if (this._target instanceof Promise) {
       const oldTarget = this._target;
       this._target = await this._target;
@@ -306,6 +306,7 @@ export class Telekinesis extends Function {
     this._state.pipeline = [];
 
     if (this._target instanceof Route) {
+      console.log('exc', this._state.repr, pipeline)
       return await this._forward(pipeline);
     }
     async function exc(x: any) {
@@ -318,7 +319,7 @@ export class Telekinesis extends Function {
     let prevTarget = target;
 
     for (let step in pipeline) {
-      if (target instanceof Telekinesis && target._target instanceof Route && (
+      if (breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && (
         target._target.session !== await this._session.sessionKey.publicSerial() ||
         !this._session.channels.has(target._target.channel)
       )) {
@@ -364,8 +365,11 @@ export class Telekinesis extends Function {
         if (target instanceof Promise) {
           target = await target;
         }
-        if (target instanceof Telekinesis) {
+        if (target instanceof Telekinesis && breakOnTelekinesis) {
           target._blockThen = true;
+        }
+        if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route) {
+          target = await target._execute();
         }
       } else if (action === 'subscribe') {
         const tk = Telekinesis._reuse(
@@ -417,7 +421,6 @@ export class Telekinesis extends Function {
       if (replyTo !== undefined) {
         const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session)
         newChannel.headerBuffer.push(tokenHeader as Header)
-        console.log(replyTo)
       }
       return await this._sendRequest(
         newChannel,

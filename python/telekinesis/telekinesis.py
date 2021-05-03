@@ -246,7 +246,7 @@ class Telekinesis:
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
 
-                ret = await self._execute(metadata, pipeline)
+                ret = await self._execute(metadata, pipeline, True)
 
                 if (
                     isinstance(ret, Telekinesis)
@@ -296,7 +296,7 @@ class Telekinesis:
             finally:
                 pass
 
-    async def _execute(self, metadata=None, pipeline=None):
+    async def _execute(self, metadata=None, pipeline=None, break_on_telekinesis=False):
         if asyncio.iscoroutine(self._target):
             old_id = id(self._target)
             self._target = await self._target
@@ -327,7 +327,8 @@ class Telekinesis:
         touched = self._session.targets.get(id(target))
         for i, (action, arg) in enumerate(pipeline):
             if (
-                isinstance(target, Telekinesis)
+                break_on_telekinesis
+                and isinstance(target, Telekinesis)
                 and isinstance(target._target, Route)
                 and (
                     target._target.session != self._session.session_key.public_serial()
@@ -363,6 +364,13 @@ class Telekinesis:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):
                     target = await target
+                if (
+                    isinstance(target, Telekinesis) 
+                    and isinstance(target._target, Route)
+                    and target._state.pipeline 
+                    and not break_on_telekinesis
+                ):
+                    target = await target._execute()
             if action == "subscribe":
                 tk = Telekinesis._reuse(
                     target,
