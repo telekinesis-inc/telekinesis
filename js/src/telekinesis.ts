@@ -164,6 +164,10 @@ export class Telekinesis extends Function {
     }
     return undefined;
   }
+  _updateState(state: State) {
+    this._state = state;
+    this._onUpdateCallback && this._onUpdateCallback(this);
+  }
   async _delegate(receiverId: string, parentChannel?: Channel) {
     let route: Route;
     let maxDelegationDepth = this._maxDelegationDepth;
@@ -205,8 +209,11 @@ export class Telekinesis extends Function {
   _subscribe(callback?: any) {
     this._onUpdateCallback = callback;
     this._subscription = new Telekinesis(
-      (s: any) => { this._state = State.fromObject(s); this._onUpdateCallback && this._onUpdateCallback(this) },
-      this._session, undefined, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+      (newState: any) => {
+        const state = State.fromObject(newState)
+        state.pipeline = this._state.pipeline;
+        this._state = state;
+      }, this._session, undefined, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
     )
     this._state.pipeline.push(['subscribe', this._subscription])
     return this
@@ -566,7 +573,7 @@ export class Telekinesis extends Function {
 
         if (this._parent) {
           this._target = route;
-          this._state = state;
+          this._updateState(state);
           this._parent = undefined;
           out = this._proxy;
         } else {
