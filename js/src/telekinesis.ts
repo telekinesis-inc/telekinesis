@@ -91,6 +91,7 @@ export class Telekinesis extends Function {
   _lastUpdate: number;
   _blockThen: boolean;
   _isTelekinesisObject: boolean;
+  _proxy: any;
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
@@ -109,17 +110,11 @@ export class Telekinesis extends Function {
 
     this._subscribers = new Set();
 
-    if (target instanceof Route) {
-      this._state = new State();
-    } else {
-      session.targets.set(target, (session.targets.get(target) || new Set()).add(this))
-      this._state = State.fromTarget(target, cacheAttributes);
-    }
     this._lastUpdate = Date.now();
     this._blockThen = false;
     this._isTelekinesisObject = true;
 
-    return new Proxy(this, {
+    this._proxy = new Proxy(this, {
       get(target: Telekinesis, prop: string) {
         if (prop[0] === '_') {
           return (target as any)[prop];
@@ -149,6 +144,13 @@ export class Telekinesis extends Function {
         return target._call(args);
       }
     });
+    if (target instanceof Route) {
+      this._state = new State();
+    } else {
+      session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
+      this._state = State.fromTarget(target, cacheAttributes);
+    }
+    return this._proxy;
   }
   _getRootState(): State {
     if (this._parent !== undefined) {
@@ -291,12 +293,12 @@ export class Telekinesis extends Function {
       const oldTarget = this._target;
       this._target = await this._target;
       const set = (this._session.targets.get(oldTarget) as Set<Telekinesis>);
-      set.delete(this)
+      set.delete(this._proxy)
       if (!set.size) {
         this._session.targets.delete(oldTarget)
       }
       if (!(this._target instanceof Route)) {
-        this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this))
+        this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this._proxy))
       }
     }
     pipeline = pipeline || [];
@@ -562,15 +564,22 @@ export class Telekinesis extends Function {
         let route = Route.fromObject(obj[0]);
         let state = State.fromObject(this._decode(inputStack, callerId, obj[1], outputStack));
 
-        out = Telekinesis._fromState(
-          state,
-          route,
-          this._session,
-          this._mask,
-          this._exposeTb,
-          this._maxDelegationDepth,
-          this._compileSignatures,
-        )
+        if (this._parent) {
+          this._target = route;
+          this._state = state;
+          this._parent = undefined;
+          out = this._proxy;
+        } else {
+          out = Telekinesis._fromState(
+            state,
+            route,
+            this._session,
+            this._mask,
+            this._exposeTb,
+            this._maxDelegationDepth,
+            this._compileSignatures,
+          )
+        }
       }
 
       outputStack.set(root, out);

@@ -21,6 +21,7 @@ class State:
         self.repr = repr or ""
         self.doc = doc
         self.last_change = last_change
+        self.history = {}
 
     def to_dict(self, mask=None):
         mask = mask or set()
@@ -180,6 +181,9 @@ class Telekinesis:
 
             self._state = state
 
+            if self._on_update_callback:
+                self._on_update_callback(self)
+
         return self
 
     def _delegate(self, receiver_id, parent_channel=None):
@@ -217,9 +221,14 @@ class Telekinesis:
         return route
 
     def _subscribe(self, callback=None):
+        def subscription_callback(new_state):
+            state = State(**new_state)
+            state.pipeline = self._state.pipeline
+            self._update_state(state)
+
         self._on_update_callback = callback
         self._subscription = Telekinesis(
-            lambda s: self._update_state(State(**s)) and self._on_update_callback and self._on_update_callback(self),
+            subscription_callback,
             self._session,
             None,
             self._expose_tb,
@@ -335,7 +344,7 @@ class Telekinesis:
                     or target._target.channel not in self._session.channels
                 )
             ):
-                new_state = State(**target._state.to_dict())
+                new_state = target._state.clone()
                 target = Telekinesis(target._target, target._session, target._mask, target._expose_tb, target._max_delegation_depth, target._compile_signatures,
                     target._parent, target._cache_attributes)
                 target._state = new_state
