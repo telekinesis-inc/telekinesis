@@ -419,7 +419,7 @@ export class Telekinesis extends Function {
 
       if (Object.getOwnPropertyNames(response).includes('return')) {
         // console.log((response as any)['return'])
-        let out = this._decode((response as any)['return'], (this._target as Route).session)
+        let out = this._decode((response as any)['return'], (this._target as Route).session[0])
         if (out && out._isTelekinesisObject === true) {
           out._lastUpdate = Date.now();
           out._blockThen = true;
@@ -435,7 +435,7 @@ export class Telekinesis extends Function {
     let newChannel = new Channel(this._session);
     try {
       if (replyTo !== undefined) {
-        const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session)
+        const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session[0])
         newChannel.headerBuffer.push(tokenHeader as Header)
       }
       return await this._sendRequest(
@@ -449,7 +449,7 @@ export class Telekinesis extends Function {
       await newChannel.close()
     }
   }
-  async _encode(target: any, receiverId: string, channel?: Channel, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
+  async _encode(target: any, receiver: [string, string], channel?: Channel, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
 
     let id = 0;
 
@@ -478,13 +478,13 @@ export class Telekinesis extends Function {
       let children: string[] = [];
       let arr = target instanceof Array ? target : Array.from(target.values());
       for (let v in arr) {
-        children[v] = await this._encode(arr[v], receiverId, channel, traversalStack, blockRecursion)
+        children[v] = await this._encode(arr[v], receiver, channel, traversalStack, blockRecursion)
       }
       out[1] = [target instanceof Array ? 'list' : 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
-        (children as any)[v] = await this._encode(target[v], receiverId, channel, traversalStack, blockRecursion);
+        (children as any)[v] = await this._encode(target[v], receiver, channel, traversalStack, blockRecursion);
       }
       out[1] = ['dict', children];
     } else if (typeof target !== 'undefined' && target instanceof Route) {
@@ -498,10 +498,10 @@ export class Telekinesis extends Function {
           this._compileSignatures, undefined, this._cacheAttributes && !blockRecursion)
       }
 
-      let route = await obj._delegate(receiverId, channel || this._channel) as Route;
+      let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
       out[1] = ['obj', [
         route.toObject(),
-        await this._encode(obj._state.toObject(this._mask), receiverId, channel, traversalStack, true)
+        await this._encode(obj._state.toObject(this._mask), receiver, channel, traversalStack, true)
       ]]
 
     }

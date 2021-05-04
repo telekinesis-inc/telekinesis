@@ -141,7 +141,7 @@ export class Connection {
         if (headers[i][0] === 'send') {
           // console.log(headers)
           let body = headers[i][1];
-          let publicKey = new PublicKey('verify', body.source.session);
+          let publicKey = new PublicKey('verify', body.source.session[0]);
 
           try {
             await publicKey.verify(signature, message.slice(64, 73 + hLen + 65 + 32))
@@ -150,7 +150,7 @@ export class Connection {
                 // console.log('ACK');
                 return
               } // Ignore ACKs
-              let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(1, 65)
+              let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(0, 64)
               await this.send(
                 [['send', { source: body.destination, destination: body.source }]],
                 undefined,
@@ -211,7 +211,7 @@ export class Connection {
 
 export class Session {
   sessionKey: PrivateKey;
-  instanceId: Uint8Array;
+  instanceId: string;
   channels: Map<string, Channel>;
   connections: Connection[];
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
@@ -220,7 +220,7 @@ export class Session {
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
-    this.instanceId = Uint8Array.from(randomBytes(6));
+    this.instanceId = b64encode(Uint8Array.from(randomBytes(6)));
     this.channels = new Map();
     this.connections = [];
     this.seenMessages = [new Set(), new Set(), 0];
@@ -292,7 +292,7 @@ export class Session {
   }
   async extendRoute(route: Route, receiver: string, maxDepth?: number) {
     let tokenHeader;
-    if (route.session === await this.sessionKey.publicSerial()) {
+    if (route.session[0] === await this.sessionKey.publicSerial()) {
       tokenHeader = await this.issueToken(route.channel, receiver, maxDepth)
     } else {
       for (var i in route.tokens) {
@@ -364,7 +364,7 @@ export class Channel {
       this.session.sessionKey.publicSerial().then(sessionId => {
         this.route = new Route(
           this.session.connections.map(c => c.brokerId) as string[],
-          sessionId as string,
+          [sessionId as string, this.session.instanceId],
           channelId as string,
           []);
         for (var i in this.initLocks) {
@@ -375,7 +375,7 @@ export class Channel {
     })
   }
   async handleMessage(source: Route, destination: Route, rawPayload: Uint8Array, proof: Uint8Array) {
-    if (await this.validateTokenChain(source.session, destination.tokens)) {
+    if (await this.validateTokenChain(source.session[0], destination.tokens)) {
       let sharedKey = new SharedKey(this.channelKey, source.channel)
       let rawChunk = new Uint8Array(
         await sharedKey.decrypt(rawPayload.slice(16,), rawPayload.slice(0, 16)) as Uint8Array
@@ -391,7 +391,7 @@ export class Channel {
       } else {
         let i = bytesToInt(rawChunk.slice(0, 2));
         let n = bytesToInt(rawChunk.slice(2, 4));
-        let mid = source.session + bytesToInt(rawChunk.slice(4, 8));
+        let mid = source.session[0] + bytesToInt(rawChunk.slice(4, 8));
         let chunk = rawChunk.slice(8);
 
         if (!this.chunks.has(mid)) {
@@ -432,8 +432,8 @@ export class Channel {
       }
     } else {
       console.error(
-        `Invalid Tokens: ${source.session.slice(0, 4)} ${source.channel.slice(0, 4)} ||| ` +
-        `${destination.session.slice(0, 4)} ${destination.channel.slice(0, 4)} ` +
+        `Invalid Tokens: ${source.session[0].slice(0, 4)} ${source.channel.slice(0, 4)} ||| ` +
+        `${destination.session[0].slice(0, 4)} ${destination.channel.slice(0, 4)} ` +
         `[${destination.tokens}]`
       );
     }
@@ -503,7 +503,7 @@ export class Channel {
         }
       }
       let sourceRoute = this.route.clone();
-      this.headerBuffer.push(await this.session.extendRoute(sourceRoute, destination.session) as Header);
+      this.headerBuffer.push(await this.session.extendRoute(sourceRoute, destination.session[0]) as Header);
       this.listen();
 
       let payload = new Uint8Array(serialize(payloadObj));
@@ -618,12 +618,12 @@ export class Channel {
 
 export class Route {
   brokers: string[];
-  session: string;
+  session: [string, string];
   channel: string;
   tokens: string[];
   _parentChannel?: Channel;
 
-  constructor(brokers: string[], session: string, channel: string, tokens: string[], parentChannel?: Channel) { // 
+  constructor(brokers: string[], session: [string, string], channel: string, tokens: string[], parentChannel?: Channel) { // 
     this.brokers = brokers;
     this.session = session;
     this.channel = channel;
@@ -655,7 +655,7 @@ export class Route {
       }
     }
   }
-  static fromObject(obj: { brokers: string[], session: string, channel: string, tokens: string[] }) {
+  static fromObject(obj: { brokers: string[], session: [string, string], channel: string, tokens: string[] }) {
     return new Route(obj.brokers, obj.session, obj.channel, obj.tokens)
   }
 }

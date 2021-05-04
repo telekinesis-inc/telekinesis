@@ -243,34 +243,34 @@ class Broker:
         self.logger.info(
             "%s: send %s %s ??? %s ??? %s %s",
             self.broker_key.public_serial()[:4],
-            source["session"][:4],
+            source["session"][0][:4],
             source["channel"][:4],
             str(len(message) // 2 ** 10),
-            destination["session"][:4],
+            destination["session"][0][:4],
             destination["channel"][:4],
         )
         s = Route(**source)
         d = Route(**destination)
 
-        dest_session = self.sessions.get(d.session)
+        dest_session = self.sessions.get(d.session[0])
         if dest_session:
             dest_channel = await dest_session.expect_channel(d.channel)
 
             if dest_session.channels.get(d.channel):
-                if await dest_channel.validate_token_chain(s.session, d.tokens, self):
+                if await dest_channel.validate_token_chain(s.session[0], d.tokens, self):
                     self.logger.info(
                         "%s: send %s %s >>> %s >>> %s %s",
                         self.broker_key.public_serial()[:4],
-                        source["session"][:4],
+                        source["session"][0][:4],
                         source["channel"][:4],
                         str(len(message) // 2 ** 10),
-                        destination["session"][:4],
+                        destination["session"][0][:4],
                         destination["channel"][:4],
                     )
-                    if connection.session.session_id != s.session:
+                    if connection.session.session_id != s.session[0]:
                         try:
                             len_h = int.from_bytes(message[68:70], "big")
-                            PublicKey(s.session).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
+                            PublicKey(s.session[0]).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
                         except InvalidSignature:
                             return
 
@@ -281,10 +281,10 @@ class Broker:
                     self.logger.info(
                         "%s: send %s %s ||| %s ||| %s %s",
                         self.broker_key.public_serial()[:4],
-                        source["session"][:4],
+                        source["session"][0][:4],
                         source["channel"][:4],
                         str(len(message) // 2 ** 10),
-                        destination["session"][:4],
+                        destination["session"][0][:4],
                         destination["channel"][:4],
                     )
             else:
@@ -310,10 +310,10 @@ class Broker:
                             self.logger.info(
                                 "%s: send %s %s ))) %s ))) %s %s (%s)",
                                 self.broker_key.public_serial()[:4],
-                                source["session"][:4],
+                                source["session"][0][:4],
                                 source["channel"][:4],
                                 str(len(message) // 2 ** 10),
-                                destination["session"][:4],
+                                destination["session"][0][:4],
                                 destination["channel"][:4],
                                 broker_id[:4],
                             )
@@ -332,7 +332,7 @@ class Broker:
                 )
 
     def handle_listen(self, connection, session, channel, brokers, is_public=False):
-        if session == connection.session.session_id:
+        if session[0] == connection.session.session_id:
             self.logger.info(
                 "%s: listen %s %s %s",
                 self.broker_key.public_serial()[:4],
@@ -353,7 +353,7 @@ class Broker:
                 event.set()
 
     def handle_close(self, connection, session, channel, **kwargs):
-        if session == connection.session.session_id:
+        if session[0] == connection.session.session_id:
             self.logger.info(
                 "%s: close %s %s",
                 self.broker_key.public_serial()[:4],

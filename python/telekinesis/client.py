@@ -1,3 +1,4 @@
+import base64
 import logging
 import time
 import os
@@ -215,11 +216,11 @@ class Connection:
             for action, content in header:
                 if action == "send":
                     source, destination = Route(**content["source"]), Route(**content["destination"])
-                    PublicKey(source.session).verify(signature, message[64 : 73 + len_h + 65 + 32])
+                    PublicKey(source.session[0]).verify(signature, message[64 : 73 + len_h + 65 + 32])
                     if self.session.channels.get(destination.channel):
                         channel = self.session.channels.get(destination.channel)
                         if full_payload[0] == 255:
-                            self.ack(source.session, full_payload[1:65])
+                            self.ack(source.session[0], full_payload[1:65])
                         else:
                             ret_signature = signature if (full_payload[0] == 0) else full_payload[1:65]
                             payload = full_payload[65 + 32 :]
@@ -243,7 +244,7 @@ class Connection:
         header = self.awaiting_ack.get(message_id, [[]])[0]
         for action, content in header:
             if action == "send":
-                if content["destination"]["session"] == source_id:
+                if content["destination"]["session"][0] == source_id:
                     t = self.awaiting_ack.pop(message_id)
                     t[2].set()
                     if self.awaiting_ack:
@@ -268,7 +269,7 @@ class Connection:
 class Session:
     def __init__(self, session_key_file=None):
         self.session_key = PrivateKey(session_key_file)
-        self.instance_id = os.urandom(6)
+        self.instance_id = base64.b64encode(os.urandom(6)).decode()
         self.channels = {}
         self.targets = {}
         self.connections = set()
@@ -336,7 +337,7 @@ class Session:
 
     def extend_route(self, route, receiver, max_depth=None):
 
-        if route.session == self.session_key.public_serial():
+        if route.session[0] == self.session_key.public_serial():
             token_header = self.issue_token(route.channel, receiver, max_depth)
             route.tokens = [token_header[1][1]]
             return token_header
@@ -371,7 +372,7 @@ class Channel:
         self.is_public = is_public
         self.route = Route(
             list(set(c.broker_id for c in self.session.connections)),
-            self.session.session_key.public_serial(),
+            (self.session.session_key.public_serial(), self.session.instance_id),
             self.channel_key.public_serial(),
         )
         self.header_buffer = []
@@ -383,7 +384,7 @@ class Channel:
         self.telekinesis = None
 
     def handle_message(self, source, destination, raw_payload, proof):
-        if self.validate_token_chain(source.session, destination.tokens):
+        if self.validate_token_chain(source.session[0], destination.tokens):
             message_tuple = None
             shared_key = SharedKey(self.channel_key, PublicKey(source.channel))
             payload = shared_key.decrypt(raw_payload[16:], raw_payload[:16])
@@ -402,7 +403,7 @@ class Channel:
                 ir, nr, mmid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
                 i, n = int.from_bytes(ir, "big"), int.from_bytes(nr, "big")
 
-                mid = source.session.encode() + mmid
+                mid = source.session[0].encode() + mmid
                 if mid not in self.chunks:
                     self.chunks[mid] = {}
                 self.chunks[mid][i] = (chunk, metadata)
@@ -430,9 +431,9 @@ class Channel:
         else:
             self.session.logger.error(
                 "Invalid Tokens: %s %s -> %s %s [%s]",
-                source.session[:4],
+                source.session[0][:4],
                 source.channel[:4],
-                destination.session[:4],
+                destination.session[0][:4],
                 destination.channel[:4],
                 destination.tokens,
             )
@@ -473,7 +474,7 @@ class Channel:
                 await self.execute(header, encrypted_slice, mid)
 
         source_route = self.route.clone()
-        self.header_buffer.append(self.session.extend_route(source_route, destination.session))
+        self.header_buffer.append(self.session.extend_route(source_route, destination.session[0]))
         self.listen()
 
         payload = bson.dumps(payload_obj)
@@ -591,7 +592,7 @@ class Route:
                 assert token.receiver == receiver
 
     def __repr__(self):
-        return f"Route {self.session[:4]} {self.channel[:4]}"
+        return f"Route {self.session[0][:4]} {self.channel[:4]}"
 
     def __eq__(self, route):
         return self.to_dict() == route.to_dict()

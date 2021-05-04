@@ -249,7 +249,7 @@ class Telekinesis:
             elif "ping" in payload:
                 await channel.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
-                pipeline = self._decode(payload.get("pipeline"), metadata.caller.session)
+                pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
@@ -424,7 +424,7 @@ class Telekinesis:
                 raise Exception(response["error"])
 
             if "return" in response:
-                ret = self._decode(response["return"], self._target.session)
+                ret = self._decode(response["return"], self._target.session[0])
                 return ret
 
             if "repr" not in response:
@@ -443,7 +443,7 @@ class Telekinesis:
     async def _forward(self, pipeline, reply_to=None):
         async with Channel(self._session) as new_channel:
             if reply_to:
-                token_header = self._session.extend_route(reply_to, self._target.session)
+                token_header = self._session.extend_route(reply_to, self._target.session[0])
                 new_channel.header_buffer.append(token_header)
             return await self._send_request(
                 new_channel,
@@ -482,7 +482,7 @@ class Telekinesis:
         if self._parent is None:
             self._session.pending_tasks.add(asyncio.get_event_loop().create_task(self._close()))
 
-    def _encode(self, target, receiver_id=None, channel=None, traversal_stack=None, block_recursion=False):
+    def _encode(self, target, receiver=None, channel=None, traversal_stack=None, block_recursion=False):
         if traversal_stack is None:
             i = 0
             traversal_stack = {}
@@ -494,8 +494,8 @@ class Telekinesis:
         traversal_stack[id(target)] = [i, None, target]
         # ..  keep a copy of the target so it doesn't get garbage collected - which messes up the id()
 
-        if receiver_id is None:
-            receiver_id = self._session.session_key.public_serial()
+        if receiver is None:
+            receiver = (self._session.session_key.public_serial(), self._session.instance_id)
 
         if type(target) in (int, float, str, bytes, bool, type(None)):
             tup = (type(target).__name__, target)
@@ -504,12 +504,12 @@ class Telekinesis:
         elif type(target) in (list, tuple, set):
             tup = (
                 type(target).__name__,
-                [self._encode(v, receiver_id, channel, traversal_stack, block_recursion) for v in target],
+                [self._encode(v, receiver, channel, traversal_stack, block_recursion) for v in target],
             )
         elif type(target) == dict:
             tup = (
                 "dict",
-                {x: self._encode(target[x], receiver_id, channel, traversal_stack, block_recursion) for x in target},
+                {x: self._encode(target[x],receiver, channel, traversal_stack, block_recursion) for x in target},
             )
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
@@ -527,12 +527,12 @@ class Telekinesis:
                     cache_attributes=not block_recursion and self._cache_attributes,
                 )
 
-            route = obj._delegate(receiver_id, channel or self._channel)
+            route = obj._delegate(receiver[0], channel or self._channel)
             tup = (
                 "obj",
                 (
                     route.to_dict(),
-                    self._encode(obj._state.to_dict(self._mask), receiver_id, channel, traversal_stack, block_recursion=True),
+                    self._encode(obj._state.to_dict(self._mask), receiver, channel, traversal_stack, block_recursion=True),
                 ),
             )
 
