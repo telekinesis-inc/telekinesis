@@ -268,6 +268,7 @@ class Connection:
 class Session:
     def __init__(self, session_key_file=None):
         self.session_key = PrivateKey(session_key_file)
+        self.instance_id = os.urandom(6)
         self.channels = {}
         self.targets = {}
         self.connections = set()

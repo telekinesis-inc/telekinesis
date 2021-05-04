@@ -1,7 +1,8 @@
 import { deserialize, serialize } from "bson";
+import { randomBytes } from "crypto";
 import { deflate, inflate } from 'zlib';
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
-import { bytesToInt, intToBytes } from "./helpers";
+import { bytesToInt, intToBytes, b64encode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
 
 const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
@@ -210,6 +211,7 @@ export class Connection {
 
 export class Session {
   sessionKey: PrivateKey;
+  instanceId: Uint8Array;
   channels: Map<string, Channel>;
   connections: Connection[];
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
@@ -218,6 +220,7 @@ export class Session {
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
+    this.instanceId = Uint8Array.from(randomBytes(6));
     this.channels = new Map();
     this.connections = [];
     this.seenMessages = [new Set(), new Set(), 0];
