@@ -191,19 +191,19 @@ class Telekinesis:
 
         return self
 
-    def _delegate(self, receiver_id, parent_channel=None):
+    def _delegate(self, receiver, parent_channel=None):
         token_header = []
         extend_route = True
 
         if isinstance(self._target, Route):
             route = self._target.clone()
             max_delegation_depth = None
-            if receiver_id == "*":
+            if isinstance(receiver, str) and receiver == "*":
                 raise Exception("Cannot delegate remote Channel to public.")
 
         else:
             if not self._channel:
-                self._channel = Channel(self._session, is_public=receiver_id == "*")
+                self._channel = Channel(self._session, is_public=isinstance(receiver, str) and receiver == "*")
                 self._channel.telekinesis = self
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
@@ -212,13 +212,19 @@ class Telekinesis:
 
             max_delegation_depth = self._max_delegation_depth
             route = self._channel.route
-            if receiver_id == "*" and not self._channel.is_public:
+            if isinstance(receiver, str) and receiver == "*" and not self._channel.is_public:
                 self._channel.is_public = True
                 self._channel.listen()
                 token_header += [self._channel.header_buffer.pop()]
 
         if extend_route:
-            token_header += [self._session.extend_route(route, receiver_id, max_delegation_depth)]
+            token_header += [
+                self._session.extend_route(route, receiver[0] if isinstance(receiver, tuple) else receiver, max_delegation_depth)
+            ]
+            if (route.session, route.channel) in self._session.routes:
+                self._session.routes[(route.session, route.channel)]["delegations"].add(
+                    receiver if isinstance(receiver, tuple) else (receiver, None)
+                )
 
         route._parent_channel = parent_channel or self._channel
         [route._parent_channel.header_buffer.append(th) for th in token_header]
@@ -250,12 +256,15 @@ class Telekinesis:
         try:
             if metadata.caller.session not in self._clients:
                 self._clients[metadata.caller.session] = {"last_state": None, "cache_attributes": None}
+                self._clients.pop((metadata.caller.session[0], None), None)
 
             if "close" in payload:
                 self._clients.pop(metadata.caller.session, None)
                 for delegation in payload["close"]:
                     if delegation not in self._clients:
                         self._clients[delegation] = {"last_state": None, "cache_attributes": None}
+                        if delegation[1] is not None:
+                            self._clients.pop((delegation[0], None), None)
                 if not self._clients and not self._channel.is_public:
                     await self._close()
             elif "ping" in payload:
@@ -562,6 +571,8 @@ class Telekinesis:
                 )
                 if receiver not in obj._clients:
                     obj._clients[receiver] = {"last_state": None, "cache_attributes": None}
+                    if receiver[1] is not None:
+                        obj._clients.pop((receiver[0], None), None)
 
             route = obj._delegate(receiver[0], channel or self._channel)
             tup = (
