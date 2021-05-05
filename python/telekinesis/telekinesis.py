@@ -111,7 +111,6 @@ class Telekinesis:
         parent=None,
         cache_attributes=False,
     ):
-
         self._logger = logging.getLogger(__name__)
         self._target = target
         self._session = session
@@ -122,13 +121,19 @@ class Telekinesis:
         self._parent = parent
         self._cache_attributes = cache_attributes
         self._channel = None
+        self._clients = {}
         self._on_update_callback = None
         self._subscription = None
         self._subscribers = set()
         self._state = None
 
         if isinstance(target, Route):
-            self._state = State()
+            self._update_state(State())
+            if parent is None:
+                if (target.session, target.channel) not in session.routes:
+                    session.routes[(target.session, target.channel)] = {"refcount": 0, "delegations": set()}  # state
+                session.routes[(target.session, target.channel)]["refcount"] += 1
+
         else:
             session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
             self._update_state(State.from_object(target, cache_attributes))
@@ -243,9 +248,16 @@ class Telekinesis:
         pipeline = None
         reply_to = None
         try:
+            if metadata.caller.session not in self._clients:
+                self._clients[metadata.caller.session] = {"last_state": None, "cache_attributes": None}
+
             if "close" in payload:
-                # await channel.close()
-                pass
+                self._clients.pop(metadata.caller.session, None)
+                for delegation in payload["close"]:
+                    if delegation not in self._clients:
+                        self._clients[delegation] = {"last_state": None, "cache_attributes": None}
+                if not self._clients and not self._channel.is_public:
+                    await self._close()
             elif "ping" in payload:
                 await channel.channel.send(metadata.caller, {"repr": self._state.repr, "timestamp": self._state.last_change})
             elif "pipeline" in payload:
@@ -312,7 +324,15 @@ class Telekinesis:
             self._session.targets[old_id].remove(self)
             if not self._session.targets[old_id]:
                 self._session.targets.pop(old_id)
-            if not isinstance(self._target, Route):
+            if isinstance(self._target, Route):
+                if self._parent is None:
+                    if (self._target.session, self._target.channel) not in self._session.routes:
+                        self._session.routes[(self._target.session, self._target.channel)] = {
+                            "refcount": 0,
+                            "delegations": set(),
+                        }  # state
+                    self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
+            else:
                 self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(
                     set((self,))
                 )
@@ -345,8 +365,16 @@ class Telekinesis:
                 )
             ):
                 new_state = target._state.clone()
-                target = Telekinesis(target._target, target._session, target._mask, target._expose_tb, target._max_delegation_depth, target._compile_signatures,
-                    target._parent, target._cache_attributes)
+                target = Telekinesis(
+                    target._target,
+                    target._session,
+                    target._mask,
+                    target._expose_tb,
+                    target._max_delegation_depth,
+                    target._compile_signatures,
+                    target._parent,
+                    target._cache_attributes,
+                )
                 target._state = new_state
                 target._state.pipeline += pipeline[i:]
                 break
@@ -374,9 +402,9 @@ class Telekinesis:
                 if asyncio.iscoroutine(target):
                     target = await target
                 if (
-                    isinstance(target, Telekinesis) 
+                    isinstance(target, Telekinesis)
                     and isinstance(target._target, Route)
-                    and target._state.pipeline 
+                    and target._state.pipeline
                     and not break_on_telekinesis
                 ):
                     target = await target._execute()
@@ -433,9 +461,15 @@ class Telekinesis:
     async def _close(self):
         try:
             if isinstance(self._target, Route):
-                async with Channel(self._session) as new_channel:
-                    await new_channel.send(self._target, {"close": True})
+                self._session.routes[(self._target.session, self._target.channel)]["refcount"] -= 1
+                if self._session.routes[(self._target.session, self._target.channel)]["refcount"] <= 0:
+                    o = self._session.routes.pop((self._target.session, self._target.channel))
+                    async with Channel(self._session) as new_channel:
+                        await new_channel.send(self._target, {"close": list(o["delegations"])})
             else:
+                self._session.targets[id(self._target)].remove(self)
+                if not self._session.targets[id(self._target)]:
+                    self._session.targets.pop(id(self._target))
                 self._channel and await self._channel.close()
         except Exception:
             self._session.logger("Error closing Telekinesis Object: %s", self._target, exc_info=True)
@@ -509,7 +543,7 @@ class Telekinesis:
         elif type(target) == dict:
             tup = (
                 "dict",
-                {x: self._encode(target[x],receiver, channel, traversal_stack, block_recursion) for x in target},
+                {x: self._encode(target[x], receiver, channel, traversal_stack, block_recursion) for x in target},
             )
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
@@ -526,6 +560,8 @@ class Telekinesis:
                     self._compile_signatures,
                     cache_attributes=not block_recursion and self._cache_attributes,
                 )
+                if receiver not in obj._clients:
+                    obj._clients[receiver] = {"last_state": None, "cache_attributes": None}
 
             route = obj._delegate(receiver[0], channel or self._channel)
             tup = (
@@ -599,9 +635,16 @@ class Telekinesis:
             elif self._parent and (
                 ("__call__" not in self._state.methods) or (self._state.methods["__call__"] == state.methods.get("__call__"))
             ):
+
                 self._target = route
                 self._update_state(state)
                 self._parent = None
+                if (self._target.session, self._target.channel) not in self._session.routes:
+                    self._session.routes[(self._target.session, self._target.channel)] = {
+                        "refcount": 0,
+                        "delegations": set(),
+                    }  # state
+                self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
                 out = self
             else:
                 out = Telekinesis._from_state(
@@ -711,9 +754,7 @@ class Telekinesis:
             if "__setitem__" in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
-        out = Telekinesis_(
-            target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes
-        )
+        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes)
         out._update_state(state)
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 

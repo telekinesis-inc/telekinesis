@@ -272,6 +272,7 @@ class Session:
         self.instance_id = base64.b64encode(os.urandom(6)).decode()
         self.channels = {}
         self.targets = {}
+        self.routes = {}
         self.connections = set()
         self.seen_messages = [set(), set(), 0]
         self.issued_tokens = {}
@@ -461,9 +462,7 @@ class Channel:
                 else:
                     if n > 2 ** 16:
                         raise Exception(f"Payload size {len(payload)/2**20} MiB is too large")
-                    chunk = (
-                        i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload : (i + 1) * max_payload]
-                    )
+                    chunk = i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload : (i + 1) * max_payload]
 
                 nonce = os.urandom(16)
                 yield nonce + shared_key.encrypt(chunk, nonce)
@@ -570,7 +569,7 @@ class Channel:
 class Route:
     def __init__(self, brokers, session, channel, tokens=None, parent_channel=None):
         self.brokers = brokers
-        self.session = session
+        self.session = tuple(session)
         self.channel = channel
         self.tokens = tokens or []
         self._parent_channel = parent_channel
