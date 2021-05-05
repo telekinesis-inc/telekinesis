@@ -84,6 +84,7 @@ export class Telekinesis extends Function {
   _state: State;
 
   _channel?: Channel;
+  _clients?: Map<[string, string|null], any>;
   _onUpdateCallback?: any;
   _subscription?: Telekinesis;
   _subscribers: Set<Telekinesis>;
@@ -146,6 +147,15 @@ export class Telekinesis extends Function {
     });
     if (target instanceof Route) {
       this._state = new State();
+      if (parent === undefined) {
+        if (!session.routes.has([target.session, target.channel])) {
+          session.routes.set([target.session, target.channel], {refcount: 0, delegations: new Set<[string, string|null]>()});
+        }
+        const o = this._session.routes.get([target.session, target.channel])
+        if (o != undefined) {
+          o.refcount += 1;
+        }
+      }
     } else {
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
       this._state = State.fromTarget(target, cacheAttributes);
@@ -168,7 +178,7 @@ export class Telekinesis extends Function {
     this._state = state;
     this._onUpdateCallback && this._onUpdateCallback(this);
   }
-  async _delegate(receiverId: string, parentChannel?: Channel) {
+  async _delegate(receiver: string | [string, string], parentChannel?: Channel) {
     let route: Route;
     let maxDelegationDepth = this._maxDelegationDepth;
     let extendRoute = true;
@@ -177,15 +187,15 @@ export class Telekinesis extends Function {
     if (this._target instanceof Route) {
       route = this._target.clone();
       maxDelegationDepth = undefined;
-      if (receiverId === '*') {
+      if (receiver === '*') {
         throw "Cannot delegate remote Route to public '*'";
       }
     } else {
-      if (this._channel === undefined || (this._channel && this._channel.isPublic && receiverId == '*')) {
+      if (this._channel === undefined || (this._channel?.isPublic && receiver === '*')) {
         if (this._channel) {
           this._channel.isPublic = true;
         } else {
-          this._channel = await (new Channel(this._session, undefined, receiverId === '*') as any) as Channel;
+          this._channel = await (new Channel(this._session, undefined, receiver === '*') as any) as Channel;
           this._channel.telekinesis = this;
         }
         this._channel.listen();
@@ -198,10 +208,13 @@ export class Telekinesis extends Function {
     }
 
     if (extendRoute) {
-      tokenHeaders.push(await this._session.extendRoute(route, receiverId, maxDelegationDepth) as Header);
+      tokenHeaders.push(await this._session.extendRoute(route, receiver instanceof Array ? receiver[0] : receiver, maxDelegationDepth) as Header);
+      if (this._session.routes.has([route.session, route.channel])) {
+        this._session.routes.get([route.session, route.channel]).add(receiver instanceof Array ? receiver : [receiver, null]);
+      }
     }
     route._parentChannel = parentChannel || this._channel;
-    route._parentChannel && route._parentChannel.headerBuffer.push(...tokenHeaders);
+    route._parentChannel?.headerBuffer.push(...tokenHeaders);
 
 
     return route;
@@ -223,8 +236,24 @@ export class Telekinesis extends Function {
     let replyTo;
 
     try {
+      if (this._clients && !this._clients.has(metadata.caller.session)) {
+        this._clients.set(metadata.caller.session, {lastState: null, cacheAttributes: null });
+        this._clients.delete([metadata.caller.session[0], null]);
+      }
       if ((payload as any)['close'] !== undefined) {
-        // await channel.close();
+        this._clients?.delete(metadata.caller.session);
+        for (const delegation of ((payload as any)['close'] as Array<[string, string|null]>)) {
+          if (this._clients && !this._clients.has(delegation)) {
+            this._clients.set(delegation, {lastState: null, cacheAttributes: null});
+            if (delegation[1] !== null) {
+              this._clients.delete([delegation[0], null]);
+            }
+          }
+        }
+        if ((this._clients?.size == 0) && (this._channel?.isPublic === false)) {
+          await this._close();
+        }
+
       } else if ((payload as any)['ping'] !== undefined) {
         await channel.send(metadata.caller, { repr: this._state.repr, timestamp: this._state.lastChange })
       } else if ((payload as any)['pipeline'] !== undefined) {
@@ -304,7 +333,17 @@ export class Telekinesis extends Function {
       if (!set.size) {
         this._session.targets.delete(oldTarget)
       }
-      if (!(this._target instanceof Route)) {
+      if (this._target instanceof Route) {
+        if (this._parent === undefined) {
+          if (!this._session.routes.has([this._target.session, this._target.channel])) {
+            this._session.routes.set([this._target.session, this._target.channel], {refcount: 0, delegations: new Set<[string, string|null]>()});
+          }
+          const o = this._session.routes.get([this._target.session, this._target.channel])
+          if (o != undefined) {
+            o.refcount += 1;
+          }
+        }
+      } else {
         this._session.targets.set(this._target, (this._session.targets.get(this._target) || new Set()).add(this._proxy))
       }
     }
@@ -420,7 +459,7 @@ export class Telekinesis extends Function {
       if (Object.getOwnPropertyNames(response).includes('return')) {
         // console.log((response as any)['return'])
         let out = this._decode((response as any)['return'], (this._target as Route).session[0])
-        if (out && out._isTelekinesisObject === true) {
+        if (out?._isTelekinesisObject === true) {
           out._lastUpdate = Date.now();
           out._blockThen = true;
         }
@@ -429,6 +468,28 @@ export class Telekinesis extends Function {
       } else if (Object.getOwnPropertyNames(response).includes('error')) {
         throw (response as any).error;
       }
+    }
+  }
+  async _close() {
+    try {
+      if (this._target instanceof Route) {
+        const o = this._session.routes.get([this._target.session, this._target.channel]);
+        if (o.refcount !== undefined) {
+          o.refcount -= 0;
+          if (o.refcount <= 0) {
+            const newChannel = new Channel(this._session);
+            await newChannel.send(this._target, {close: Array.from(o.delegations) || []})
+          }
+        }
+      } else {
+        this._session.targets.get(this._target)?.delete(this);
+        if (this._session.targets.get(this._target)?.size === 0) {
+          this._session.targets.delete(this._target);
+        }
+        await this._channel?.close();
+      }
+    } catch(e) {
+      console.error(e)
     }
   }
   async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route) {
@@ -441,7 +502,7 @@ export class Telekinesis extends Function {
       return await this._sendRequest(
         newChannel,
         {
-          reply_to: replyTo && replyTo.toObject(),
+          reply_to: replyTo?.toObject(),
           pipeline: await this._encode(pipeline, (this._target as Route).session, newChannel)
         }
       )
@@ -496,6 +557,14 @@ export class Telekinesis extends Function {
       } else {
         obj = Telekinesis._reuse(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth,
           this._compileSignatures, undefined, this._cacheAttributes && !blockRecursion)
+      }
+      if (!(target._target instanceof Route)) {
+        if (obj._clients?.has(receiver) === false) {
+          obj._clients?.set(receiver, {lastState: null, cacheAttributes: null});
+        }
+        if (receiver[1] !== null) {
+          obj._clients?.delete([receiver[0], null]);
+        }
       }
 
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
@@ -571,10 +640,17 @@ export class Telekinesis extends Function {
         let route = Route.fromObject(obj[0]);
         let state = State.fromObject(this._decode(inputStack, callerId, obj[1], outputStack));
 
-        if (this._parent) {
+        if (this._parent ) {
           this._target = route;
           this._updateState(state);
           this._parent = undefined;
+          if (!this._session.routes.has([route.session, route.channel])) {
+            this._session.routes.set([route.session, route.channel], {refcount: 0, delegations: new Set<[string, string|null]>()})
+          }
+          const o = this._session.routes.get([route.session, route.channel])
+          if (o != undefined) {
+            o.refcount += 1;
+          }
           out = this._proxy;
         } else {
           out = Telekinesis._fromState(

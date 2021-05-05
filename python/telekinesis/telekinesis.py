@@ -569,6 +569,7 @@ class Telekinesis:
                     self._compile_signatures,
                     cache_attributes=not block_recursion and self._cache_attributes,
                 )
+            if not isinstance(obj._target, Route):
                 if receiver not in obj._clients:
                     obj._clients[receiver] = {"last_state": None, "cache_attributes": None}
                     if receiver[1] is not None:

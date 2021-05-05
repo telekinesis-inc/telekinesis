@@ -216,7 +216,8 @@ export class Session {
   connections: Connection[];
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
   issuedTokens: Map<string, [Token, Token?]>;
-  targets: Map<any, Set<Telekinesis>>
+  targets: Map<any, Set<Telekinesis>>;
+  routes: Map<[[string, string], string], any>;
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
@@ -226,6 +227,7 @@ export class Session {
     this.seenMessages = [new Set(), new Set(), 0];
     this.issuedTokens = new Map();
     this.targets = new Map();
+    this.routes = new Map();
   }
   checkNoRepeat(signature: Uint8Array, timestamp: number) {
     let now = Date.now() / 1000;
