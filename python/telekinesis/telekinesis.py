@@ -23,11 +23,11 @@ class State:
         self.last_change = last_change
         self.history = {}
 
-    def to_dict(self, mask=None):
+    def to_dict(self, mask=None, cache_attributes=False):
         mask = mask or set()
         return {
             "attributes": {k: v for k, v in self.attributes.items() if k not in mask}
-            if isinstance(self.attributes, dict)
+            if cache_attributes and isinstance(self.attributes, dict)
             else [k for k in self.attributes if k not in mask],
             "methods": {k: v for k, v in self.methods.items() if k not in mask},
             "pipeline": self.pipeline,
@@ -37,13 +37,13 @@ class State:
         }
 
     def clone(self):
-        return State(**self.to_dict())
+        return State(**self.to_dict(None, True))
 
     @staticmethod
-    def from_object(target, cache_attributes):
+    def from_object(target):
         logger = logging.getLogger(__name__)
 
-        attributes, methods, repr_ = {} if cache_attributes else [], {}, ""
+        attributes, methods, repr_ = {}, {}, ""
 
         for attribute_name in dir(target):
             if attribute_name[0] != "_" or attribute_name in [
@@ -81,10 +81,7 @@ class State:
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
-                        if cache_attributes:
-                            attributes[attribute_name] = target_attribute
-                        else:
-                            attributes.append(attribute_name)
+                        attributes[attribute_name] = target_attribute
 
                 except Exception as e:
                     logger.error("Could not obtain handle for %s.%s: %s", target, attribute_name, e)
@@ -136,7 +133,7 @@ class Telekinesis:
 
         else:
             session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
-            self._update_state(State.from_object(target, cache_attributes))
+            self._update_state(State.from_object(target))
 
     def __getattribute__(self, attr):
         if attr[0] == "_":
@@ -431,9 +428,9 @@ class Telekinesis:
                 tk._subscribers.add(arg)
 
         for tk in touched:
-            tk._update_state(State.from_object(tk._target, tk._cache_attributes))
+            tk._update_state(State.from_object(tk._target))
             if tk and tk._subscribers:
-                state_obj = State.from_object(tk._target, True).to_dict(tk._mask)
+                state_obj = State.from_object(tk._target).to_dict(tk._mask, True)
                 for s in tk._subscribers:
                     asyncio.create_task(s(state_obj)._execute())
 
