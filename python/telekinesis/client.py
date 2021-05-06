@@ -581,14 +581,25 @@ class Route:
         return Route(**self.to_dict())
 
     def validate_token_chain(self, receiver):
-        assert len(self.tokens) > 0
-        for i, raw_token in enumerate(self.tokens):
-            token = Token.decode(raw_token)
-            if i == 0:
-                assert token.asset == self.channel
-                assert token.token_type == "root"
-            if i == (len(self.tokens) - 1):
-                assert token.receiver == receiver
+        if self.session[0] != receiver:
+            assert len(self.tokens) > 0
+            prev_token = None
+            for i, raw_token in enumerate(self.tokens):
+                token = Token.decode(raw_token)
+                if i == 0:
+                    assert token.asset == self.channel
+                    assert token.issuer == self.session[0]
+                    assert token.token_type == "root"
+                else:
+                    assert token.asset == prev_token.signature
+                    assert token.issuer == prev_token.receiver
+                    assert token.token_type == "extension"
+                if token.receiver == receiver:
+                    break
+                prev_token = token
+            else:
+                return False
+        return True
 
     def __repr__(self):
         return f"Route {self.session[0][:4]} {self.channel[:4]}"
