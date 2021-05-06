@@ -20,12 +20,15 @@ export class State {
     this.lastChange = lastChange;
   }
 
-  toObject(mask?: Set<string>) {
+  toObject(mask?: Set<string>, cacheAttributes: boolean = false) {
     mask = mask || new Set<string>();
     return {
       attributes: this.attributes instanceof Map ?
-        Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
-          .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
+        (cacheAttributes ?
+          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
+            .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
+          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)) 
+        ) :
         this.attributes.filter(v => !(mask as Set<string>).has(v)),
       methods: Array.from(this.methods.keys()).filter(v => !(mask as Set<string>).has(v))
         .reduce((p: any, v: string) => { p[v] = this.methods.get(v); return p }, {}),
@@ -36,7 +39,7 @@ export class State {
     }
   }
   clone() {
-    return State.fromObject(this.toObject());
+    return State.fromObject(this.toObject(undefined, true));
   }
   static fromObject(obj: any) {
     return new State(
@@ -50,13 +53,11 @@ export class State {
     );
   }
 
-  static fromTarget(target: Object, cacheAttributes: boolean) {
+  static fromTarget(target: Object) {
     let state = State.fromObject({
-      attributes: cacheAttributes ?
-        Object.getOwnPropertyNames(target)
+      attributes: Object.getOwnPropertyNames(target)
           .filter(x => x[0] !== '_')
-          .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}) :
-        Object.getOwnPropertyNames(target).filter(x => x[0] !== '_'),
+          .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
         .reduce((p, v) => { (p as any)[v] = ['(*args)', (target as any)[v].toString()]; return p }, {}),
@@ -158,7 +159,7 @@ export class Telekinesis extends Function {
       }
     } else {
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
-      this._state = State.fromTarget(target, cacheAttributes);
+      this._state = State.fromTarget(target);
     }
     return this._proxy;
   }
@@ -433,11 +434,11 @@ export class Telekinesis extends Function {
     }
 
     for (const tk of touched) {
-      tk._state = State.fromTarget(tk._target, this._cacheAttributes);
+      tk._state = State.fromTarget(tk._target);
 
       const subscribers = Array.from(tk._subscribers)
       if (subscribers) {
-        const state = State.fromTarget(tk._target, true).toObject(tk._mask)
+        const state = State.fromTarget(tk._target).toObject(tk._mask, true)
         subscribers.map((s: Telekinesis) => s(state)._execute())
       }
     }
@@ -570,7 +571,7 @@ export class Telekinesis extends Function {
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
       out[1] = ['obj', [
         route.toObject(),
-        await this._encode(obj._state.toObject(this._mask), receiver, channel, traversalStack, true)
+        await this._encode(obj._state.toObject(this._mask, obj._cacheAttributes), receiver, channel, traversalStack, true)
       ]]
 
     }
