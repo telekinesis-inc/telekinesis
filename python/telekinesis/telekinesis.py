@@ -411,16 +411,21 @@ class Telekinesis:
                 ):
                     target = await target._execute()
             if action == "subscribe":
-                tk = Telekinesis._reuse(
-                    target,
-                    self._session,
-                    self._mask,
-                    self._expose_tb,
-                    self._max_delegation_depth,
-                    self._compile_signatures,
-                    None,
-                )
-                tk._subscribers.add(arg)
+                if arg._target.validate_token_chain(metadata.caller.session[0]):
+                    tk = Telekinesis._reuse(
+                        target,
+                        self._session,
+                        self._mask,
+                        self._expose_tb,
+                        self._max_delegation_depth,
+                        self._compile_signatures,
+                        None,
+                    )
+                    if arg._target.session not in tk._clients:
+                        tk._clients[arg._target.session] = {"last_state": None, "cache_attributes": None}
+                        tk._clients.pop((arg._target.session[0], None), None)
+                    tk._clients[arg._target.session]["cache_attributes"] = True 
+                    tk._subscribers.add(arg)
 
         for tk in touched:
             tk._update_state(State.from_object(tk._target))

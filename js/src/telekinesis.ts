@@ -424,10 +424,21 @@ export class Telekinesis extends Function {
           target = await target._execute();
         }
       } else if (action === 'subscribe') {
-        const tk = Telekinesis._reuse(
-          target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
-        )
-        tk._subscribers.add(pipeline[step][1] as Telekinesis)
+        const cb = pipeline[step][1] as Telekinesis;
+        const r = cb._target as Route;
+        if (metadata && r.validateTokenChain(metadata.caller.session[0])) {
+          const tk = Telekinesis._reuse(
+            target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+          )
+          if (tk._clients && !tk._clients.has(r.session)) {
+            tk._clients.set(r.session, {lastState: null, cacheAttributes: null });
+            tk._clients.delete([r.session[0], null]);
+          }
+          const o = tk._clients?.get(r.session);
+          o.cacheAttributes = true;
+          tk._subscribers.add(cb);
+
+        }
       }
     }
 
