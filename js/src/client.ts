@@ -644,18 +644,27 @@ export class Route {
     return Route.fromObject(this.toObject());
   }
   async validateTokenChain(receiver: string) {
-    if (!(this.tokens.length > 0)) {
-      throw 'Invalid token chain';
-    }
-    for (let i in this.tokens) {
-      let token = await Token.decode(this.tokens[i]) as Token;
-      if (
-        (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root'))) ||
-        (i === (this.tokens.length - 1).toString()) && (!(token.receiver === receiver))
-      ) {
+    if (this.session[0] !== receiver) {
+      if (!(this.tokens.length > 0)) {
         throw 'Invalid token chain';
       }
+      let prevToken: Token | undefined = undefined;
+      for (let i in this.tokens) {
+        let token = await Token.decode(this.tokens[i]) as Token;
+        prevToken = prevToken || token;
+        if (
+          (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root') || !(token.issuer == this.session[0]))) ||
+          (i !== '0') && (!(token.issuer === prevToken.receiver) || !(token.asset !== prevToken.signature) || !(token.tokenType === 'extension')) ||
+          (i === this.tokens.length.toString() && token.receiver !== receiver)
+        ) {
+          throw 'Invalid token chain';
+        }
+        if (token.receiver === receiver) {
+          break
+        }
+      }
     }
+    return true;
   }
   static fromObject(obj: { brokers: string[], session: [string, string], channel: string, tokens: string[] }) {
     return new Route(obj.brokers, obj.session, obj.channel, obj.tokens)
