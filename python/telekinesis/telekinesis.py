@@ -106,7 +106,6 @@ class Telekinesis:
         max_delegation_depth=None,
         compile_signatures=True,
         parent=None,
-        cache_attributes=False,
     ):
         self._logger = logging.getLogger(__name__)
         self._target = target
@@ -116,7 +115,6 @@ class Telekinesis:
         self._max_delegation_depth = max_delegation_depth
         self._compile_signatures = compile_signatures
         self._parent = parent
-        self._cache_attributes = cache_attributes
         self._channel = None
         self._clients = {}
         self._on_update_callback = None
@@ -151,7 +149,6 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
-            self._cache_attributes,
         )
 
     def _get_root_state(self):
@@ -379,7 +376,6 @@ class Telekinesis:
                     target._max_delegation_depth,
                     target._compile_signatures,
                     target._parent,
-                    target._cache_attributes,
                 )
                 target._state = new_state
                 target._state.pipeline += pipeline[i:]
@@ -423,7 +419,6 @@ class Telekinesis:
                     self._max_delegation_depth,
                     self._compile_signatures,
                     None,
-                    self._cache_attributes,
                 )
                 tk._subscribers.add(arg)
 
@@ -504,7 +499,6 @@ class Telekinesis:
             self._max_delegation_depth,
             self._compile_signatures,
             self,
-            self._cache_attributes,
         )
 
     def __setattr__(self, attribute, value):
@@ -564,7 +558,6 @@ class Telekinesis:
                     self._expose_tb,
                     self._max_delegation_depth,
                     self._compile_signatures,
-                    cache_attributes=not block_recursion and self._cache_attributes,
                 )
             if not isinstance(obj._target, Route):
                 if receiver not in obj._clients:
@@ -577,7 +570,16 @@ class Telekinesis:
                 "obj",
                 (
                     route.to_dict(),
-                    self._encode(obj._state.to_dict(self._mask), receiver, channel, traversal_stack, block_recursion=True),
+                    self._encode(
+                        obj._state.to_dict(
+                            self._mask,
+                            obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
+                        ),
+                        receiver,
+                        channel,
+                        traversal_stack,
+                        block_recursion=True,
+                    ),
                 ),
             )
 
@@ -636,7 +638,6 @@ class Telekinesis:
                             self._max_delegation_depth,
                             self._compile_signatures,
                             channel.telekinesis,
-                            self._cache_attributes,
                         )
                     out = channel.telekinesis._target
                 else:
@@ -664,7 +665,6 @@ class Telekinesis:
                     self._expose_tb,
                     self._max_delegation_depth,
                     self._compile_signatures,
-                    cache_attributes=self._cache_attributes,
                 )
 
         output_stack[root] = out
@@ -680,7 +680,6 @@ class Telekinesis:
         max_delegation_depth=None,
         compile_signatures=True,
         parent=None,
-        cache_attributes=False,
     ):
         def signatured_subclass(signature, method_name, docstring):
             class Telekinesis_(Telekinesis):
@@ -735,7 +734,6 @@ class Telekinesis:
                     self._max_delegation_depth,
                     self._compile_signatures,
                     self,
-                    self._cache_attributes,
                 )
 
             def setitem(self, key, value):
@@ -751,7 +749,6 @@ class Telekinesis:
                     self._max_delegation_depth,
                     self._compile_signatures,
                     self,
-                    self._cache_attributes,
                 )
 
             if "__getitem__" in state.methods:
@@ -763,7 +760,7 @@ class Telekinesis:
             if "__setitem__" in state.methods:
                 Telekinesis_.__setitem__ = setitem
 
-        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent, cache_attributes)
+        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent)
         out._update_state(state)
         out.__doc__ = state.doc if method_name == "__call__" else docstring
 
@@ -778,7 +775,6 @@ class Telekinesis:
         max_delegation_depth=None,
         compile_signatures=True,
         parent=None,
-        cache_attributes=False,
     ):
         kwargs = locals()
 
