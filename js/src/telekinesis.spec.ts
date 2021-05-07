@@ -51,15 +51,39 @@ describe("Telekinesis", () => {
     const echo = await (new PublicUser(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")
     expect(await echo(largeMessage)).toEqual(largeMessage);
-  })
+  });
   it('sends telekinesis objects', async () => {
     const echo = await (new PublicUser(HOST) as any).get('echo');
     const func = (x: number) => x + 1;
     expect(await echo(func)(1)).toEqual(2);
-  })
+  });
   it('manipulates remote objects', async () => {
     const registry = await new PublicUser(HOST) as any;
     await registry.update({ test: 123 });
     expect(await registry.get('test')).toEqual(123);
+  });
+  it('receives pull updates when it subscribes', async () => {
+    class TestChild {
+      x: number;
+      constructor() {
+        this.x = 0;
+      }
+    }
+    class TestParent {
+      t: TestChild;
+      constructor() {
+        this.t = new TestChild();
+      }
+      incrementChild() {
+        this.t.x += 1;
+        return this;
+      }
+    }
+    const server = await new PublicUser(HOST) as any;
+    await server.update({ testParent: new TestParent() });
+    const p = await (new PublicUser(HOST) as any).get('testParent');
+    await p.t._subscribe();
+    await p.incrementChild().incrementChild();
+    expect(p.x._last()).toEqual(1);
   })
 });
