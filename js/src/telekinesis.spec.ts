@@ -57,4 +57,9 @@ describe("Telekinesis", () => {
     const func = (x: number) => x + 1;
     expect(await echo(func)(1)).toEqual(2);
   })
+  it('manipulates remote objects', async () => {
+    const registry = await new PublicUser(HOST) as any;
+    await registry.update({ test: 123 });
+    expect(await registry.get('test')).toEqual(123);
+  })
 });
