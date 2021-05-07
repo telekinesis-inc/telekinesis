@@ -7,10 +7,15 @@ const startBroker = `
 import telekinesis as tk
 import asyncio
 
+class Registry(dict):
+    pass
+
 async def main():
     broker = await tk.Broker().serve(port=${HOST.split(':')[2]})
     c = tk.Connection(tk.Session(), '${HOST}')
-    broker.entrypoint = await tk.Telekinesis(lambda x: x, c.session)._delegate('*')
+    reg = Registry()
+    reg['echo'] = lambda x: x
+    broker.entrypoint = await tk.Telekinesis(reg, c.session)._delegate('*')
     lock = asyncio.Event()
     await lock.wait()
 
@@ -39,17 +44,17 @@ describe("Connection", () => {
 });
 describe("Telekinesis", () => {
   it("echos", async () => {
-    const echo = await new PublicUser(HOST) as any;
+    const echo = await (new PublicUser(HOST) as any).get('echo');
     expect(await echo('hello!')).toEqual('hello!');
   });
   it('handles large messages', async () => {
-    const echo = await new PublicUser(HOST) as any;
+    const echo = await (new PublicUser(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")
     expect(await echo(largeMessage)).toEqual(largeMessage);
   })
   it('sends telekinesis objects', async () => {
-    const echo = await new PublicUser(HOST) as any;
-    const func = (x : number) => x+1;
+    const echo = await (new PublicUser(HOST) as any).get('echo');
+    const func = (x: number) => x + 1;
     expect(await echo(func)(1)).toEqual(2);
   })
 });
