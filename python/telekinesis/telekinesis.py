@@ -61,7 +61,7 @@ class State:
                         target_attribute = target.__getattribute__(attribute_name)
 
                     if "__call__" in dir(target_attribute):
-                        if attribute_name in ["__call__", "__init__"]:
+                        if attribute_name == "__call__" or (isinstance(target, type) and attribute_name == "__init__"):
                             target_attribute = target
                         signature = None
                         try:
@@ -76,7 +76,7 @@ class State:
                         except Exception:
                             logger.debug("Could not obtain signature from %s.%s", target, attribute_name)
 
-                        if attribute_name == "__init__":
+                        if attribute_name == "__init__" and isinstance(target, type):
                             methods["__call__"] = (signature, target.__init__.__doc__)
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
@@ -129,9 +129,11 @@ class Telekinesis:
                     session.routes[(target.session, target.channel)] = {"refcount": 0, "delegations": set()}  # state
                 session.routes[(target.session, target.channel)]["refcount"] += 1
 
-        else:
+        elif not asyncio.iscoroutine(target):
             session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
             self._update_state(State.from_object(target))
+        else:
+            self._update_state(State())
 
     def __getattribute__(self, attr):
         if attr[0] == "_":
@@ -323,19 +325,14 @@ class Telekinesis:
 
     async def _execute(self, metadata=None, pipeline=None, break_on_telekinesis=False):
         if asyncio.iscoroutine(self._target):
-            old_id = id(self._target)
             self._target = await self._target
-            self._session.targets[old_id].remove(self)
-            if not self._session.targets[old_id]:
-                self._session.targets.pop(old_id)
             if isinstance(self._target, Route):
-                if self._parent is None:
-                    if (self._target.session, self._target.channel) not in self._session.routes:
-                        self._session.routes[(self._target.session, self._target.channel)] = {
-                            "refcount": 0,
-                            "delegations": set(),
-                        }  # state
-                    self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
+                if (self._target.session, self._target.channel) not in self._session.routes:
+                    self._session.routes[(self._target.session, self._target.channel)] = {
+                        "refcount": 0,
+                        "delegations": set(),
+                    }  # state
+                self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
             else:
                 self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(
                     set((self,))
@@ -650,7 +647,6 @@ class Telekinesis:
             elif self._parent and (
                 ("__call__" not in self._state.methods) or (self._state.methods["__call__"] == state.methods.get("__call__"))
             ):
-
                 self._target = route
                 self._update_state(state)
                 self._parent = None
@@ -660,6 +656,11 @@ class Telekinesis:
                         "delegations": set(),
                     }  # state
                 self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
+                out = self
+            elif (isinstance(self._target, Route) and (route == self._target)) and (
+                ("__call__" not in self._state.methods) or (self._state.methods["__call__"] == state.methods.get("__call__"))
+            ):
+                self._update_state(state)
                 out = self
             else:
                 out = Telekinesis._from_state(

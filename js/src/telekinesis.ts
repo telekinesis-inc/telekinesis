@@ -652,7 +652,7 @@ export class Telekinesis extends Function {
         let route = Route.fromObject(obj[0]);
         let state = State.fromObject(this._decode(inputStack, callerId, obj[1], outputStack));
 
-        if (this._parent ) {
+        if (this._parent) {
           this._target = route;
           this._updateState(state);
           this._parent = undefined;
@@ -663,6 +663,9 @@ export class Telekinesis extends Function {
           if (o != undefined) {
             o.refcount += 1;
           }
+          out = this._proxy;
+        } else if (this._target instanceof Route && this._target.toObject() === route.toObject()) {
+          this._updateState(state);
           out = this._proxy;
         } else {
           out = Telekinesis._fromState(
