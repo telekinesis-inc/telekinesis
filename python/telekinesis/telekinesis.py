@@ -254,7 +254,8 @@ class Telekinesis:
 
             if "close" in payload:
                 self._clients.pop(metadata.caller.session, None)
-                for delegation in payload["close"]:
+                for delegation_lst in payload["close"]:
+                    delegation = tuple(delegation_lst)
                     if delegation not in self._clients:
                         self._clients[delegation] = {"last_state": None, "cache_attributes": None}
                         if delegation[1] is not None:
