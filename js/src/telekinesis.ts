@@ -156,6 +156,7 @@ export class Telekinesis extends Function {
         }
       }
     } else {
+      this._clients = new Map();
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
       this._state = State.fromTarget(target);
     }
@@ -377,7 +378,6 @@ export class Telekinesis extends Function {
         target._blockThen = true;
         break;
       }
-      touched = new Set([...touched, ...(this._session.targets.get(target) || [])])
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
@@ -430,6 +430,7 @@ export class Telekinesis extends Function {
           const tk = Telekinesis._reuse(
             target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
           )
+          console.log(r.toObject())
           if (tk._clients && !tk._clients.has(r.session)) {
             tk._clients.set(r.session, {lastState: null, cacheAttributes: null });
             tk._clients.delete([r.session[0], null]);
@@ -440,6 +441,7 @@ export class Telekinesis extends Function {
 
         }
       }
+      touched = new Set([...touched, ...(this._session.targets.get(target) || [])])
     }
 
     for (const tk of touched) {

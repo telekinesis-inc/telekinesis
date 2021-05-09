@@ -381,8 +381,6 @@ class Telekinesis:
                 target._state.pipeline += pipeline[i:]
                 break
 
-            touched = touched.union((self._session.targets.get(id(target))) or set())
-
             if action == "get":
                 self._logger.info("%s %s %s", action, arg, target)
                 if (
@@ -426,6 +424,7 @@ class Telekinesis:
                         tk._clients.pop((arg._target.session[0], None), None)
                     tk._clients[arg._target.session]["cache_attributes"] = True 
                     tk._subscribers.add(arg)
+            touched = touched.union((self._session.targets.get(id(target))) or set())
 
         for tk in touched:
             tk._update_state(State.from_object(tk._target))

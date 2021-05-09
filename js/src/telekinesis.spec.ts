@@ -82,8 +82,8 @@ describe("Telekinesis", () => {
     const server = await new PublicUser(HOST) as any;
     await server.update({ testParent: new TestParent() });
     const p = await (new PublicUser(HOST) as any).get('testParent');
-    await p.t._subscribe();
-    await p.incrementChild().incrementChild();
-    expect(p.x._last()).toEqual(1);
+    const c = await p.t._subscribe();
+    await p.incrementChild().incrementChild().t;
+    expect(c.x._last()).toEqual(2);
   })
 });
