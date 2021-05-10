@@ -458,7 +458,8 @@ class Telekinesis:
                     self._session.routes[(self._target.session, self._target.channel)] = {
                         "refcount": 0,
                         "delegations": set(),
-                    }  # state
+                        "state": State(),
+                    }
                 self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
             else:
                 self._session.targets[id(self._target)] = (self._session.targets.get(id(self._target)) or set()).union(
