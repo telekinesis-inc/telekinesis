@@ -9,7 +9,7 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
     yield asyncio.get_event_loop()
 
 
-async def test_subscribe():
+async def test_garbage_collection():
     bro = await Broker().serve(port=8781)
     class Registry(dict):
         pass
