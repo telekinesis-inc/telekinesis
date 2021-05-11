@@ -174,7 +174,14 @@ class State:
             self.pipeline = diffs['pipeline']
                 
         return self
-            
+
+
+    def __repr__(self):
+        return "State<attributes: %s |methods: %s>" % (
+            ", ".join(x for x in self.attributes or {}),
+            ", ".join(x for x in self.methods or {}),
+        )
+
     @staticmethod
     def calc_diff(obj0, obj1, max_depth=10):
         if obj0 == obj1:
