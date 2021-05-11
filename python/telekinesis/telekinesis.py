@@ -38,32 +38,33 @@ class State:
 
     def clone(self):
         return State(**self.to_dict(None, True))
-    
+
     def get_diffs(self, last_version=0, mask=None, cache_attributes=False):
         if last_version < self._history_offset and last_version > 0:
-            return self._history_offset+len(self._history), self.to_dict(mask, cache_attributes)
+            return self._history_offset + len(self._history), self.to_dict(mask, cache_attributes)
         out = {}
         if last_version > 0:
-            for i, diff in enumerate(self._history[last_version-self._history_offset:]):
+            for i, diff in enumerate(self._history[last_version - self._history_offset :]):
                 filtered = {}
-                if 'attributes' in diff:
+                if "attributes" in diff:
                     if cache_attributes:
-                        x = {k: v for k, v in diff['attributes'][1].items() if k not in (mask or set())}
+                        x = {k: v for k, v in diff["attributes"][1].items() if k not in (mask or set())}
                     else:
-                        x = {k: v[0] for k, v in diff['attributes'][1].items()
-                                                if k not in (mask or set()) and v[0] in ['c', 'd']}
+                        x = {
+                            k: v[0] for k, v in diff["attributes"][1].items() if k not in (mask or set()) and v[0] in ["c", "d"]
+                        }
                     if x:
-                        filtered['attributes'] = (diff['attributes'][0], x)
-                if 'methods' in diff:
-                    x = {k: v for k, v in diff['methods'] if k not in (mask or set())}
+                        filtered["attributes"] = (diff["attributes"][0], x)
+                if "methods" in diff:
+                    x = {k: v for k, v in diff["methods"] if k not in (mask or set())}
                     if x:
-                        filtered['methods'] = x
-                if 'repr' in diff:
-                    filtered['repr'] = diff['repr']
-                if 'doc' in diff:
-                    filtered['doc'] = diff['doc']
-                out[i+last_version+1] = filtered
-        out['pipeline'] = self.pipeline
+                        filtered["methods"] = x
+                if "repr" in diff:
+                    filtered["repr"] = diff["repr"]
+                if "doc" in diff:
+                    filtered["doc"] = diff["doc"]
+                out[i + last_version + 1] = filtered
+        out["pipeline"] = self.pipeline
         return 0, out
 
     def update_from_target(self, target):
@@ -118,7 +119,7 @@ class State:
         else:
             doc = None
             repr_ = target.__repr__()
-            
+
         if self._history_offset == 0:
             self._history_offset = 1
             self.attributes = attributes
@@ -127,19 +128,21 @@ class State:
             self.doc = doc
             return self
         diff = {}
-        cmp = {'attributes': (self.attributes, attributes),
-               'methods': (self.methods, methods),
-               'repr': (self.repr, repr_),
-               'doc': (self.doc, doc)}
+        cmp = {
+            "attributes": (self.attributes, attributes),
+            "methods": (self.methods, methods),
+            "repr": (self.repr, repr_),
+            "doc": (self.doc, doc),
+        }
         for k in cmp:
             x = self.calc_diff(*cmp[k])
             if x:
                 diff[k] = x
-        
-        return self.update_from_diffs(0, {self._history_offset+len(self._history)+1: diff})
-    
+
+        return self.update_from_diffs(0, {self._history_offset + len(self._history) + 1: diff})
+
     def update_from_diffs(self, last_version, diffs):
-        ks = ['attributes', 'methods', 'repr', 'doc']
+        ks = ["attributes", "methods", "repr", "doc"]
         if last_version:
             self._history = []
             self._history_offset = last_version
@@ -149,13 +152,13 @@ class State:
                 self.__dict__[k] = new_state.__dict__[k]
         else:
             next_version = self._history_offset + len(self._history) + 1
-            diffs_int = {int(k): v for k, v in diffs.items() if k != 'pipeline'}
+            diffs_int = {int(k): v for k, v in diffs.items() if k != "pipeline"}
             if next_version in diffs_int:
                 for i in range(len(diffs)):
-                    self._history.append(diffs_int[i+next_version])
+                    self._history.append(diffs_int[i + next_version])
                     for k in ks:
-                        if k in diffs_int[i+next_version]:
-                            self.__dict__[k] = self.apply_diff(self.__dict__[k], diffs_int[i+next_version][k])
+                        if k in diffs_int[i + next_version]:
+                            self.__dict__[k] = self.apply_diff(self.__dict__[k], diffs_int[i + next_version][k])
 
                 for i in sorted(self._pending_changes):
                     if i < (self._history_offset + len(self._history) + 1):
@@ -169,12 +172,11 @@ class State:
                         break
             else:
                 self._pending_changes.update(diffs_int)
-            
-        if 'pipeline' in diffs:
-            self.pipeline = diffs['pipeline']
-                
-        return self
 
+        if "pipeline" in diffs:
+            self.pipeline = diffs["pipeline"]
+
+        return self
 
     def __repr__(self):
         return "State<attributes: %s |methods: %s>" % (
@@ -191,45 +193,46 @@ class State:
                 changes = {}
                 for key in obj0:
                     if key in obj1:
-                        changes[key] = State.calc_diff(obj0[key], obj1[key], max_depth-1)
+                        changes[key] = State.calc_diff(obj0[key], obj1[key], max_depth - 1)
                     else:
-                        changes[key] = ('d',)
+                        changes[key] = ("d",)
                 for key in obj1:
                     if key not in obj0:
-                        changes[key] = ('c', obj1[key])
-                return ('u', {k: c for k, c in changes.items() if c})
+                        changes[key] = ("c", obj1[key])
+                return ("u", {k: c for k, c in changes.items() if c})
             if type(obj0) == type(obj1) == set:
                 changes = {}
                 for key in obj0.difference(obj1):
-                    changes[key] = 'd'
+                    changes[key] = "d"
                 for key in obj1.difference(obj0):
-                    changes[key] = 'c'
-                return ('u', changes)
+                    changes[key] = "c"
+                return ("u", changes)
 
-        return ('r', obj1)
+        return ("r", obj1)
+
     @staticmethod
     def apply_diff(obj0, diff):
         if not diff:
             return obj0
-        if diff[0] == 'c':
+        if diff[0] == "c":
             return diff[1]
-        if diff[0] == 'u':
+        if diff[0] == "u":
             if type(obj0) == dict:
                 obj1 = obj0.copy()
                 for key, (code, *changes) in diff[1].items():
-                    if code in {'c', 'r'}:
+                    if code in {"c", "r"}:
                         obj1[key] = changes[0]
-                    if code == 'd' and key in obj1:
+                    if code == "d" and key in obj1:
                         del obj1[key]
-                    if code == 'u':
+                    if code == "u":
                         obj1[key] = State.apply_diff(obj1[key], (code, changes[0]))
                 return obj1
             if type(obj0) == set:
                 obj1 = obj0.copy()
                 for key, code in diff[1].items():
-                    if code == 'c':
+                    if code == "c":
                         obj1.add(key)
-                    if code == 'd':
+                    if code == "d":
                         obj1.discard(key)
                 return obj1
 
@@ -263,7 +266,7 @@ class Telekinesis:
         if isinstance(target, Route):
             if parent is None:
                 if (target.session, target.channel) not in session.routes:
-                    session.routes[(target.session, target.channel)] = {"refcount": 0, "delegations": set(), "state": State()} 
+                    session.routes[(target.session, target.channel)] = {"refcount": 0, "delegations": set(), "state": State()}
                 session.routes[(target.session, target.channel)]["refcount"] += 1
 
         elif not asyncio.iscoroutine(target):
@@ -399,7 +402,7 @@ class Telekinesis:
                 if not self._clients and not self._channel.is_public:
                     await self._close()
             elif "ping" in payload:
-                await channel.channel.send(metadata.caller, {'pong': True})
+                await channel.channel.send(metadata.caller, {"pong": True})
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
                 self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
@@ -555,9 +558,9 @@ class Telekinesis:
                     if arg._target.session not in tk._clients:
                         tk._clients[arg._target.session] = {"last_state": 0, "cache_attributes": True}
                         tk._clients.pop((arg._target.session[0], None), None)
-                    if tk._clients[arg._target.session]['cache_attributes'] != True:
-                        tk._clients[arg._target.session]['last_state'] = 0
-                    tk._clients[arg._target.session]["cache_attributes"] = True 
+                    if tk._clients[arg._target.session]["cache_attributes"] != True:
+                        tk._clients[arg._target.session]["last_state"] = 0
+                    tk._clients[arg._target.session]["cache_attributes"] = True
                     tk._subscribers.add(arg)
             touched = touched.union((self._session.targets.get(id(target))) or set())
 
@@ -581,7 +584,7 @@ class Telekinesis:
             _, response = await channel.recv()
 
             state = self._get_root_state()
-            if "repr" in response:# and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
+            if "repr" in response:  # and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
                 # state.last_change = response.get("timestamp") or time.time()
                 state.repr = response["repr"]
 
@@ -786,7 +789,9 @@ class Telekinesis:
                 else:
                     raise Exception(f"Unauthorized! {caller_id} {route.tokens}")
             elif self._parent and (
-                ("__call__" not in self._state.methods) or ('methods' not in state_diff[1]) or ('__call__' not in state_diff[1]['methods'])
+                ("__call__" not in self._state.methods)
+                or ("methods" not in state_diff[1])
+                or ("__call__" not in state_diff[1]["methods"])
             ):
                 self._target = route
                 self._parent = None
@@ -794,17 +799,23 @@ class Telekinesis:
                     self._session.routes[(self._target.session, self._target.channel)] = {
                         "refcount": 0,
                         "delegations": set(),
-                        "state": State()
+                        "state": State(),
                     }
                 self._session.routes[(self._target.session, self._target.channel)]["state"].update_from_diffs(*state_diff)
-                self._update_state(self._session.routes[(self._target.session, self._target.channel)]["state"].get_diffs(0, None, True))
+                self._update_state(
+                    self._session.routes[(self._target.session, self._target.channel)]["state"].get_diffs(0, None, True)
+                )
                 self._session.routes[(self._target.session, self._target.channel)]["refcount"] += 1
                 out = self
             elif (isinstance(self._target, Route) and (route == self._target)) and (
-                ("__call__" not in self._state.methods) or ('methods' not in state_diff[1]) or ('__call__' not in state_diff[1]['methods'])
+                ("__call__" not in self._state.methods)
+                or ("methods" not in state_diff[1])
+                or ("__call__" not in state_diff[1]["methods"])
             ):
                 self._session.routes[(self._target.session, self._target.channel)]["state"].update_from_diffs(*state_diff)
-                self._update_state(self._session.routes[(self._target.session, self._target.channel)]["state"].get_diffs(0, None, True))
+                self._update_state(
+                    self._session.routes[(self._target.session, self._target.channel)]["state"].get_diffs(0, None, True)
+                )
                 out = self
             else:
                 out = Telekinesis._from_state(
