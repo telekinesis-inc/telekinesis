@@ -17,12 +17,12 @@ async def test_state_diffing():
     class MeasuredBroker(Broker):
         async def handle_send(self, connection, message, source, destination):
             measures["count"] += 1
-            measures["size_kb"] += len(message) / 2**10
+            measures["size_kb"] += len(message) / 2 ** 10
             return await super().handle_send(connection, message, source, destination)
 
     bro = await MeasuredBroker().serve(port=8783)
 
-    class Container():
+    class Container:
         def __init__(self):
             pass
 
@@ -32,14 +32,14 @@ async def test_state_diffing():
 
     pu = await PublicUser("ws://localhost:8783")._subscribe()
 
-    assert measures['size_kb'] < 2**10
+    assert measures["size_kb"] < 2 ** 10
 
-    container.x = os.urandom(2**20)
-
-    await pu
-    assert 2**10 < measures['size_kb'] < 1.1 * 2**10
-
-    container.y = os.urandom(2**20)
+    container.x = os.urandom(2 ** 20)
 
     await pu
-    assert 2**11 < measures['size_kb'] < 1.1 * 2**11
+    assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
+
+    container.y = os.urandom(2 ** 20)
+
+    await pu
+    assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
