@@ -28,13 +28,15 @@ async def test_subscribe():
             self.value += amount
             return self
 
-    pu0 = await PublicUser("ws://localhost:8780")
-    await pu0.update({"Counter": Counter})
+    pu = await PublicUser("ws://localhost:8780")
+    await pu.update({"counter": Counter(2)})
 
-    counter = await PublicUser("ws://localhost:8780").get("Counter")(2)._subscribe()
+    counter0 = await PublicUser("ws://localhost:8780").get("counter")
+    counter1 = await PublicUser("ws://localhost:8780").get("counter")._subscribe()
 
-    assert counter.value._last() == 2
+    assert counter1.value._last() == 2
 
-    await counter.increment(3).increment(1)
+    await counter0.increment(3).increment(1)
 
-    assert counter.value._last() == 6
+    await asyncio.sleep(0.1)
+    assert counter1.value._last() == 6

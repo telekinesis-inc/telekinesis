@@ -37,13 +37,16 @@ class State:
         }
 
     def clone(self):
-        return State(**self.to_dict(None, True))
+        out = State(**self.to_dict(None, True))
+        out._history = self._history.copy()
+        out._history_offset = self._history_offset
+        return out
 
     def get_diffs(self, last_version=0, mask=None, cache_attributes=False):
-        if last_version < self._history_offset and last_version > 0:
+        if last_version < self._history_offset and last_version >= 0:
             return self._history_offset + len(self._history), self.to_dict(mask, cache_attributes)
         out = {}
-        if last_version > 0:
+        if last_version >= 0:
             for i, diff in enumerate(self._history[last_version - self._history_offset :]):
                 filtered = {}
                 if "attributes" in diff:
@@ -154,7 +157,7 @@ class State:
             next_version = self._history_offset + len(self._history) + 1
             diffs_int = {int(k): v for k, v in diffs.items() if k != "pipeline"}
             if next_version in diffs_int:
-                for i in range(len(diffs)):
+                for i in range(len(diffs_int)):
                     self._history.append(diffs_int[i + next_version])
                     for k in ks:
                         if k in diffs_int[i + next_version]:
@@ -271,7 +274,8 @@ class Telekinesis:
 
         elif not asyncio.iscoroutine(target):
             session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
-            self._update_state(State().update_from_target(target).get_diffs(0))
+            self._state.update_from_target(target)
+            self._update_state()
 
     def __getattribute__(self, attr):
         if attr[0] == "_":
@@ -818,8 +822,15 @@ class Telekinesis:
                 )
                 out = self
             else:
+                if (route.session, route.channel) not in self._session.routes:
+                    self._session.routes[(route.session, route.channel)] = {
+                        "refcount": 0,
+                        "delegations": set(),
+                        "state": State(),
+                    }
+                self._session.routes[(route.session, route.channel)]["state"].update_from_diffs(*state_diff)
                 out = Telekinesis._from_state(
-                    State().update_from_diffs(*state_diff),
+                    self._session.routes[(route.session, route.channel)]["state"].clone(),
                     route,
                     self._session,
                     self._mask,
