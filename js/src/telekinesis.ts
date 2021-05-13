@@ -1,7 +1,7 @@
 import { Channel, Header, RequestMetadata, Route, Session } from './client';
 
 export class State {
-  attributes: string[] | Map<string, any>;
+  attributes: Map<string, any>;
   methods: Map<string, [string, string]>;
   pipeline: [string, Telekinesis | string | [any[], {}]][];
   repr: string;
@@ -11,10 +11,10 @@ export class State {
   _history: {}[];
 
   constructor(
-    attributes?: string[] | Map<string, any>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
+    attributes?: Map<string, any>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
     pipeline?: [string, string | [any[], {}]][]
   ) {
-    this.attributes = attributes || [];
+    this.attributes = attributes || new Map();
     this.methods = methods || new Map();
     this.pipeline = pipeline || [];
     this.repr = repr || '';
@@ -27,13 +27,10 @@ export class State {
   toObject(mask?: Set<string>, cacheAttributes: boolean = false) {
     mask = mask || new Set<string>();
     return {
-      attributes: this.attributes instanceof Map ?
-        (cacheAttributes ?
+      attributes: cacheAttributes ?
           Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
             .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
-          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)) 
-        ) :
-        this.attributes.filter(v => !(mask as Set<string>).has(v)),
+          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)), 
       methods: Array.from(this.methods.keys()).filter(v => !(mask as Set<string>).has(v))
         .reduce((p: any, v: string) => { p[v] = this.methods.get(v); return p }, {}),
       pipeline: this.pipeline.map(x => x),
@@ -74,6 +71,47 @@ export class State {
       state.methods.set('__call__', ['(*args)', target.toString()]);
     }
     return state;
+  }
+  static calcDiff(obj0: any, obj1: any, maxDepth: number = 10) {
+    if (obj0 === obj1) {
+      return;
+    }
+    return ["r", obj1];
+  }
+  static applyDiff(obj0: any, diff: any) {
+    if (!diff || (Object.keys(diff).length === 0)) {
+      return obj0;
+    }
+    if (diff[0] === 'c') {
+      return diff[1];
+    }
+    if (diff[0] === 'u') {
+      if (obj0 instanceof Map) {
+        const obj1 = new Map(obj0);
+        for (const [key, value] of Object.entries(diff)) {
+          const code = (value as any)[0];
+          if (['c', 'r'].includes(code)) {
+            obj1.set(key, (value as any)[1]);
+          } else if (code == 'r') {
+            obj1.delete(key);
+          } else if (code == 'u') {
+            obj1.set(key, State.applyDiff(obj1.get(key), value))
+          }
+        }
+        return obj1;
+      } else if (obj0 instanceof Set) {
+        const obj1 = new Set(obj0);
+        for (const [key, code] of Object.entries(diff)) {
+          if (code === 'c') {
+            obj1.add(key);
+          } else if (code === 'd') {
+            obj1.delete(key);
+          }
+        }
+        return obj1;
+      }
+      
+    }
   }
 }
 export class Telekinesis extends Function {
