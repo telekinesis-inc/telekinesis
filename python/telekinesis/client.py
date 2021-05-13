@@ -557,8 +557,9 @@ class Channel:
         return False
 
     def __repr__(self):
-        return "Channel %s %s: %s" % (
+        return "Channel %s %s - %s: %s" % (
             self.session.session_key.public_serial()[:4],
+            self.session.instance_id[:2],
             self.channel_key.public_serial()[:4],
             self.telekinesis,
         )
