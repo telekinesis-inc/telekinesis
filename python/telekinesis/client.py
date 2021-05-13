@@ -361,6 +361,12 @@ class Session:
         for connection in self.connections:
             await connection.send(header, payload, bundle_id)
 
+    def __repr__(self):
+        return "Session %s %s" % (
+            self.session_key.public_serial()[:4],
+            self.instance_id[:2],
+        )
+
 
 class Channel:
     def __init__(self, session, channel_key_file=None, is_public=False):
@@ -602,7 +608,7 @@ class Route:
         return True
 
     def __repr__(self):
-        return f"Route {self.session[0][:4]} {self.channel[:4]}"
+        return f"Route {self.session[0][:4]} {self.session[1][:2]} - {self.channel[:4]}"
 
     def __eq__(self, route):
         return self.to_dict() == route.to_dict()
