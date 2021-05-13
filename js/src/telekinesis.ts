@@ -6,18 +6,22 @@ export class State {
   pipeline: [string, Telekinesis | string | [any[], {}]][];
   repr: string;
   doc?: string;
-  lastChange?: number;
+  _pending_changes: {};
+  _history_offset: number;
+  _history: {}[];
 
   constructor(
     attributes?: string[] | Map<string, any>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
-    pipeline?: [string, string | [any[], {}]][], lastChange?: number
+    pipeline?: [string, string | [any[], {}]][]
   ) {
     this.attributes = attributes || [];
     this.methods = methods || new Map();
     this.pipeline = pipeline || [];
     this.repr = repr || '';
     this.doc = doc;
-    this.lastChange = lastChange;
+    this._pending_changes = {};
+    this._history_offset = 0;
+    this._history = [];
   }
 
   toObject(mask?: Set<string>, cacheAttributes: boolean = false) {
@@ -35,7 +39,6 @@ export class State {
       pipeline: this.pipeline.map(x => x),
       repr: this.repr,
       doc: this.doc,
-      last_change: this.lastChange,
     }
   }
   clone() {
@@ -49,7 +52,6 @@ export class State {
       obj.repr,
       obj.doc,
       obj.pipeline,
-      obj.last_change,
     );
   }
 
@@ -64,7 +66,6 @@ export class State {
       repr: (target.toString && target.toString()) || '',
       doc: (target as any).__doc__,
       pipeline: [],
-      last_change: Date.now() / 1000,
     })
     if (target instanceof Function) {
       state.methods.set('__call__', ['(*args)', target.toString()]);
@@ -255,7 +256,7 @@ export class Telekinesis extends Function {
         }
 
       } else if ((payload as any)['ping'] !== undefined) {
-        await channel.send(metadata.caller, { repr: this._state.repr, timestamp: this._state.lastChange })
+        await channel.send(metadata.caller, { repr: this._state.repr })
       } else if ((payload as any)['pipeline'] !== undefined) {
         if ((payload as any)['reply_to']) {
           replyTo = Route.fromObject((payload as any)['reply_to'])
@@ -278,7 +279,6 @@ export class Telekinesis extends Function {
               await newChannel.send(replyTo, {
                 return: await this._encode(ret, replyTo.session, newChannel),
                 repr: this._state.repr,
-                timestamp: this._state.lastChange,
               })
             } finally {
               await newChannel.close();
@@ -287,7 +287,6 @@ export class Telekinesis extends Function {
             await channel.send(metadata.caller, {
               return: await this._encode(ret, metadata.caller.session),
               repr: this._state.repr,
-              timestamp: this._state.lastChange,
             })
           }
         }
