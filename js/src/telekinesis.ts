@@ -42,7 +42,10 @@ export class State {
     }
   }
   clone() {
-    return State.fromObject(this.toObject(undefined, true));
+    const out = State.fromObject(this.toObject(undefined, true));
+    out._history = Array.from(this._history);
+    out._history_offset = this._history_offset;
+    return out;
   }
   static fromObject(obj: any) {
     return new State(
