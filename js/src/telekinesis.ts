@@ -1,33 +1,33 @@
 import { Channel, Header, RequestMetadata, Route, Session } from './client';
 
 export class State {
-  attributes: Map<string, any>;
+  attributes: Map<string, any> | Set<string>;
   methods: Map<string, [string, string]>;
   pipeline: [string, Telekinesis | string | [any[], {}]][];
   repr: string;
   doc?: string;
-  _pending_changes: {};
-  _history_offset: number;
+  _pendingChanges: {};
+  _historyOffset: number;
   _history: {}[];
 
   constructor(
-    attributes?: Map<string, any>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
+    attributes?: Map<string, any>|Set<string>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
     pipeline?: [string, string | [any[], {}]][]
   ) {
-    this.attributes = attributes || new Map();
+    this.attributes = attributes || new Set();
     this.methods = methods || new Map();
     this.pipeline = pipeline || [];
     this.repr = repr || '';
     this.doc = doc;
-    this._pending_changes = {};
-    this._history_offset = 0;
+    this._pendingChanges = {};
+    this._historyOffset = 0;
     this._history = [];
   }
 
   toObject(mask?: Set<string>, cacheAttributes: boolean = false) {
     mask = mask || new Set<string>();
     return {
-      attributes: cacheAttributes ?
+      attributes: cacheAttributes && this.attributes instanceof Map ?
           Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
             .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
           Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)), 
@@ -41,12 +41,12 @@ export class State {
   clone() {
     const out = State.fromObject(this.toObject(undefined, true));
     out._history = Array.from(this._history);
-    out._history_offset = this._history_offset;
+    out._historyOffset = this._historyOffset;
     return out;
   }
   static fromObject(obj: any) {
     return new State(
-      obj.attributes instanceof Array ? obj.attributes :
+      obj.attributes instanceof Array ? new Set(obj.attributes) :
         Object.getOwnPropertyNames(obj.attributes || {}).reduce((p, v) => { p.set(v, obj.attributes[v]); return p }, new Map()),
       Object.getOwnPropertyNames(obj.methods || {}).reduce((p, v) => { p.set(v, obj.methods[v]); return p }, new Map()),
       obj.repr,
@@ -54,23 +54,71 @@ export class State {
       obj.pipeline,
     );
   }
-
-  static fromTarget(target: Object) {
-    let state = State.fromObject({
+  updateFromTarget(target: Object) {
+    const newProps = {
       attributes: Object.getOwnPropertyNames(target)
           .filter(x => x[0] !== '_')
           .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
-        .reduce((p, v) => { (p as any)[v] = ['(*args)', (target as any)[v].toString()]; return p }, {}),
+        .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
       repr: (target.toString && target.toString()) || '',
       doc: (target as any).__doc__,
-      pipeline: [],
-    })
+    };
     if (target instanceof Function) {
-      state.methods.set('__call__', ['(*args)', target.toString()]);
+      newProps.methods.set('__call__', ['(*args)', target.toString()]);
     }
-    return state;
+    // const props = {
+    //   attributes: this.attributes,
+    //   methods: this.methods,
+    //   repr: this.repr,
+    //   doc: this.doc,
+    // }
+    const diffs = {} as any;
+    diffs[this._historyOffset+this._history.length+1] = Object.getOwnPropertyNames(newProps)
+      .map(k => [k, State.calcDiff((this as any)[k], (newProps as any)[k])])
+      .reduce((p, [k, v]) => {(p as any)[k as string] = v; return p}, {})
+    return this.updateFromDiffs(0, diffs);
+  }
+  updateFromDiffs(lastVersion: number, diffs: any) {
+    const ks = ['attributes', 'methods', 'repr', 'doc'];
+    if (lastVersion) {
+      this._history = [];
+      this._historyOffset = lastVersion;
+      this._pendingChanges = {};
+      let newState;
+      if ((diffs.attributes && !(diffs.attributes instanceof Map || diffs.attributes instanceof Set)) || 
+          (diffs.methods && !(diffs.methods instanceof Map)) ) {
+            newState = State.fromObject(diffs);
+      } else {
+        newState = diffs;
+      }
+      for (const k of ks) {
+        (this as any)[k] = (newState as any)[k];
+      }
+    } else {
+      const nextVersion = this._historyOffset + this._history.length;
+      if (Object.keys(diffs).includes(nextVersion.toString())) {
+        for (let i in Object.keys(diffs)) {
+          const diff = diffs[(nextVersion+i).toString()];
+          this._history.push(diff);
+          
+          for (let k of Object.getOwnPropertyNames(diff)) {
+            (this as any)[k] = (diff[k] instanceof Array) ? new Set(diff[k]) : (
+              (diff[k] instanceof Object && !(diff[k] instanceof Map)) ? new Map(Object.entries(diff[k])) : diff[k]
+            )
+          }
+          // TODO: add pendingChanges
+        }
+      } else {
+        Object.assign(
+          this._pendingChanges,
+          Object.entries(diffs).filter(([k, v]) => k != 'pipeline').reduce((p, [k, v]) => {(p as any)[k] = v; return p}, {}));
+      }
+    }
+    if (Object.keys(diffs).includes('pipeline')) {
+      this.pipeline = diffs.pipeline;
+    }
   }
   static calcDiff(obj0: any, obj1: any, maxDepth: number = 10) {
     if (obj0 === obj1) {
