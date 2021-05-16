@@ -11,7 +11,7 @@ export class State {
   _history: {}[];
 
   constructor(
-    attributes?: Map<string, any>|Set<string>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
+    attributes?: Map<string, any> | Set<string>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
     pipeline?: [string, string | [any[], {}]][]
   ) {
     this.attributes = attributes || new Set();
@@ -28,9 +28,9 @@ export class State {
     mask = mask || new Set<string>();
     return {
       attributes: cacheAttributes && this.attributes instanceof Map ?
-          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
-            .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
-          Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)), 
+        Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v))
+          .reduce((p: any, v: string) => { p[v] = (this.attributes as Map<string, any>).get(v); return p }, {}) :
+        Array.from(this.attributes.keys()).filter(v => !(mask as Set<string>).has(v)),
       methods: Array.from(this.methods.keys()).filter(v => !(mask as Set<string>).has(v))
         .reduce((p: any, v: string) => { p[v] = this.methods.get(v); return p }, {}),
       pipeline: this.pipeline.map(x => x),
@@ -54,11 +54,17 @@ export class State {
       obj.pipeline,
     );
   }
+  getDiffs(lastVersion: number, mask?: Set<string>, cacheAttributes: boolean = false) {
+    if (true) {// TODO: Implement diffs: (lastVersion < this._historyOffset && lastVersion >= 0) {
+      return [this._historyOffset + this._history.length, this.toObject(mask, cacheAttributes)]
+    }
+
+  }
   updateFromTarget(target: Object) {
     const newProps = {
       attributes: Object.getOwnPropertyNames(target)
-          .filter(x => x[0] !== '_')
-          .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}),
+        .filter(x => x[0] !== '_')
+        .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
         .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
@@ -75,9 +81,9 @@ export class State {
     //   doc: this.doc,
     // }
     const diffs = {} as any;
-    diffs[this._historyOffset+this._history.length+1] = Object.getOwnPropertyNames(newProps)
+    diffs[this._historyOffset + this._history.length + 1] = Object.getOwnPropertyNames(newProps)
       .map(k => [k, State.calcDiff((this as any)[k], (newProps as any)[k])])
-      .reduce((p, [k, v]) => {(p as any)[k as string] = v; return p}, {})
+      .reduce((p, [k, v]) => { (p as any)[k as string] = v; return p }, {})
     return this.updateFromDiffs(0, diffs);
   }
   updateFromDiffs(lastVersion: number, diffs: any) {
@@ -87,9 +93,9 @@ export class State {
       this._historyOffset = lastVersion;
       this._pendingChanges = {};
       let newState;
-      if ((diffs.attributes && !(diffs.attributes instanceof Map || diffs.attributes instanceof Set)) || 
-          (diffs.methods && !(diffs.methods instanceof Map)) ) {
-            newState = State.fromObject(diffs);
+      if ((diffs.attributes && !(diffs.attributes instanceof Map || diffs.attributes instanceof Set)) ||
+        (diffs.methods && !(diffs.methods instanceof Map))) {
+        newState = State.fromObject(diffs);
       } else {
         newState = diffs;
       }
@@ -100,9 +106,9 @@ export class State {
       const nextVersion = this._historyOffset + this._history.length;
       if (Object.keys(diffs).includes(nextVersion.toString())) {
         for (let i in Object.keys(diffs)) {
-          const diff = diffs[(nextVersion+i).toString()];
+          const diff = diffs[(nextVersion + i).toString()];
           this._history.push(diff);
-          
+
           for (let k of Object.getOwnPropertyNames(diff)) {
             (this as any)[k] = (diff[k] instanceof Array) ? new Set(diff[k]) : (
               (diff[k] instanceof Object && !(diff[k] instanceof Map)) ? new Map(Object.entries(diff[k])) : diff[k]
@@ -113,7 +119,7 @@ export class State {
       } else {
         Object.assign(
           this._pendingChanges,
-          Object.entries(diffs).filter(([k, v]) => k != 'pipeline').reduce((p, [k, v]) => {(p as any)[k] = v; return p}, {}));
+          Object.entries(diffs).filter(([k, v]) => k != 'pipeline').reduce((p, [k, v]) => { (p as any)[k] = v; return p }, {}));
       }
     }
     if (Object.keys(diffs).includes('pipeline')) {
@@ -158,7 +164,7 @@ export class State {
         }
         return obj1;
       }
-      
+
     }
   }
 }
@@ -174,7 +180,7 @@ export class Telekinesis extends Function {
   _state: State;
 
   _channel?: Channel;
-  _clients?: Map<[string, string|null], any>;
+  _clients?: Map<[string, string | null], any>;
   _onUpdateCallback?: any;
   _subscription?: Telekinesis;
   _subscribers: Set<Telekinesis>;
@@ -186,7 +192,7 @@ export class Telekinesis extends Function {
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
-    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis 
+    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis
   ) {
     super();
     this._target = target;
@@ -220,8 +226,7 @@ export class Telekinesis extends Function {
         let state = target._state.clone()
         state.pipeline.push(['get', prop])
 
-        return Telekinesis._fromState(
-          state,
+        let out = new Telekinesis(
           target._target,
           target._session,
           target._mask,
@@ -230,6 +235,9 @@ export class Telekinesis extends Function {
           target._compileSignatures,
           target,
         )
+        out._state.pipeline = state.pipeline;
+
+        return out;
       },
       apply(target: Telekinesis, that: any, args: any[]) {
         return target._call(args);
@@ -238,12 +246,11 @@ export class Telekinesis extends Function {
     if (target instanceof Route) {
       if (parent === undefined) {
         if (!session.routes.has([target.session, target.channel])) {
-          session.routes.set([target.session, target.channel], {refcount: 0, delegations: new Set<[string, string|null]>()});
+          session.routes.set([target.session, target.channel], { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() });
         }
-        const o = this._session.routes.get([target.session, target.channel])
-        if (o != undefined) {
-          o.refcount += 1;
-        }
+        const o = this._session.routes.get([target.session, target.channel]) as any;
+        o.refcount += 1;
+        this._updateState(...o.state.getDiffs(0, undefined, true));
       }
     } else {
       this._clients = new Map();
@@ -264,8 +271,10 @@ export class Telekinesis extends Function {
     }
     return undefined;
   }
-  _updateState(state: State) {
-    this._state = state;
+  _updateState(lastVersion?: number, diffs?: any) {
+    if (lastVersion !== undefined) {
+      this._state.updateFromDiffs(lastVersion, diffs)
+    }
     this._onUpdateCallback && this._onUpdateCallback(this);
   }
   async _delegate(receiver: string | [string, string], parentChannel?: Channel) {
@@ -327,14 +336,14 @@ export class Telekinesis extends Function {
 
     try {
       if (this._clients && !this._clients.has(metadata.caller.session)) {
-        this._clients.set(metadata.caller.session, {lastState: null, cacheAttributes: null });
+        this._clients.set(metadata.caller.session, { lastState: null, cacheAttributes: null });
         this._clients.delete([metadata.caller.session[0], null]);
       }
       if ((payload as any)['close'] !== undefined) {
         this._clients?.delete(metadata.caller.session);
-        for (const delegation of ((payload as any)['close'] as Array<[string, string|null]>)) {
+        for (const delegation of ((payload as any)['close'] as Array<[string, string | null]>)) {
           if (this._clients && !this._clients.has(delegation)) {
-            this._clients.set(delegation, {lastState: null, cacheAttributes: null});
+            this._clients.set(delegation, { lastState: null, cacheAttributes: null });
             if (delegation[1] !== null) {
               this._clients.delete([delegation[0], null]);
             }
@@ -402,8 +411,7 @@ export class Telekinesis extends Function {
     let state = this._state.clone()
     state.pipeline.push(['call', [args, kwargs || {}]])
 
-    return Telekinesis._fromState(
-      state,
+    let out = new Telekinesis(
       this._target,
       this._session,
       this._mask,
@@ -411,6 +419,8 @@ export class Telekinesis extends Function {
       this._maxDelegationDepth,
       this._compileSignatures,
       this)
+    out._state.pipeline = state.pipeline;
+    return out;
   }
   async _execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][], breakOnTelekinesis: boolean = false) {
     if (this._target instanceof Promise) {
@@ -424,7 +434,7 @@ export class Telekinesis extends Function {
       if (this._target instanceof Route) {
         if (this._parent === undefined) {
           if (!this._session.routes.has([this._target.session, this._target.channel])) {
-            this._session.routes.set([this._target.session, this._target.channel], {refcount: 0, delegations: new Set<[string, string|null]>()});
+            this._session.routes.set([this._target.session, this._target.channel], { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() });
           }
           const o = this._session.routes.get([this._target.session, this._target.channel])
           if (o != undefined) {
@@ -520,7 +530,7 @@ export class Telekinesis extends Function {
           )
           console.log(r.toObject())
           if (tk._clients && !tk._clients.has(r.session)) {
-            tk._clients.set(r.session, {lastState: null, cacheAttributes: null });
+            tk._clients.set(r.session, { lastState: null, cacheAttributes: null });
             tk._clients.delete([r.session[0], null]);
           }
           const o = tk._clients?.get(r.session);
@@ -534,6 +544,7 @@ export class Telekinesis extends Function {
 
     for (const tk of touched) {
       tk._state.updateFromTarget(tk._target);
+      tk._updateState();
 
       const subscribers = Array.from(tk._subscribers)
       if (subscribers) {
@@ -577,7 +588,7 @@ export class Telekinesis extends Function {
           o.refcount -= 0;
           if (o.refcount <= 0) {
             const newChannel = new Channel(this._session);
-            await newChannel.send(this._target, {close: Array.from(o.delegations) || []})
+            await newChannel.send(this._target, { close: Array.from(o.delegations) || [] })
           }
         }
       } else {
@@ -587,7 +598,7 @@ export class Telekinesis extends Function {
         }
         await this._channel?.close();
       }
-    } catch(e) {
+    } catch (e) {
       console.error(e)
     }
   }
@@ -659,7 +670,7 @@ export class Telekinesis extends Function {
       }
       if (!(target._target instanceof Route)) {
         if (obj._clients?.has(receiver) === false) {
-          obj._clients?.set(receiver, {lastState: null, cacheAttributes: null});
+          obj._clients?.set(receiver, { lastState: null, cacheAttributes: null });
         }
         if (receiver[1] !== null) {
           obj._clients?.delete([receiver[0], null]);
@@ -669,8 +680,19 @@ export class Telekinesis extends Function {
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
       out[1] = ['obj', [
         route.toObject(),
-        await this._encode(obj._state.toObject(this._mask, !blockRecursion && obj._clients?.get(receiver)?.cacheAttributes), receiver, channel, traversalStack, true)
-      ]]
+        await this._encode(
+          receiver !== route.session ?
+            obj._state.getDiffs(obj._clients?.get(receiver)?.lastState || 0, this._mask, !blockRecursion && obj._clients?.get(receiver)?.cacheAttributes) :
+            {pipeline: obj._state.pipeline},
+          receiver,
+          channel,
+          traversalStack,
+          true)
+      ]];
+      if (this._clients?.has(receiver)) {
+        const o = (obj._clients as Map<[string, string|null], any>).get(receiver);
+        o.lastState = obj._state._historyOffset + obj._state._history.length;
+      }
 
     }
 
@@ -736,27 +758,26 @@ export class Telekinesis extends Function {
         out = Route.fromObject(obj);
       } else {
         // console.log(typ, obj)
-        let route = Route.fromObject(obj[0]);
-        let state = State.fromObject(this._decode(inputStack, callerId, obj[1], outputStack));
+        const route = Route.fromObject(obj[0]);
+        const [lastVersion, stateDiffs] = this._decode(inputStack, callerId, obj[1], outputStack) as [number, any];
+
+        if (!this._session.routes.has([route.session, route.channel])) {
+          this._session.routes.set([route.session, route.channel], { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State()})
+        }
+        const o = this._session.routes.get([route.session, route.channel]) as any;
+        o.state.updateFromDiffs(lastVersion, stateDiffs)
 
         if (this._parent) {
           this._target = route;
-          this._updateState(state);
+          o.refcount += 1;
+          this._updateState(...o.state.getDiffs(0, undefined, true));
           this._parent = undefined;
-          if (!this._session.routes.has([route.session, route.channel])) {
-            this._session.routes.set([route.session, route.channel], {refcount: 0, delegations: new Set<[string, string|null]>()})
-          }
-          const o = this._session.routes.get([route.session, route.channel])
-          if (o != undefined) {
-            o.refcount += 1;
-          }
           out = this._proxy;
-        } else if (this._target instanceof Route && this._target.toObject() === route.toObject()) {
-          this._updateState(state);
+        } else if (this._target instanceof Route && JSON.stringify(this._target.toObject()) === JSON.stringify(route.toObject())) {
+          this._updateState(...o.state.getDiffs(0, undefined, true));
           out = this._proxy;
         } else {
-          out = Telekinesis._fromState(
-            state,
+          out = new Telekinesis(
             route,
             this._session,
             this._mask,
@@ -770,12 +791,6 @@ export class Telekinesis extends Function {
       outputStack.set(root, out);
       return out;
     }
-  }
-  static _fromState(state: State, target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
-    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis) {
-    let t = new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent);
-    t._state = state;
-    return t
   }
   static _reuse(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
