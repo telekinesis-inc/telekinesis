@@ -197,6 +197,7 @@ export class Telekinesis extends Function {
     this._maxDelegationDepth = maxDelegationDepth;
     this._compileSignatures = compileSignatures;
     this._parent = parent;
+    this._state = new State();
 
     this._subscribers = new Set();
 
@@ -235,7 +236,6 @@ export class Telekinesis extends Function {
       }
     });
     if (target instanceof Route) {
-      this._state = new State();
       if (parent === undefined) {
         if (!session.routes.has([target.session, target.channel])) {
           session.routes.set([target.session, target.channel], {refcount: 0, delegations: new Set<[string, string|null]>()});
@@ -248,7 +248,7 @@ export class Telekinesis extends Function {
     } else {
       this._clients = new Map();
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
-      this._state = State.fromTarget(target);
+      this._state.updateFromTarget(target);
     }
     return this._proxy;
   }
@@ -533,12 +533,11 @@ export class Telekinesis extends Function {
     }
 
     for (const tk of touched) {
-      tk._state = State.fromTarget(tk._target);
+      tk._state.updateFromTarget(tk._target);
 
       const subscribers = Array.from(tk._subscribers)
       if (subscribers) {
-        const state = State.fromTarget(tk._target).toObject(tk._mask, true)
-        subscribers.map((s: Telekinesis) => s(state)._execute())
+        subscribers.map((s: Telekinesis) => s(tk)._execute())
       }
     }
 
