@@ -721,9 +721,7 @@ class Telekinesis:
                             obj._clients[receiver]["last_state"] if receiver in obj._clients else -1,
                             self._mask,
                             obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
-                        )
-                        if receiver != route.session
-                        else {},
+                        ) if receiver != route.session else {"pipeline": obj._state.pipeline},
                         receiver,
                         channel,
                         traversal_stack,
