@@ -648,7 +648,7 @@ export class Route {
   async validateTokenChain(receiver: string) {
     if (this.session[0] !== receiver) {
       if (!(this.tokens.length > 0)) {
-        throw 'Invalid token chain';
+        throw 'Invalid token chain 0';
       }
       let prevToken: Token | undefined = undefined;
       for (let i in this.tokens) {
@@ -656,9 +656,11 @@ export class Route {
         prevToken = prevToken || token;
         if (
           (i === '0' && (!(token.asset == this.channel) || !(token.tokenType == 'root') || !(token.issuer == this.session[0]))) ||
-          (i !== '0') && (!(token.issuer === prevToken.receiver) || !(token.asset !== prevToken.signature) || !(token.tokenType === 'extension')) ||
+          (i !== '0') && (!(token.issuer === prevToken.receiver) || !(token.asset === prevToken.signature) || !(token.tokenType === 'extension')) ||
           (i === this.tokens.length.toString() && token.receiver !== receiver)
         ) {
+          console.log(i, token, prevToken, this, receiver)
+          console.log(!(token.issuer === prevToken.receiver), !(token.asset === prevToken.signature) || !(token.tokenType === 'extension'), token.receiver !== receiver)
           throw 'Invalid token chain';
         }
         if (token.receiver === receiver) {

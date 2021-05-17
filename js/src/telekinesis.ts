@@ -243,7 +243,7 @@ export class Telekinesis extends Function {
           target._exposeTb,
           target._maxDelegationDepth,
           target._compileSignatures,
-          target,
+          target._proxy,
         )
         out._state.pipeline = state.pipeline;
 
@@ -262,7 +262,7 @@ export class Telekinesis extends Function {
         o.refcount += 1;
         this._updateState(...o.state.getDiffs(0, undefined, true));
       }
-    } else {
+    } else if (!(target instanceof Promise)){
       this._clients = new Map();
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
       this._state.updateFromTarget(target);
@@ -428,19 +428,13 @@ export class Telekinesis extends Function {
       this._exposeTb,
       this._maxDelegationDepth,
       this._compileSignatures,
-      this)
+      this._proxy)
     out._state.pipeline = state.pipeline;
     return out;
   }
   async _execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][], breakOnTelekinesis: boolean = false) {
     if (this._target instanceof Promise) {
-      const oldTarget = this._target;
       this._target = await this._target;
-      const set = (this._session.targets.get(oldTarget) as Set<Telekinesis>);
-      set.delete(this._proxy)
-      if (!set.size) {
-        this._session.targets.delete(oldTarget)
-      }
       if (this._target instanceof Route) {
         if (this._parent === undefined) {
           if (!this._session.routes.has(this._target._hash)) {
