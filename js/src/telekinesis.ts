@@ -48,8 +48,11 @@ export class State {
   static fromObject(obj: any) {
     return new State(
       obj.attributes instanceof Array ? new Set(obj.attributes) :
-        Object.getOwnPropertyNames(obj.attributes || {}).reduce((p, v) => { p.set(v, obj.attributes[v]); return p }, new Map()),
-      Object.getOwnPropertyNames(obj.methods || {}).reduce((p, v) => { p.set(v, obj.methods[v]); return p }, new Map()),
+        (obj.attributes instanceof Set || obj.attributes instanceof Map ? obj.attributes :
+          Object.getOwnPropertyNames(obj.attributes || {}).reduce((p, v) => { p.set(v, obj.attributes[v]); return p }, new Map())
+        ),
+      obj.methods instanceof Map ? obj.methods :
+        Object.getOwnPropertyNames(obj.methods || {}).reduce((p, v) => { p.set(v, obj.methods[v]); return p }, new Map()),
       obj.repr,
       obj.doc,
       obj.pipeline,
@@ -65,7 +68,7 @@ export class State {
     const newProps = {
       attributes: Object.getOwnPropertyNames(target)
         .filter(x => x[0] !== '_')
-        .reduce((p, v) => { (p as any)[v] = (target as any)[v]; return p }, {}),
+        .reduce((p, v) => { p.set(v, (target as any)[v]); return p }, new Map()),
       methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
         .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
         .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
