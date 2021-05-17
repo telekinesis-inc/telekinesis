@@ -116,16 +116,16 @@ export class State {
         (this as any)[k] = (newState as any)[k];
       }
     } else {
-      const nextVersion = this._historyOffset + this._history.length;
+      const nextVersion = this._historyOffset + this._history.length + 1;
       if (Object.keys(diffs).includes(nextVersion.toString())) {
         for (let i in Object.keys(diffs)) {
-          const diff = diffs[(nextVersion + i).toString()];
+          const diff = diffs[(nextVersion + parseInt(i)).toString()];
           this._history.push(diff);
-
+          
           for (let k of Object.getOwnPropertyNames(diff)) {
-            (this as any)[k] = (diff[k] instanceof Array) ? new Set(diff[k]) : (
+            (this as any)[k] = State.applyDiff((this as any)[k], (diff[k] instanceof Array) ? new Set(diff[k]) : (
               (diff[k] instanceof Object && !(diff[k] instanceof Map)) ? new Map(Object.entries(diff[k])) : diff[k]
-            )
+            ))
           }
           // TODO: add pendingChanges
         }
@@ -236,8 +236,8 @@ export class Telekinesis extends Function {
           return (async (r: any) => r(await target._execute()))
         }
 
-        let state = target._state.clone()
-        state.pipeline.push(['get', prop])
+        let state = target._state.clone();
+        state.pipeline.push(['get', prop]);
 
         let out = new Telekinesis(
           target._target,
@@ -257,13 +257,13 @@ export class Telekinesis extends Function {
       }
     });
     if (target instanceof Route) {
+      if (!session.routes.has(target._hash)) {
+        session.routes.set(target._hash, { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() });
+      }
+      const o = this._session.routes.get(target._hash) as any;
+      this._updateState(...o.state.getDiffs(0, undefined, true));
       if (parent === undefined) {
-        if (!session.routes.has(target._hash)) {
-          session.routes.set(target._hash, { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() });
-        }
-        const o = this._session.routes.get(target._hash) as any;
         o.refcount += 1;
-        this._updateState(...o.state.getDiffs(0, undefined, true));
       }
     } else if (!(target instanceof Promise)){
       this._clients = new Map();

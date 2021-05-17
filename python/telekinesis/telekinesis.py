@@ -718,7 +718,7 @@ class Telekinesis:
                     route.to_dict(),
                     self._encode(
                         obj._state.get_diffs(
-                            obj._clients[receiver]["last_state"] if receiver in obj._clients else -1,
+                            obj._clients[receiver]["last_state"] if receiver in obj._clients else 0,
                             self._mask,
                             obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
                         ) if receiver != route.session else {"pipeline": obj._state.pipeline},
