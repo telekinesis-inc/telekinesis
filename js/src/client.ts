@@ -217,7 +217,7 @@ export class Session {
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
   issuedTokens: Map<string, [Token, Token?]>;
   targets: Map<any, Set<Telekinesis>>;
-  routes: Map<[[string, string], string], any>;
+  routes: Map<string, any>;
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
@@ -623,6 +623,7 @@ export class Route {
   session: [string, string];
   channel: string;
   tokens: string[];
+  _hash: string;
   _parentChannel?: Channel;
 
   constructor(brokers: string[], session: [string, string], channel: string, tokens: string[], parentChannel?: Channel) { // 
@@ -630,6 +631,7 @@ export class Route {
     this.session = session;
     this.channel = channel;
     this.tokens = tokens;
+    this._hash = this.session.join('') + this.channel;
     this._parentChannel = parentChannel;
   }
   toObject() {
