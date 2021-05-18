@@ -158,7 +158,7 @@ export class State {
     if (diff[0] === 'u') {
       if (obj0 instanceof Map) {
         const obj1 = new Map(obj0);
-        for (const [key, value] of Object.entries(diff)) {
+        for (const [key, value] of Object.entries(diff[1])) {
           const code = (value as any)[0];
           if (['c', 'r'].includes(code)) {
             obj1.set(key, (value as any)[1]);

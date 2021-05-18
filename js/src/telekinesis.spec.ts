@@ -30,7 +30,7 @@ asyncio.run(main())
 `
 
 beforeAll(() => new Promise((resolve, reject) => {
-  // jest.setTimeout(300000);
+  jest.setTimeout(300000);
   subprocess = spawn('python', ['-c', startBroker])
 
   subprocess.stderr.on('data', (data: any) => {
