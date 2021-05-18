@@ -118,14 +118,21 @@ export class State {
       const nextVersion = this._historyOffset + this._history.length + 1;
       if (Object.keys(diffs).includes(nextVersion.toString())) {
         for (let i in Object.keys(diffs)) {
-          const diff = diffs[(nextVersion + parseInt(i)).toString()];
-          this._history.push(diff);
-          
-          for (let k of Object.getOwnPropertyNames(diff)) {
-            (this as any)[k] = State.applyDiff((this as any)[k], diff[k]);
+          if (Object.keys(diffs)[i] === 'pipeline') {
+            this.pipeline = diffs.pipeline;
+          } else {
+            const diff = diffs[(nextVersion + parseInt(i)).toString()];
+            this._history.push(diff);
+            if (diff === undefined) {
+              console.log(diffs, nextVersion, i)
+            }
+            
+            for (let k of Object.getOwnPropertyNames(diff)) {
+              (this as any)[k] = State.applyDiff((this as any)[k], diff[k]);
+            }
+            // TODO: add pendingChanges
           }
-          // TODO: add pendingChanges
-        }
+      }
       } else {
         Object.assign(
           this._pendingChanges,
@@ -133,7 +140,6 @@ export class State {
       }
     }
     if (Object.keys(diffs).includes('pipeline')) {
-      this.pipeline = diffs.pipeline;
     }
   }
   static calcDiff(obj0: any, obj1: any, maxDepth: number = 10) {
@@ -400,7 +406,8 @@ export class Telekinesis extends Function {
         }
       }
     } catch (e) {
-      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${e}`)
+      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${e.message}` + 
+                        this._exposeTb ? '\n' + e.stack: '')
       this._state.pipeline = [];
       try {
         const errMessage = { error: (this._exposeTb ? e : e.name) };
