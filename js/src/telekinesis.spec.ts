@@ -15,6 +15,13 @@ async def main():
     c = tk.Connection(tk.Session(), '${HOST}')
     reg = Registry()
     reg['echo'] = lambda x: x
+    class Counter:
+        def __init__(self, initial_value=0):
+            self.value = initial_value
+        def increment(self, amount=1):
+            self.value += amount
+            return self
+    reg['counter_python'] = Counter()
     broker.entrypoint = await tk.Telekinesis(reg, c.session)._delegate('*')
     lock = asyncio.Event()
     await lock.wait()
@@ -62,7 +69,7 @@ describe("Telekinesis", () => {
     await registry.update({ test: 123 });
     expect(await registry.get('test')).toEqual(123);
   });
-  it('receives pull updates when it subscribes', async () => {
+  it('receives pull updates when it subscribes (JS object)', async () => {
     class Counter {
       value: number;
       constructor(initialValue: number = 0) {
@@ -77,6 +84,14 @@ describe("Telekinesis", () => {
     await server.update({ counter: new Counter() });
     const a = await (new PublicUser(HOST) as any).get('counter');
     const b = await (new PublicUser(HOST) as any).get('counter')._subscribe();
+
+    expect(await a.increment().increment().increment(2).value).toEqual(4);
+    await new Promise(r => setTimeout(()=> r(true), 10));
+    expect(b.value._last()).toEqual(4);
+  })
+  it('receives pull updates when it subscribes (python object)', async () => {
+    const a = await (new PublicUser(HOST) as any).get('counter_python');
+    const b = await (new PublicUser(HOST) as any).get('counter_python')._subscribe();
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
     await new Promise(r => setTimeout(()=> r(true), 10));
