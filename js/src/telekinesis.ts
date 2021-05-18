@@ -1,4 +1,3 @@
-import { PublicUser } from '.';
 import { Channel, Header, RequestMetadata, Route, Session } from './client';
 
 export class State {
@@ -58,7 +57,7 @@ export class State {
       obj.pipeline,
     );
   }
-  getDiffs(lastVersion: number, mask?: Set<string>, cacheAttributes: boolean = false) {
+  getDiffs(lastVersion: number, mask?: Set<string>, cacheAttributes: boolean = false): [number, any] {
     if (true) {// TODO: Implement diffs: (lastVersion < this._historyOffset && lastVersion >= 0) {
       return [this._historyOffset + this._history.length, this.toObject(mask, cacheAttributes)]
     }
@@ -123,9 +122,7 @@ export class State {
           this._history.push(diff);
           
           for (let k of Object.getOwnPropertyNames(diff)) {
-            (this as any)[k] = State.applyDiff((this as any)[k], (diff[k] instanceof Array) ? new Set(diff[k]) : (
-              (diff[k] instanceof Object && !(diff[k] instanceof Map)) ? new Map(Object.entries(diff[k])) : diff[k]
-            ))
+            (this as any)[k] = State.applyDiff((this as any)[k], diff[k]);
           }
           // TODO: add pendingChanges
         }
@@ -149,7 +146,7 @@ export class State {
     if (!diff || (Object.keys(diff).length === 0)) {
       return obj0;
     }
-    if (diff[0] === 'c') {
+    if (diff[0] === 'c' || diff[0] === 'r') {
       return diff[1];
     }
     if (diff[0] === 'u') {
@@ -334,10 +331,10 @@ export class Telekinesis extends Function {
   _subscribe(callback?: any) {
     this._onUpdateCallback = callback;
     this._subscription = new Telekinesis(
-      (newState: any) => {
-        const state = State.fromObject(newState)
-        state.pipeline = this._state.pipeline;
-        this._state = state;
+      (tk: Telekinesis) => {
+        const pipeline = this._state.pipeline;
+        this._updateState(...tk._state.getDiffs(0, undefined, true))
+        this._state.pipeline = pipeline;
       }, this._session, undefined, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
     )
     this._state.pipeline.push(['subscribe', this._subscription])
@@ -552,7 +549,7 @@ export class Telekinesis extends Function {
       tk._updateState();
 
       const subscribers = Array.from(tk._subscribers)
-      if (subscribers) {
+      if (subscribers.length) {
         subscribers.map((s: Telekinesis) => s(tk)._execute())
       }
     }

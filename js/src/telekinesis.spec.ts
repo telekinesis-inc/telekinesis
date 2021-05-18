@@ -63,27 +63,23 @@ describe("Telekinesis", () => {
     expect(await registry.get('test')).toEqual(123);
   });
   it('receives pull updates when it subscribes', async () => {
-    class TestChild {
-      x: number;
-      constructor() {
-        this.x = 0;
+    class Counter {
+      value: number;
+      constructor(initialValue: number = 0) {
+        this.value = initialValue;
       }
-    }
-    class TestParent {
-      t: TestChild;
-      constructor() {
-        this.t = new TestChild();
-      }
-      incrementChild() {
-        this.t.x += 1;
+      increment(amount: number = 1) {
+        this.value += amount;
         return this;
       }
     }
     const server = await new PublicUser(HOST) as any;
-    await server.update({ testParent: new TestParent() });
-    const p = await (new PublicUser(HOST) as any).get('testParent');
-    const c = await p.t._subscribe();
-    await p.incrementChild().incrementChild().t;
-    expect(c.x._last()).toEqual(2);
+    await server.update({ counter: new Counter() });
+    const a = await (new PublicUser(HOST) as any).get('counter');
+    const b = await (new PublicUser(HOST) as any).get('counter')._subscribe();
+
+    expect(await a.increment().increment().increment(2).value).toEqual(4);
+    await new Promise(r => setTimeout(()=> r(true), 10));
+    expect(b.value._last()).toEqual(4);
   })
 });
