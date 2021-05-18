@@ -38,8 +38,10 @@ async def test_state_diffing():
 
     await pu
     assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
+    assert pu.x._last() == container.x
 
     container.y = os.urandom(2 ** 20)
 
     await pu
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
+    assert pu.y._last() == container.y
