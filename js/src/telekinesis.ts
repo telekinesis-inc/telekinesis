@@ -1,4 +1,5 @@
 import { Channel, Header, RequestMetadata, Route, Session } from './client';
+import { eqSet } from './helpers';
 
 export class State {
   attributes: Map<string, any> | Set<string>;
@@ -251,7 +252,7 @@ export class Telekinesis extends Function {
           target._compileSignatures,
           target._proxy,
         )
-        out._state.pipeline = state.pipeline;
+        out._state = state;
 
         return out;
       },
@@ -268,7 +269,7 @@ export class Telekinesis extends Function {
       if (parent === undefined) {
         o.refcount += 1;
       }
-    } else if (!(target instanceof Promise)){
+    } else if (!(target instanceof Promise) && !(this._parent)){
       this._clients = new Map();
       session.targets.set(target, (session.targets.get(target) || new Set()).add(this._proxy))
       this._state.updateFromTarget(target);
@@ -812,10 +813,14 @@ export class Telekinesis extends Function {
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
     maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis
   ) {
-    const kwargs = { target, session, mask, exposeTb, maxDelegationDepth, compileSignatures }
+    const kwargs = { target, session, mask: new Set(mask), exposeTb, maxDelegationDepth, compileSignatures }
     return Array.from(session.targets.get(target) || [])
       .reduce((p, c: any) => p || (Object.entries(kwargs)
-        .reduce((pp, cc: [string, any]) => pp && c['_' + cc[0]] === cc[1], true) && c), undefined) ||
+        .reduce((pp, cc: [string, any]) => pp && (
+          c['_' + cc[0]] instanceof Set ?
+          eqSet(c['_' + cc[0]], cc[1]) :
+          c['_' + cc[0]] === cc[1]
+        ), true) && c), undefined) ||
       new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent)
   }
 }

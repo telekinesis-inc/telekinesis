@@ -16,6 +16,11 @@ export function intToBytes(int: number, len: number) {
 export function bytesToInt(bytes: Uint8Array) {
   return Array.from(bytes).reduce((p, c, i) => p + c * 256 ** (bytes.length - i - 1), 0)
 }
+export function eqSet(as: Set<any>, bs: Set<any>) {
+    if (as.size !== bs.size) return false;
+    for (var a of as) if (!bs.has(a)) return false;
+    return true;
+}
 
 export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} },
   printCallback: ((output: any) => void) = console.log, kwargs?: any) {
