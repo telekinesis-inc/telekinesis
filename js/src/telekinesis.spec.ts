@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { Connection, PublicUser, Session } from "./index";
+import { Connection, PublicUser, Session, Telekinesis } from "./index";
 
 let subprocess: any;
 const HOST = 'ws://localhost:8777';
@@ -10,11 +10,21 @@ import asyncio
 class Registry(dict):
     pass
 
+measures = {"count": 0, "size_kb": 0}
+
+class MeasuredBroker(tk.Broker):
+    async def handle_send(self, connection, message, source, destination):
+        measures["count"] += 1
+        measures["size_kb"] += len(message) / 2 ** 10
+        return await super().handle_send(connection, message, source, destination)
+
 async def main():
-    broker = await tk.Broker().serve(port=${HOST.split(':')[2]})
+    broker = await MeasuredBroker().serve(port=${HOST.split(':')[2]})
     c = tk.Connection(tk.Session(), '${HOST}')
     reg = Registry()
     reg['echo'] = lambda x: x
+    reg['get_measures'] = lambda: measures
+
     class Counter:
         def __init__(self, initial_value=0):
             self.value = initial_value
@@ -37,6 +47,7 @@ beforeAll(() => new Promise((resolve, reject) => {
     throw `${data}`;
   });
   setTimeout(() => resolve(true), 1000)
+  // resolve(true);
 }))
 afterAll(() => {
   subprocess.kill()
@@ -69,6 +80,30 @@ describe("Telekinesis", () => {
     await registry.update({ test: 123 });
     expect(await registry.get('test')).toEqual(123);
   });
+  it('updates its State when its attributes change', async () => {
+    class Demo {
+      x: string;
+      constructor() {
+        this.x = '';
+      }
+    }
+    const d = new Demo();
+    const tk = new Telekinesis(d, new Session()) as any;
+
+    expect(tk.x._last()).toEqual(d.x);  
+
+    d.x = 'hello';
+    await tk;
+
+    expect(tk.x._last()).toEqual(d.x);  
+
+    d.x = 'bye';
+    await tk;
+
+    expect(tk.x._last()).toEqual(d.x);  
+
+  })
+
   it('receives pull updates when it subscribes (JS object)', async () => {
     class Counter {
       value: number;
@@ -97,4 +132,43 @@ describe("Telekinesis", () => {
     await new Promise(r => setTimeout(()=> r(true), 10));
     expect(b.value._last()).toEqual(4);
   })
+  it('transfers only the difference between updates', async () => {
+    class Demo {
+      x0: string;
+      x1: string;
+      constructor() {
+        this.x0 = '';
+        this.x1 = ''; 
+      }
+    }
+    const d = new Demo();
+
+    const server = new PublicUser(HOST) as any;
+    const a = new Telekinesis(d, server._session) as any;
+
+    await server.update({'demo': a});
+    const b = await (new PublicUser(HOST) as any).get('demo')._subscribe();
+    const getMeasures = await (new PublicUser(HOST) as any).get('get_measures')
+
+    const m0 = (await getMeasures()).size_kb;
+    d.x0 = Array(10000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
+
+    await a;
+
+    expect(a.x0._last()).toEqual(d.x0);
+    await new Promise(r => setTimeout(()=> r(true), 300));
+    expect(b.x0._last()).toEqual(d.x0);
+    // console.log((await getMeasures()).size_kb, m0)
+    const m1 = (await getMeasures()).size_kb;
+
+    d.x1 = Array(20).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
+    await a;
+    await new Promise(r => setTimeout(()=> r(true), 100));
+
+    expect(b.x1._last()).toEqual(d.x1);
+    const m2 = (await getMeasures()).size_kb;
+    expect(m2-m1).toBeLessThan(0.2*(m1-m0));
+    // console.log((await getMeasures()).size_kb, m0)
+  })
+
 });
