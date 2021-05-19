@@ -59,10 +59,45 @@ export class State {
     );
   }
   getDiffs(lastVersion: number, mask?: Set<string>, cacheAttributes: boolean = false): [number, any] {
-    if (true) {// TODO: Implement diffs: (lastVersion < this._historyOffset && lastVersion >= 0) {
+    if (lastVersion < this._historyOffset && lastVersion >= 0) {
       return [this._historyOffset + this._history.length, this.toObject(mask, cacheAttributes)]
     }
-
+    const out = {} as any;
+    for (let i in this._history.slice(lastVersion - this._historyOffset)) {
+      const diff = this._history.slice(lastVersion - this._historyOffset)[i] as any;
+      // console.log('diff', diff)
+      const filtered = {} as any;
+      if (diff.attributes) {
+        let x;
+        if (cacheAttributes) {
+          x = Array.from(Object.entries(diff.attributes[1])).filter(([k, _]) => !(mask || new Set()).has(k));
+        } else {
+          x = Array.from(Object.entries(diff.attributes[1]))
+            .filter(([k, v]) => !(mask || new Set()).has(k) && ['c', 'd'].includes((v as any)[0]))
+            .map(([k, v]) => [k, (v as any)[0]]);
+        }
+        // console.log(x)
+        if (x.length) {
+          filtered.attributes = ['u', x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
+        }
+      }
+      if (diff.methods) {
+        let x;
+        x = Array.from(Object.entries(diff.attributes)).filter(([k, _]) => !(mask || new Set()).has(k));
+        if (x.length) {
+          filtered.methods = ['u', x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
+        }
+      }
+      if (diff.repr) {
+        filtered.repr = diff.repr;
+      }
+      if (diff.doc) {
+        filtered.doc = diff.doc;
+      }
+      out[(parseInt(i) + lastVersion + 1).toString()] = filtered;
+    }
+    out.pipeline = this.pipeline;
+    return [0, out];
   }
   updateFromTarget(target: Object) {
     const newProps = {
@@ -146,6 +181,31 @@ export class State {
   static calcDiff(obj0: any, obj1: any, maxDepth: number = 10) {
     if (obj0 === obj1) {
       return;
+    }
+    if (maxDepth > 0) {
+      if ((obj0 instanceof Map) && (obj1 instanceof Map)) {
+        const changes = {} as any;
+        for (let key of obj0.keys()) {
+          if (obj1.has(key)) {
+            const diff = State.calcDiff(obj0.get(key), obj1.get(key), maxDepth-1);
+            if (diff) {
+              changes[key] = diff;
+            }
+          } else {
+            changes[key] = ["d"];
+          }
+        }
+        for (let key of obj1.keys()) {
+          if (!obj0.has(key)) {
+            changes[key] = ["c", obj1.get(key)]
+          }
+        }
+        if (Object.keys(changes).length) {
+          return ["u", changes];
+        } else {
+          return;
+        }
+      }
     }
     return ["r", obj1];
   }
@@ -703,9 +763,10 @@ export class Telekinesis extends Function {
           traversalStack,
           true)
       ]];
-      if (this._clients?.has(receiver.join())) {
+      if (obj._clients?.has(receiver.join())) {
         const o = (obj._clients as Map<string, any>).get(receiver.join());
         o.lastState = obj._state._historyOffset + obj._state._history.length;
+        // console.log('>>>>>>>', o.lastState)
       }
 
     }

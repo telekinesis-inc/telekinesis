@@ -148,10 +148,11 @@ describe("Telekinesis", () => {
 
     await server.update({'demo': a});
     const b = await (new PublicUser(HOST) as any).get('demo')._subscribe();
+    await b;
     const getMeasures = await (new PublicUser(HOST) as any).get('get_measures')
 
     const m0 = (await getMeasures()).size_kb;
-    d.x0 = Array(10000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
+    d.x0 = Array(30000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
 
     await a;
 
@@ -161,7 +162,7 @@ describe("Telekinesis", () => {
     // console.log((await getMeasures()).size_kb, m0)
     const m1 = (await getMeasures()).size_kb;
 
-    d.x1 = Array(20).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
+    d.x1 = Array(2).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
     await a;
     await new Promise(r => setTimeout(()=> r(true), 100));
 
