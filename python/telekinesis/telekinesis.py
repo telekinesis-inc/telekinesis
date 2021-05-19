@@ -272,7 +272,7 @@ class Telekinesis:
                     session.routes[(target.session, target.channel)] = {"refcount": 0, "delegations": set(), "state": State()}
                 session.routes[(target.session, target.channel)]["refcount"] += 1
 
-        elif not asyncio.iscoroutine(target):
+        elif not asyncio.iscoroutine(target) and not parent:
             session.targets[id(target)] = (session.targets.get(id(target)) or set()).union(set((self,)))
             self._state.update_from_target(target)
             self._update_state()
