@@ -2,7 +2,7 @@ import { deserialize, serialize } from "bson";
 import { randomBytes } from "crypto";
 import { deflate, inflate } from 'zlib';
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
-import { bytesToInt, intToBytes, b64encode } from "./helpers";
+import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
 
 const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
@@ -183,12 +183,13 @@ export class Connection {
   }
   send(headers: Header[], payload: Uint8Array = new Uint8Array(), bundleId?: Uint8Array, reply?: Uint8Array) {
     return new Promise(async (res, rej) => {
-      if (this.websocket === undefined || this.websocket.readyState > 1) {
-        await this.connect()
-      }
-      if (this.websocket !== undefined) {
+      const encode = async (messageId?: string, retry?: number) => {
         let h = new TextEncoder().encode(JSON.stringify(headers))
-        let r = reply ? reply : new Uint8Array(65)
+        let r = reply ? reply : (
+          retry && messageId?
+          new Uint8Array([retry, ...b64decode(messageId)]) :
+          new Uint8Array(65)
+        )
         let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
         let m = new Uint8Array([
           ...intToBytes(Date.now() / 1000 - this.tOffset, 4),
@@ -200,13 +201,35 @@ export class Connection {
         ])
 
         let s = await this.session.sessionKey.sign(m) as Uint8Array;
-        this.websocket.send(new Uint8Array([...s, ...m, ...payload]));
+        return [s, new Uint8Array([...s, ...m, ...payload])]
+      }
 
-        if (headers.map(([a, _]) => a).includes('send') && reply == undefined) {
-          setTimeout(() => {this.awaitingAck.has(b64encode(s)) && rej('Timeout')}, this.RESEND_TIMEOUT*1000);
-          this.awaitingAck.set(b64encode(s), [headers, res])
-        } else {
+      let [s, mm] = await encode();
+      const expectAck = headers.map(([a, _]) => a).includes('send') && reply == undefined;
+      const messageId = b64encode(s);
+
+      if (expectAck) {
+        this.awaitingAck.set(messageId, [headers, res]);
+      }
+      for (let i in Array(this.MAX_SEND_RETRIES+1).fill(0)) {
+        if (this.websocket === undefined || this.websocket.readyState > 1) {
+          await this.connect()
+        }
+        if (this.websocket !== undefined) {
+          this.websocket.send(mm);
+        };
+        if (!expectAck) {
           res(undefined);
+          break;
+        }
+        await new Promise(rr => setTimeout(rr, this.RESEND_TIMEOUT*1000))
+        if (!this.awaitingAck.has(messageId)) {
+          break;
+        } else if (parseInt(i) === this.MAX_SEND_RETRIES) {
+          this.awaitingAck.delete(messageId);
+          rej('Max sent retries reached');
+        } else {
+          [s, mm] = await encode(messageId, parseInt(i));
         }
       }
     }) 
