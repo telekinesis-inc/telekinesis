@@ -99,7 +99,7 @@ class Connection:
             len(payload),
         )
 
-        def encode(header, payload, bundle_id, message_id, retry):
+        def encode(header, payload, message_id, retry):
             h = ujson.dumps(header, escape_forward_slashes=False).encode()
             r = (retry).to_bytes(1, "big") + (message_id or b"0" * 64)
             p = hashlib.sha256(payload).digest()
@@ -108,7 +108,7 @@ class Connection:
             s = self.session.session_key.sign(t + m)
             return s, t + m + payload
 
-        s, mm = encode(header, payload, bundle_id, ack_message_id, 255 if ack_message_id else 0)
+        s, mm = encode(header, payload, ack_message_id, 255 if ack_message_id else 0)
         message_id = s
 
         expect_ack = "send" in set(a for a, _ in header) and not ack_message_id
@@ -143,7 +143,7 @@ class Connection:
                 return
 
             if retry < (self.MAX_SEND_RETRIES):
-                s, mm = encode(header, payload, bundle_id, message_id, retry + 1)
+                s, mm = encode(header, payload, message_id, retry + 1)
                 self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
         raise Exception("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
