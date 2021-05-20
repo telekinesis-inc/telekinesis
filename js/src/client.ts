@@ -216,7 +216,7 @@ export class Connection {
           await this.connect()
         }
         if (this.websocket !== undefined) {
-          this.websocket.send(mm);
+         this.websocket.send(mm);
         };
         if (!expectAck) {
           res(undefined);

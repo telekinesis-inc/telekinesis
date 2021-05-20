@@ -161,6 +161,7 @@ class State:
                     self._history.append(diffs_int[i + next_version])
                     for k in ks:
                         if k in diffs_int[i + next_version]:
+                            # print(k, diffs_int[i+next_version][k], self.__dict__[k], self.apply_diff(self.__dict__[k], diffs_int[i+next_version][k]))
                             self.__dict__[k] = self.apply_diff(self.__dict__[k], diffs_int[i + next_version][k])
 
                 for i in sorted(self._pending_changes):
@@ -217,7 +218,7 @@ class State:
     def apply_diff(obj0, diff):
         if not diff:
             return obj0
-        if diff[0] == "c":
+        if diff[0] in {"c", "r"}:
             return diff[1]
         if diff[0] == "u":
             if type(obj0) == dict:
