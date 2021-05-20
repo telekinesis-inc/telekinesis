@@ -19,6 +19,7 @@ export class Connection {
   brokerId?: string;
   tOffset: number;
   entrypoint?: Route;
+  awaitingAck: Map<string, any>;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
     this.RESEND_TIMEOUT = 2; // sec
@@ -27,6 +28,7 @@ export class Connection {
     this.session = session;
     this.url = url;
     this.tOffset = 0;
+    this.awaitingAck = new Map();
 
     session.connections.push(this);
   }
@@ -148,27 +150,29 @@ export class Connection {
             if (this.session.channels.has(body.destination.channel)) {
               if (fullPayload[0] == 255) {
                 // console.log('ACK');
-                return
-              } // Ignore ACKs
-              let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(0, 64)
-              await this.send(
-                [['send', { source: body.destination, destination: body.source }]],
-                undefined,
-                undefined,
-                new Uint8Array([255, ...mid])
-              ); // Send ACK 
-              let payload = fullPayload.slice(65 + 32)
-              let hash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
-              if (fullPayload.slice(65, 65 + 32).reduce((p, v, i) => p && v === hash[i], true)) {
-                if (mid.reduce((p, v, i) => p && v === signature[i], true)
-                  || this.session.checkNoRepeat(mid, timestamp + this.tOffset)) {
-                  let channel = this.session.channels.get(body.destination.channel)
-                  channel && await channel.handleMessage(
-                    Route.fromObject(body.source),
-                    Route.fromObject(body.destination),
-                    payload,
-                    message.slice(0, 73 + hLen + 65 + 32)
-                  )
+                this.ack(body.source.session[0], b64encode(fullPayload.slice(1, 65)));
+
+              } else {
+                let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(1, 65)
+                await this.send(
+                  [['send', { source: body.destination, destination: body.source }]],
+                  undefined,
+                  undefined,
+                  new Uint8Array([255, ...mid])
+                ); // Send ACK 
+                let payload = fullPayload.slice(65 + 32)
+                let hash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
+                if (fullPayload.slice(65, 65 + 32).reduce((p, v, i) => p && v === hash[i], true)) {
+                  if (mid.reduce((p, v, i) => p && v === signature[i], true)
+                    || this.session.checkNoRepeat(mid, timestamp + this.tOffset)) {
+                    let channel = this.session.channels.get(body.destination.channel)
+                    channel && await channel.handleMessage(
+                      Route.fromObject(body.source),
+                      Route.fromObject(body.destination),
+                      payload,
+                      message.slice(0, 73 + hLen + 65 + 32)
+                    )
+                  }
                 }
               }
             }
@@ -176,29 +180,49 @@ export class Connection {
         }
       }
     }
-
-
   }
-  async send(headers: Header[], payload: Uint8Array = new Uint8Array(), bundleId?: Uint8Array, reply?: Uint8Array) {
-    if (this.websocket === undefined || this.websocket.readyState > 1) {
-      await this.connect()
-    }
-    if (this.websocket !== undefined) {
-      let h = new TextEncoder().encode(JSON.stringify(headers))
-      let r = reply ? reply : new Uint8Array(65)
-      let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
-      let m = new Uint8Array([
-        ...intToBytes(Date.now() / 1000 - this.tOffset, 4),
-        ...intToBytes(h.length, 2),
-        ...intToBytes(payload.length + 32 + 65, 3),
-        ...h,
-        ...r,
-        ...p
-      ])
+  send(headers: Header[], payload: Uint8Array = new Uint8Array(), bundleId?: Uint8Array, reply?: Uint8Array) {
+    return new Promise(async (res, rej) => {
+      if (this.websocket === undefined || this.websocket.readyState > 1) {
+        await this.connect()
+      }
+      if (this.websocket !== undefined) {
+        let h = new TextEncoder().encode(JSON.stringify(headers))
+        let r = reply ? reply : new Uint8Array(65)
+        let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
+        let m = new Uint8Array([
+          ...intToBytes(Date.now() / 1000 - this.tOffset, 4),
+          ...intToBytes(h.length, 2),
+          ...intToBytes(payload.length + 32 + 65, 3),
+          ...h,
+          ...r,
+          ...p
+        ])
 
-      let s = await this.session.sessionKey.sign(m) as Uint8Array;
-      this.websocket.send(new Uint8Array([...s, ...m, ...payload]));
+        let s = await this.session.sessionKey.sign(m) as Uint8Array;
+        this.websocket.send(new Uint8Array([...s, ...m, ...payload]));
+
+        if (headers.map(([a, _]) => a).includes('send') && reply == undefined) {
+          setTimeout(() => {this.awaitingAck.has(b64encode(s)) && rej('Timeout')}, this.RESEND_TIMEOUT*1000);
+          this.awaitingAck.set(b64encode(s), [headers, res])
+        } else {
+          res(undefined);
+        }
+      }
+    }) 
+  }
+  ack(sourceId: string, messageId: string) {
+    const [headers, resolve] = this.awaitingAck.get(messageId);
+    // console.log(sourceId, messageId, headers)
+    if (headers !== undefined) {
+      for (let [action, content] of headers) {
+        if (action === 'send' && content.destination.session[0] === sourceId) {
+          this.awaitingAck.delete(messageId);
+          resolve(undefined);
+        }
+      }
     }
+
   }
   clear(bundleId: Uint8Array) { }
   close() {
