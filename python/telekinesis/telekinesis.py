@@ -445,7 +445,7 @@ class Telekinesis:
                             metadata.caller,
                             {
                                 "return": self._encode(ret, metadata.caller.session),
-                                "root_parent": self._encode(self, metadata.caller.session)
+                                "root_parent": None if ret is self else self._encode(self, metadata.caller.session)
                             },
                         )
 
