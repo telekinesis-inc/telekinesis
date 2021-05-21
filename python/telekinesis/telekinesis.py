@@ -296,10 +296,10 @@ class Telekinesis:
             self,
         )
 
-    def _get_root_state(self):
+    def _get_root_parent(self):
         if self._parent:
-            return self._parent._get_root_state()
-        return self._state
+            return self._parent._get_root_parent()
+        return self
 
     def _last(self):
         if (
@@ -426,7 +426,10 @@ class Telekinesis:
                         or ret._target._channel not in self._session.channels
                     )
                 ):
-                    await ret._forward(ret._state.pipeline, reply_to or metadata.caller)
+                    await ret._forward(
+                        ret._state.pipeline,
+                        reply_to or metadata.caller,
+                        root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session))
                 else:
                     if reply_to:
                         async with Channel(self._session) as new_channel:
@@ -434,8 +437,7 @@ class Telekinesis:
                                 reply_to,
                                 {
                                     "return": self._encode(ret, reply_to.session, new_channel),
-                                    "repr": self._state.repr,
-                                    # "timestamp": self._state.last_change,
+                                    "root_parent": payload.get("root_parent"),
                                 },
                             )
                     else:
@@ -443,8 +445,7 @@ class Telekinesis:
                             metadata.caller,
                             {
                                 "return": self._encode(ret, metadata.caller.session),
-                                "repr": self._state.repr,
-                                # "timestamp": self._state.last_change,
+                                "root_parent": self._encode(self, metadata.caller.session)
                             },
                         )
 
@@ -586,25 +587,20 @@ class Telekinesis:
         await channel.send(self._target, kwargs)
 
         if not kwargs.get("reply_to"):
-            _, response = await channel.recv()
+            metadata, response = await channel.recv()
 
-            state = self._get_root_state()
-            if "repr" in response:  # and ((response.get("timestamp") or 1e99) >= (state.last_change or 0)):
-                # state.last_change = response.get("timestamp") or time.time()
-                state.repr = response["repr"]
-
-            if "repr" in response:
-                state = self._get_root_state()
+            if response.get("root_parent"):
+                root = self._get_root_parent()
+                diffs = root._decode(response['root_parent'], metadata.caller.session[0])._state.get_diffs(0, None, True)
+                root._update_state(diffs)
 
             if "error" in response:
                 raise Exception(response["error"])
 
             if "return" in response:
-                ret = self._decode(response["return"], self._target.session[0])
+                ret = self._decode(response["return"], metadata.caller.session[0])
                 return ret
 
-            if "repr" not in response:
-                raise Exception("Telekinesis communication error: received unrecognized message schema %s" % response)
 
     async def _close(self):
         try:
@@ -622,15 +618,19 @@ class Telekinesis:
         except Exception:
             self._session.logger("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
-    async def _forward(self, pipeline, reply_to=None):
+    async def _forward(self, pipeline, reply_to=None, **kwargs):
         async with Channel(self._session) as new_channel:
             if reply_to:
                 token_header = self._session.extend_route(reply_to, self._target.session[0])
                 new_channel.header_buffer.append(token_header)
+            for key, value in kwargs.items():
+                if isinstance(value, tuple) and isinstance(value[0], Telekinesis):
+                    kwargs[key] = value[0]._encode(value[0], value[1], new_channel)
             return await self._send_request(
                 new_channel,
                 reply_to=reply_to and reply_to.to_dict(),
                 pipeline=self._encode(pipeline, self._target.session, new_channel),
+                **kwargs
             )
 
     def __call__(self, *args, **kwargs):
