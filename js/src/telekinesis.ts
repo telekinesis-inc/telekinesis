@@ -634,13 +634,16 @@ export class Telekinesis extends Function {
     return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then(res) })
   }
   async _sendRequest(channel: Channel, request: {}) {
-    let response = {};
     await channel.send(this._target as Route, request);
 
     if ((request as any).reply_to === undefined) {
-      let tup = await channel.recv();
-      response = (tup as any)[1];
+      let [metadata, response] = await channel.recv() as [RequestMetadata, {}];
 
+      if ((response as any).root_parent) {
+        const root = this._getRootParent();
+        const [lastVersion, diffs] = root._decode((response as any).root_parent, metadata.caller.session[0])._state.getDiffs(0, undefined, true);
+        root._updateState(lastVersion, diffs); 
+      }
       if (Object.getOwnPropertyNames(response).includes('return')) {
         // console.log((response as any)['return'])
         let out = this._decode((response as any)['return'], (this._target as Route).session[0])
