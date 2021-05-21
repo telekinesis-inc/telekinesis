@@ -83,7 +83,7 @@ export class State {
       }
       if (diff.methods) {
         let x;
-        x = Array.from(Object.entries(diff.attributes)).filter(([k, _]) => !(mask || new Set()).has(k));
+        x = Array.from(Object.entries(diff.methods)).filter(([k, _]) => !(mask || new Set()).has(k));
         if (x.length) {
           filtered.methods = ['u', x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
         }
@@ -336,11 +336,11 @@ export class Telekinesis extends Function {
     }
     return this._proxy;
   }
-  _getRootState(): State {
+  _getRootParent(): Telekinesis {
     if (this._parent !== undefined) {
-      return this._parent._getRootState();
+      return this._parent;
     }
-    return this._state;
+    return this;
   }
   _last() {
     if ((this._state.pipeline.length === 1) && (this._state.pipeline[0][0] === 'get') && (this._state.attributes instanceof Map)) {
@@ -446,14 +446,18 @@ export class Telekinesis extends Function {
           ret._target.session !== await this._session.sessionKey.publicSerial() ||
           !this._session.channels.has(ret._target.channel)
         )) {
-          await (ret as Telekinesis)._forward(ret._state.pipeline, replyTo || metadata.caller);
+          await (ret as Telekinesis)._forward(
+            ret._state.pipeline,
+            replyTo || metadata.caller,
+            {root_parent: replyTo? (payload as any).root_parent : [this, metadata.caller.session]}
+          );
         } else {
           if (replyTo !== undefined) {
             const newChannel = new Channel(this._session)
             try {
               await newChannel.send(replyTo, {
                 return: await this._encode(ret, replyTo.session, newChannel),
-                repr: this._state.repr,
+                root_parent: (payload as any).root_parent,
               })
             } finally {
               await newChannel.close();
@@ -461,7 +465,8 @@ export class Telekinesis extends Function {
           } else {
             await channel.send(metadata.caller, {
               return: await this._encode(ret, metadata.caller.session),
-              repr: this._state.repr,
+              root_parent: ret === this || ret === this._target && ret === this._proxy ? 
+                null : await this._encode(this._proxy, metadata.caller.session, channel)
             })
           }
         }
@@ -672,18 +677,26 @@ export class Telekinesis extends Function {
       console.error(e)
     }
   }
-  async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route) {
+  async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route, kwargs?: {}) {
     let newChannel = new Channel(this._session);
     try {
       if (replyTo !== undefined) {
         const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session[0])
         newChannel.headerBuffer.push(tokenHeader as Header)
       }
+      if (kwargs) {
+        for (let [key, value] of Object.entries(kwargs)) {
+          if (value instanceof Array && value.length == 2 && value[0] instanceof Telekinesis) {
+            (kwargs as any)[key] = await value[0]._encode(value[0]._proxy, value[1], newChannel);
+          }
+        }
+      }
       return await this._sendRequest(
         newChannel,
         {
           reply_to: replyTo?.toObject(),
-          pipeline: await this._encode(pipeline, (this._target as Route).session, newChannel)
+          pipeline: await this._encode(pipeline, (this._target as Route).session, newChannel),
+          ...kwargs
         }
       )
     } finally {
