@@ -32,7 +32,7 @@ export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: {
 }
 
 export class PublicUser {
-  constructor(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} }) {
+  constructor(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} }, ...args: any) {
     if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
       let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
       url = url.slice(0, i) + ':8776' + url.slice(i);
@@ -40,6 +40,6 @@ export class PublicUser {
     const session = new Session(sessionKey);
     const connection = new Connection(session, url);
 
-    return new Telekinesis(new Promise((r: any) => connection.connect().then(() => r(connection.entrypoint))), session)
+    return new Telekinesis(new Promise((r: any) => connection.connect().then(() => r(connection.entrypoint))), session, ...args)
   }
 }

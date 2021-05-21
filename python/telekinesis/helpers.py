@@ -11,7 +11,7 @@ def authenticate(url="ws://localhost:8776", session_key_file=None, print_callbac
     return user
 
 
-def PublicUser(url="ws://localhost:8776", session_key_file=None):
+def PublicUser(url="ws://localhost:8776", session_key_file=None, **kwargs):
     s = Session(session_key_file)
 
     if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
@@ -24,4 +24,4 @@ def PublicUser(url="ws://localhost:8776", session_key_file=None):
         await c
         return c.entrypoint
 
-    return Telekinesis(await_entrypoint(), s)
+    return Telekinesis(await_entrypoint(), s, **kwargs)
