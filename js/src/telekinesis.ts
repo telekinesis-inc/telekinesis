@@ -78,14 +78,14 @@ export class State {
         }
         // console.log(x)
         if (x.length) {
-          filtered.attributes = ['u', x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
+          filtered.attributes = [diff.attributes[0], x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
         }
       }
       if (diff.methods) {
         let x;
-        x = Array.from(Object.entries(diff.methods)).filter(([k, _]) => !(mask || new Set()).has(k));
+        x = Array.from(Object.entries(diff.methods[1])).filter(([k, _]) => !(mask || new Set()).has(k));
         if (x.length) {
-          filtered.methods = ['u', x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
+          filtered.methods = [diff.methods[0], x.reduce((p, [k, v]) => {p[k] = v; return p}, {} as any)];
         }
       }
       if (diff.repr) {
@@ -159,9 +159,9 @@ export class State {
           } else {
             const diff = diffs[(nextVersion + parseInt(i)).toString()];
             this._history.push(diff);
-            if (diff === undefined) {
-              console.log(diffs, nextVersion, i)
-            }
+            // if (diff === undefined) {
+            //   console.log(diffs, nextVersion, i)
+            // }
             
             for (let k of Object.getOwnPropertyNames(diff)) {
               (this as any)[k] = State.applyDiff((this as any)[k], diff[k]);
@@ -463,10 +463,13 @@ export class Telekinesis extends Function {
               await newChannel.close();
             }
           } else {
+            // console.log(metadata.caller.session, this._clients, this._state)
+            const parent = await this._encode(this, metadata.caller.session, channel);
+            // console.log(this._decode(parent))
             await channel.send(metadata.caller, {
               return: await this._encode(ret, metadata.caller.session),
               root_parent: ret === this || ret === this._target && ret === this._proxy ? 
-                null : await this._encode(this._proxy, metadata.caller.session, channel)
+                null : parent
             })
           }
         }
@@ -768,12 +771,14 @@ export class Telekinesis extends Function {
       }
 
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
+      let stateDiff = receiver !== route.session ?
+        obj._state.getDiffs(obj._clients?.get(receiver.join())?.lastState || 0, this._mask, !blockRecursion && obj._clients?.get(receiver.join())?.cacheAttributes) :
+        {pipeline: obj._state.pipeline};
+      // console.log('>>>>', stateDiff)
       out[1] = ['obj', [
         route.toObject(),
         await this._encode(
-          receiver !== route.session ?
-            obj._state.getDiffs(obj._clients?.get(receiver.join())?.lastState || 0, this._mask, !blockRecursion && obj._clients?.get(receiver.join())?.cacheAttributes) :
-            {pipeline: obj._state.pipeline},
+          stateDiff,
           receiver,
           channel,
           traversalStack,

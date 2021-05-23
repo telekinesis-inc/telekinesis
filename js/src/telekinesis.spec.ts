@@ -124,6 +124,14 @@ describe("Telekinesis", () => {
     await new Promise(r => setTimeout(()=> r(true), 10));
     expect(b.value._last()).toEqual(4);
   })
+  it('receives pull updates when it subscribes (python object)', async () => {
+    const a = await (new PublicUser(HOST) as any).get('counter_python');
+    const b = await (new PublicUser(HOST) as any).get('counter_python')._subscribe();
+
+    expect(await a.increment().increment().increment(2).value).toEqual(4);
+    await new Promise(r => setTimeout(()=> r(true), 10));
+    expect(b.value._last()).toEqual(4);
+  })
   it('transfers only the difference between updates', async () => {
     class Demo {
       x0: string;
@@ -162,14 +170,6 @@ describe("Telekinesis", () => {
     const m2 = (await getMeasures()).size_kb;
     expect(m2-m1).toBeLessThan(0.3*(m1-m0));
     // console.log((await getMeasures()).size_kb, m0)
-  })
-  it('receives pull updates when it subscribes (python object)', async () => {
-    const a = await (new PublicUser(HOST) as any).get('counter_python');
-    const b = await (new PublicUser(HOST) as any).get('counter_python')._subscribe();
-
-    expect(await a.increment().increment().increment(2).value).toEqual(4);
-    await new Promise(r => setTimeout(()=> r(true), 10));
-    expect(b.value._last()).toEqual(4);
   })
 
 });
