@@ -5,18 +5,20 @@ const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'un
 export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";
   _usage: ["sign"] | ["deriveKey"];
+  repr?: string;
   key?: CryptoKeyPair;
   exportedKey?: { privateKey: {}, publicKey: {} };
 
   constructor(use: "sign" | "derive", importedKey?: { privateKey: {}, publicKey: {} }) {
     this.exportedKey = importedKey;
     if (use === 'sign') {
-      this._algorithm = 'ECDSA'
-      this._usage = ['sign']
-      return
+      this._algorithm = 'ECDSA';
+      this._usage = ['sign'];
+      return;
     }
-    this._algorithm = 'ECDH'
-    this._usage = ['deriveKey']
+    this._algorithm = 'ECDH';
+    this._usage = ['deriveKey'];
+    this.publicSerial();
     return
   }
   async generate() {
@@ -75,8 +77,12 @@ export class PrivateKey {
       await this.generate();
     }
     if (this.key !== undefined) {
-      let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey)).slice(1)
-      return b64encode(new Uint8Array(publicKey))
+      let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey)).slice(1);
+      let out = b64encode(new Uint8Array(publicKey))
+      if (this.repr === undefined) {
+        this.repr = out;
+      }
+      return out;
     }
   }
   async exportKey() {

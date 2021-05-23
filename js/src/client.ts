@@ -276,6 +276,9 @@ export class Session {
     this.targets = new Map();
     this.routes = new Map();
   }
+  toString() {
+    return `Session ${this.sessionKey.repr?.slice(0, 4)} ${this.instanceId.slice(0, 2)}`
+  }
   checkNoRepeat(signature: Uint8Array, timestamp: number) {
     let now = Date.now() / 1000;
     let lead = Math.floor(now / 60);
@@ -422,6 +425,9 @@ export class Channel {
         this.initLocks = [];
       })
     })
+  }
+  toString() {
+    return `Channel ${this.session.sessionKey.repr?.slice(0, 4)} ${this.session.instanceId.slice(0, 2)} - ${this.channelKey.repr?.slice(0, 4)}`
   }
   async handleMessage(source: Route, destination: Route, rawPayload: Uint8Array, proof: Uint8Array) {
     if (await this.validateTokenChain(source.session[0], destination.tokens)) {
@@ -688,6 +694,9 @@ export class Route {
       channel: this.channel,
       tokens: this.tokens,
     }
+  }
+  toString() {
+    return `Route ${this.session[0].slice(0, 4)} ${this.session[1].slice(0, 2)} - ${this.channel.slice(0, 4)}`
   }
   clone() {
     return Route.fromObject(this.toObject());
