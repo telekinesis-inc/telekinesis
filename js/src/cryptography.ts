@@ -18,7 +18,7 @@ export class PrivateKey {
     }
     this._algorithm = 'ECDH';
     this._usage = ['deriveKey'];
-    this.publicSerial();
+    // this.publicSerial(); // <- weird s**t wreaks havoc!
     return
   }
   async generate() {
