@@ -205,6 +205,13 @@ export class State {
         } else {
           return;
         }
+      } else if ((obj0 instanceof Array) && (obj1 instanceof Array) && obj0.length == obj1.length) {
+        for (let i in obj0) {
+          if (typeof obj0[i] !== typeof obj1[i] || obj0[i] !== obj1[i]) {
+            return ["r", obj1];
+          }
+        }
+        return;
       }
     }
     return ["r", obj1];
