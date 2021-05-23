@@ -278,6 +278,7 @@ class Broker:
                         await connection.websocket.send(message)
                     return
                 else:
+                    # print('|||||', [Token.decode(t) for t in s.tokens], [Token.decode(t) for t in d.tokens])
                     self.logger.info(
                         "%s: send %s %s ||| %s ||| %s %s",
                         self.broker_key.public_serial()[:4],

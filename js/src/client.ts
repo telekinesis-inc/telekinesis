@@ -227,7 +227,7 @@ export class Connection {
           break;
         } else if (parseInt(i) === this.MAX_SEND_RETRIES) {
           this.awaitingAck.delete(messageId);
-          rej('Max sent retries reached');
+          rej(`Max sent retries reached`);// ${bundleId}`);
         } else {
           [s, mm] = await encode(messageId, parseInt(i));
         }
@@ -346,6 +346,8 @@ export class Session {
     let tokenHeader;
     if (route.session[0] === await this.sessionKey.publicSerial()) {
       tokenHeader = await this.issueToken(route.channel, receiver, maxDepth)
+      route.tokens = [tokenHeader[1][1] as string]
+      return tokenHeader;
     } else {
       for (var i in route.tokens) {
         let token = await Token.decode(route.tokens[i]) as Token;
@@ -477,6 +479,7 @@ export class Channel {
           inflate(payloadSer.slice(1), (err, buff) => err ? rej(err) : r(new Uint8Array(buff)))
         }) as Uint8Array);
       }
+      // console.log(`<<< ${source} ${destination} ${Object.keys(payload)}`)
       if (this.telekinesis instanceof Telekinesis) {
         this.telekinesis._handleRequest(this, metadata, payload)
       } else if (this.waiting.length > 0) {
@@ -573,6 +576,7 @@ export class Channel {
       }
 
       let mid = webcrypto.getRandomValues(new Uint8Array(4));
+      // console.log(`>>> ${this.route} ${destination} ${Object.keys(payloadObj)} ${mid}`)
 
       let sharedKey = new SharedKey(
         this.channelKey,
@@ -715,8 +719,8 @@ export class Route {
           (i !== '0') && (!(token.issuer === prevToken.receiver) || !(token.asset === prevToken.signature) || !(token.tokenType === 'extension')) ||
           (i === this.tokens.length.toString() && token.receiver !== receiver)
         ) {
-          console.log(i, token, prevToken, this, receiver)
-          console.log(!(token.issuer === prevToken.receiver), !(token.asset === prevToken.signature) || !(token.tokenType === 'extension'), token.receiver !== receiver)
+          // console.log(i, token, prevToken, this, receiver)
+          // console.log(!(token.issuer === prevToken.receiver), !(token.asset === prevToken.signature) || !(token.tokenType === 'extension'), token.receiver !== receiver)
           throw 'Invalid token chain';
         }
         if (token.receiver === receiver) {

@@ -430,6 +430,7 @@ class Channel:
                         raise Exception("Received message with different encoding")
 
             if message_tuple:
+                # print('<<<', source, destination, {k: v is None for k, v in message_tuple[1].items()})
                 if not self.telekinesis:
                     self.messages.appendleft(message_tuple)
                     self.lock.set()
@@ -461,6 +462,8 @@ class Channel:
         return self
 
     async def send(self, destination, payload_obj):
+        # if payload_obj:
+            # print('>>>', self.route, destination, {k: v is None for k, v in payload_obj.items()})
         def encrypt_slice(payload, max_payload, shared_key, mid, n, i):
             if i < n:
                 if n == 1:
