@@ -529,10 +529,11 @@ class Broker:
         return self
 
     async def close(self, host=None, port=None):
-        for server_host, server_port in self.servers:
+        keys = set(self.servers.keys())
+        for server_host, server_port in keys:
             if not host or server_host == host:
                 if not port or server_port == port:
-                    await self.servers.pop((server_host, server_port)).close()
+                    self.servers.pop((server_host, server_port)).close()
 
 
 class Peer(Connection):
