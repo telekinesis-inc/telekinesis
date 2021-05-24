@@ -1,4 +1,4 @@
-from telekinesis import Broker, Telekinesis, Connection, Session, PublicUser
+from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
 import os
@@ -30,18 +30,18 @@ async def test_state_diffing():
     c = await Connection(Session(), "ws://localhost:8783")
     bro.entrypoint = await Telekinesis(container, c.session)._delegate("*")
 
-    pu = await PublicUser("ws://localhost:8783")._subscribe()
+    registry = await Entrypoint("ws://localhost:8783")._subscribe()
 
     assert measures["size_kb"] < 2 ** 10
 
     container.x = os.urandom(2 ** 20)
 
-    await pu
+    await registry
     assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
-    assert pu.x._last() == container.x
+    assert registry.x._last() == container.x
 
     container.y = os.urandom(2 ** 20)
 
-    await pu
+    await registry
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
-    assert pu.y._last() == container.y
+    assert registry.y._last() == container.y

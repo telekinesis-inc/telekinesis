@@ -1,4 +1,4 @@
-from telekinesis import Broker, Telekinesis, Connection, Session, PublicUser
+from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
 import os
@@ -28,11 +28,11 @@ async def test_subscribe():
             self.value += amount
             return self
 
-    pu = await PublicUser("ws://localhost:8780")
-    await pu.update({"counter": Counter(2)})
+    registry = await Entrypoint("ws://localhost:8780")
+    await registry.update({"counter": Counter(2)})
 
-    counter0 = await PublicUser("ws://localhost:8780").get("counter")
-    counter1 = await PublicUser("ws://localhost:8780").get("counter")._subscribe()
+    counter0 = await Entrypoint("ws://localhost:8780").get("counter")
+    counter1 = await Entrypoint("ws://localhost:8780").get("counter")._subscribe()
 
     assert counter1.value._last() == 2
 

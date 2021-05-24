@@ -1,4 +1,4 @@
-from telekinesis import Broker, Telekinesis, Connection, Session, PublicUser
+from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
 
@@ -28,9 +28,9 @@ async def test_forwarding():
 
     echo = lambda x: x
 
-    pu0 = await PublicUser("ws://localhost:8782")
-    await pu0.update({"echo": echo})
+    registry = await Entrypoint("ws://localhost:8782")
+    await registry.update({"echo": echo})
 
     count["count"] = 0
-    assert await PublicUser("ws://localhost:8782").get("echo")("hello") == "hello"
+    assert await Entrypoint("ws://localhost:8782").get("echo")("hello") == "hello"
     assert count["count"] == 2 * 3

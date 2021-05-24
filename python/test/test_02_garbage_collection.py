@@ -1,4 +1,4 @@
-from telekinesis import Broker, Telekinesis, Connection, Session, PublicUser
+from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
 
@@ -27,16 +27,16 @@ async def test_garbage_collection():
             self.value += amount
             return self
 
-    pu0 = await PublicUser("ws://localhost:8781")
-    await pu0.update({"Counter": Counter})
+    registry = await Entrypoint("ws://localhost:8781")
+    await registry.update({"Counter": Counter})
 
-    assert len(pu0._session.targets) == 1
+    assert len(registry._session.targets) == 1
 
-    counter = await PublicUser("ws://localhost:8781").get("Counter")(2)
+    counter = await Entrypoint("ws://localhost:8781").get("Counter")(2)
 
-    assert len(pu0._session.targets) == 2
+    assert len(registry._session.targets) == 2
 
     del counter
 
     await asyncio.sleep(0.1)
-    assert len(pu0._session.targets) == 1
+    assert len(registry._session.targets) == 1
