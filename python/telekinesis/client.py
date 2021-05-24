@@ -463,7 +463,7 @@ class Channel:
 
     async def send(self, destination, payload_obj):
         # if payload_obj:
-            # print('>>>', self.route, destination, {k: v is None for k, v in payload_obj.items()})
+        # print('>>>', self.route, destination, {k: v is None for k, v in payload_obj.items()})
         def encrypt_slice(payload, max_payload, shared_key, mid, n, i):
             if i < n:
                 if n == 1:

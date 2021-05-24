@@ -20,7 +20,6 @@ class MeasuredBroker(tk.Broker):
 
 async def main():
     broker = await MeasuredBroker().serve(port=${HOST.split(':')[2]})
-    c = tk.Connection(tk.Session(), '${HOST}')
     reg = Registry()
     reg['echo'] = lambda x: x
     reg['get_measures'] = lambda: measures
@@ -32,7 +31,7 @@ async def main():
             self.value += amount
             return self
     reg['counter_python'] = Counter()
-    broker.entrypoint = await tk.Telekinesis(reg, c.session)._delegate('*')
+    broker.entrypoint, _ = await tk.create_entrypoint(reg, '${HOST}')
     lock = asyncio.Event()
     await lock.wait()
 
@@ -90,17 +89,17 @@ describe("Telekinesis", () => {
     const d = new Demo();
     const tk = new Telekinesis(d, new Session()) as any;
 
-    expect(tk.x._last()).toEqual(d.x);  
+    expect(tk.x._last()).toEqual(d.x);
 
     d.x = 'hello';
     await tk;
 
-    expect(tk.x._last()).toEqual(d.x);  
+    expect(tk.x._last()).toEqual(d.x);
 
     d.x = 'bye';
     await tk;
 
-    expect(tk.x._last()).toEqual(d.x);  
+    expect(tk.x._last()).toEqual(d.x);
 
   })
 
@@ -121,7 +120,7 @@ describe("Telekinesis", () => {
     const b = await (new Entrypoint(HOST) as any).get('counter')._subscribe();
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
-    await new Promise(r => setTimeout(()=> r(true), 10));
+    await new Promise(r => setTimeout(() => r(true), 10));
     expect(b.value._last()).toEqual(4);
   })
   it('receives pull updates when it subscribes (python object)', async () => {
@@ -129,7 +128,7 @@ describe("Telekinesis", () => {
     const b = await (new Entrypoint(HOST) as any).get('counter_python')._subscribe();
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
-    await new Promise(r => setTimeout(()=> r(true), 10));
+    await new Promise(r => setTimeout(() => r(true), 10));
     expect(b.value._last()).toEqual(4);
   })
   it('transfers only the difference between updates', async () => {
@@ -138,7 +137,7 @@ describe("Telekinesis", () => {
       x1: string;
       constructor() {
         this.x0 = '';
-        this.x1 = ''; 
+        this.x1 = '';
       }
     }
     const d = new Demo();
@@ -146,7 +145,7 @@ describe("Telekinesis", () => {
     const server = new Entrypoint(HOST) as any;
     const a = new Telekinesis(d, server._session) as any;
 
-    await server.update({'demo': a});
+    await server.update({ 'demo': a });
     const b = await (new Entrypoint(HOST) as any).get('demo')._subscribe();
     await b;
     const getMeasures = await (new Entrypoint(HOST) as any).get('get_measures')
@@ -157,18 +156,18 @@ describe("Telekinesis", () => {
     await a;
 
     expect(a.x0._last()).toEqual(d.x0);
-    await new Promise(r => setTimeout(()=> r(true), 300));
+    await new Promise(r => setTimeout(() => r(true), 300));
     expect(b.x0._last()).toEqual(d.x0);
     // console.log((await getMeasures()).size_kb, m0)
     const m1 = (await getMeasures()).size_kb;
 
     d.x1 = Array(2).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
     await a;
-    await new Promise(r => setTimeout(()=> r(true), 100));
+    await new Promise(r => setTimeout(() => r(true), 100));
 
     expect(b.x1._last()).toEqual(d.x1);
     const m2 = (await getMeasures()).size_kb;
-    expect(m2-m1).toBeLessThan(0.3*(m1-m0));
+    expect(m2 - m1).toBeLessThan(0.3 * (m1 - m0));
     // console.log((await getMeasures()).size_kb, m0)
   })
 

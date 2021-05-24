@@ -28,19 +28,19 @@ async def test_state_diffing():
         def set(self, attr, val):
             self.__setattr__(attr, val)
 
-    bro.entrypoint, container = await create_entrypoint(Container(), 'ws://localhost:8783')
+    bro.entrypoint, container = await create_entrypoint(Container(), "ws://localhost:8783")
 
     registry = await Entrypoint("ws://localhost:8783")._subscribe()
 
     assert measures["size_kb"] < 2 ** 10
 
-    await container.set('x', os.urandom(2 ** 20))
+    await container.set("x", os.urandom(2 ** 20))
 
     await registry
     assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
     assert registry.x._last() == container.x._last()
 
-    await container.set('y', os.urandom(2 ** 20))
+    await container.set("y", os.urandom(2 ** 20))
 
     await registry
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11

@@ -24,7 +24,7 @@ async def test_forwarding():
     class Registry(dict):
         pass
 
-    bro.entrypoint, _ = await create_entrypoint(Registry(), 'ws://localhost:8782')
+    bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8782")
 
     echo = lambda x: x
 

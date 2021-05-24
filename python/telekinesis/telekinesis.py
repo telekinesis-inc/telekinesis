@@ -428,7 +428,8 @@ class Telekinesis:
                     await ret._forward(
                         ret._state.pipeline,
                         reply_to or metadata.caller,
-                        root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session))
+                        root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session),
+                    )
                 else:
                     if reply_to:
                         async with Channel(self._session) as new_channel:
@@ -444,7 +445,7 @@ class Telekinesis:
                             metadata.caller,
                             {
                                 "return": self._encode(ret, metadata.caller.session),
-                                "root_parent": None if ret is self else self._encode(self, metadata.caller.session, channel)
+                                "root_parent": None if ret is self else self._encode(self, metadata.caller.session, channel),
                             },
                         )
 
@@ -590,7 +591,7 @@ class Telekinesis:
 
             if response.get("root_parent"):
                 root = self._get_root_parent()
-                diffs = root._decode(response['root_parent'], metadata.caller.session[0])._state.get_diffs(0, None, True)
+                diffs = root._decode(response["root_parent"], metadata.caller.session[0])._state.get_diffs(0, None, True)
                 root._update_state(diffs)
 
             if "error" in response:
@@ -599,7 +600,6 @@ class Telekinesis:
             if "return" in response:
                 ret = self._decode(response["return"], metadata.caller.session[0])
                 return ret
-
 
     async def _close(self):
         try:
@@ -629,7 +629,7 @@ class Telekinesis:
                 new_channel,
                 reply_to=reply_to and reply_to.to_dict(),
                 pipeline=self._encode(pipeline, self._target.session, new_channel),
-                **kwargs
+                **kwargs,
             )
 
     def __call__(self, *args, **kwargs):
@@ -721,7 +721,9 @@ class Telekinesis:
                             obj._clients[receiver]["last_state"] if receiver in obj._clients else 0,
                             self._mask,
                             obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
-                        ) if receiver != route.session else {"pipeline": obj._state.pipeline},
+                        )
+                        if receiver != route.session
+                        else {"pipeline": obj._state.pipeline},
                         receiver,
                         channel,
                         traversal_stack,

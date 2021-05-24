@@ -19,7 +19,7 @@ async def test_subscribe():
     class Registry(dict):
         pass
 
-    bro.entrypoint, _ = await create_entrypoint(Registry(), 'ws://localhost:8780')
+    bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8780")
 
     class Counter:
         def __init__(self, initial_value=0):

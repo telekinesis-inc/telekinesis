@@ -186,9 +186,9 @@ export class Connection {
       const encode = async (messageId?: string, retry?: number) => {
         let h = new TextEncoder().encode(JSON.stringify(headers))
         let r = reply ? reply : (
-          retry && messageId?
-          new Uint8Array([retry, ...b64decode(messageId)]) :
-          new Uint8Array(65)
+          retry && messageId ?
+            new Uint8Array([retry, ...b64decode(messageId)]) :
+            new Uint8Array(65)
         )
         let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
         let m = new Uint8Array([
@@ -211,18 +211,18 @@ export class Connection {
       if (expectAck) {
         this.awaitingAck.set(messageId, [headers, res]);
       }
-      for (let i in Array(this.MAX_SEND_RETRIES+1).fill(0)) {
+      for (let i in Array(this.MAX_SEND_RETRIES + 1).fill(0)) {
         if (this.websocket === undefined || this.websocket.readyState > 1) {
           await this.connect()
         }
         if (this.websocket !== undefined) {
-         this.websocket.send(mm);
+          this.websocket.send(mm);
         };
         if (!expectAck) {
           res(undefined);
           break;
         }
-        await new Promise(rr => setTimeout(rr, this.RESEND_TIMEOUT*1000))
+        await new Promise(rr => setTimeout(rr, this.RESEND_TIMEOUT * 1000))
         if (!this.awaitingAck.has(messageId)) {
           break;
         } else if (parseInt(i) === this.MAX_SEND_RETRIES) {
@@ -232,7 +232,7 @@ export class Connection {
           [s, mm] = await encode(messageId, parseInt(i));
         }
       }
-    }) 
+    })
   }
   ack(sourceId: string, messageId: string) {
     const [headers, resolve] = this.awaitingAck.get(messageId);
