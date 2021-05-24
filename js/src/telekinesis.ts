@@ -100,39 +100,41 @@ export class State {
     return [0, out];
   }
   updateFromTarget(target: Object) {
-    const newProps = {
-      attributes: Object.getOwnPropertyNames(target)
-        .filter(x => x[0] !== '_')
-        .reduce((p, v) => { p.set(v, (target as any)[v]); return p }, new Map()),
-      methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
-        .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
-        .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
-      repr: (target.toString && target.toString()) || '',
-      doc: (target as any).__doc__,
-    };
-    if (target instanceof Function) {
-      newProps.methods.set('__call__', ['(*args)', target.toString()]);
-    }
-    // const props = {
-    //   attributes: this.attributes,
-    //   methods: this.methods,
-    //   repr: this.repr,
-    //   doc: this.doc,
-    // }
-    if (this._historyOffset == 0) {
-      const newState = State.fromObject(newProps);
-      this._historyOffset = 1;
-      for (let prop of Object.getOwnPropertyNames(newProps)) {
-        (this as any)[prop] = (newState as any)[prop];
+    if (target !== undefined && target !== null) {
+      const newProps = {
+        attributes: Object.getOwnPropertyNames(target)
+          .filter(x => x[0] !== '_')
+          .reduce((p, v) => { p.set(v, (target as any)[v]); return p }, new Map()),
+        methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
+          .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
+          .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
+        repr: (target.toString && target.toString()) || '',
+        doc: (target as any).__doc__,
+      };
+      if (target instanceof Function) {
+        newProps.methods.set('__call__', ['(*args)', target.toString()]);
       }
-      return this;
+      // const props = {
+      //   attributes: this.attributes,
+      //   methods: this.methods,
+      //   repr: this.repr,
+      //   doc: this.doc,
+      // }
+      if (this._historyOffset == 0) {
+        const newState = State.fromObject(newProps);
+        this._historyOffset = 1;
+        for (let prop of Object.getOwnPropertyNames(newProps)) {
+          (this as any)[prop] = (newState as any)[prop];
+        }
+        return this;
 
+      }
+      const diffs = {} as any;
+      diffs[this._historyOffset + this._history.length + 1] = Object.getOwnPropertyNames(newProps)
+        .map(k => [k, State.calcDiff((this as any)[k], (newProps as any)[k])])
+        .reduce((p, [k, v]) => { (p as any)[k as string] = v; return p }, {})
+      return this.updateFromDiffs(0, diffs);
     }
-    const diffs = {} as any;
-    diffs[this._historyOffset + this._history.length + 1] = Object.getOwnPropertyNames(newProps)
-      .map(k => [k, State.calcDiff((this as any)[k], (newProps as any)[k])])
-      .reduce((p, [k, v]) => { (p as any)[k as string] = v; return p }, {})
-    return this.updateFromDiffs(0, diffs);
   }
   updateFromDiffs(lastVersion: number, diffs: any) {
     const ks = ['attributes', 'methods', 'repr', 'doc'];
@@ -636,9 +638,12 @@ export class Telekinesis extends Function {
         subscribers.map((s: Telekinesis) => s(tk)._execute())
       }
     }
-
+    if (target === this._target && (this._target === undefined || this._target === null)) {
+      this._lastUpdate = Date.now();
+      this._blockThen = true;
+      return this._proxy;
+    }
     return target;
-
   }
   _timeout(seconds: number) {
     return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then(res) })

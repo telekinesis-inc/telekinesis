@@ -577,6 +577,9 @@ class Telekinesis:
                 for s in tk._subscribers:
                     asyncio.create_task(s(tk)._execute())
 
+        if target is self._target:
+            return self
+
         return target
 
     async def _timeout(self, seconds):
