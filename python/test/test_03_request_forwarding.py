@@ -1,6 +1,7 @@
 from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
+from telekinesis.helpers import create_entrypoint
 
 pytestmark = pytest.mark.asyncio
 
@@ -23,8 +24,7 @@ async def test_forwarding():
     class Registry(dict):
         pass
 
-    c = await Connection(Session(), "ws://localhost:8782")
-    bro.entrypoint = await Telekinesis(Registry(), c.session)._delegate("*")
+    bro.entrypoint, _ = await create_entrypoint(Registry(), 'ws://localhost:8782')
 
     echo = lambda x: x
 

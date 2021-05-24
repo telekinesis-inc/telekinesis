@@ -3,6 +3,8 @@ import asyncio
 import pytest
 import os
 
+from telekinesis.helpers import create_entrypoint
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -23,25 +25,23 @@ async def test_state_diffing():
     bro = await MeasuredBroker().serve(port=8783)
 
     class Container:
-        def __init__(self):
-            pass
+        def set(self, attr, val):
+            self.__setattr__(attr, val)
 
-    container = Container()
-    c = await Connection(Session(), "ws://localhost:8783")
-    bro.entrypoint = await Telekinesis(container, c.session)._delegate("*")
+    bro.entrypoint, container = await create_entrypoint(Container(), 'ws://localhost:8783')
 
     registry = await Entrypoint("ws://localhost:8783")._subscribe()
 
     assert measures["size_kb"] < 2 ** 10
 
-    container.x = os.urandom(2 ** 20)
+    await container.set('x', os.urandom(2 ** 20))
 
     await registry
     assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
-    assert registry.x._last() == container.x
+    assert registry.x._last() == container.x._last()
 
-    container.y = os.urandom(2 ** 20)
+    await container.set('y', os.urandom(2 ** 20))
 
     await registry
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
-    assert registry.y._last() == container.y
+    assert registry.y._last() == container.y._last()

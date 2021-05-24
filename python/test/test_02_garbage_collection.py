@@ -1,6 +1,7 @@
 from telekinesis import Broker, Telekinesis, Connection, Session, Entrypoint
 import asyncio
 import pytest
+from telekinesis.helpers import create_entrypoint
 
 pytestmark = pytest.mark.asyncio
 
@@ -16,9 +17,7 @@ async def test_garbage_collection():
     class Registry(dict):
         pass
 
-    c = await Connection(Session(), "ws://localhost:8781")
-    bro.entrypoint = await Telekinesis(Registry(), c.session)._delegate("*")
-
+    bro.entrypoint, _ = await create_entrypoint(Registry(), 'ws://localhost:8781')
     class Counter:
         def __init__(self, initial_value=0):
             self.value = initial_value
