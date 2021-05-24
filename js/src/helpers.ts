@@ -25,13 +25,13 @@ export function eqSet(as: Set<any>, bs: Set<any>) {
 export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} },
   printCallback: ((output: any) => void) = console.log, kwargs?: any) {
 
-  let user = (new PublicUser(url, sessionKey) as any)
+  let user = (new Entrypoint(url, sessionKey) as any)
     .authenticate._call([printCallback], kwargs);
 
   return user;
 }
 
-export class PublicUser {
+export class Entrypoint {
   constructor(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} }, ...args: any) {
     if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
       let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;

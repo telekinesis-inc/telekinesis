@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { Connection, PublicUser, Session, Telekinesis } from "./index";
+import { Connection, Entrypoint, Session, Telekinesis } from "./index";
 
 let subprocess: any;
 const HOST = 'ws://localhost:8777';
@@ -62,21 +62,21 @@ describe("Connection", () => {
 });
 describe("Telekinesis", () => {
   it("echos", async () => {
-    const echo = await (new PublicUser(HOST) as any).get('echo');
+    const echo = await (new Entrypoint(HOST) as any).get('echo');
     expect(await echo('hello!')).toEqual('hello!');
   });
   it('handles large messages', async () => {
-    const echo = await (new PublicUser(HOST) as any).get('echo');
+    const echo = await (new Entrypoint(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")
     expect(await echo(largeMessage)).toEqual(largeMessage);
   });
   it('sends telekinesis objects', async () => {
-    const echo = await (new PublicUser(HOST) as any).get('echo');
+    const echo = await (new Entrypoint(HOST) as any).get('echo');
     const func = (x: number) => x + 1;
     expect(await echo(func)(1)).toEqual(2);
   });
   it('manipulates remote objects', async () => {
-    const registry = await new PublicUser(HOST) as any;
+    const registry = await new Entrypoint(HOST) as any;
     await registry.update({ test: 123 });
     expect(await registry.get('test')).toEqual(123);
   });
@@ -115,18 +115,18 @@ describe("Telekinesis", () => {
         return this;
       }
     }
-    const server = await new PublicUser(HOST) as any;
+    const server = await new Entrypoint(HOST) as any;
     await server.update({ counter: new Counter() });
-    const a = await (new PublicUser(HOST) as any).get('counter');
-    const b = await (new PublicUser(HOST) as any).get('counter')._subscribe();
+    const a = await (new Entrypoint(HOST) as any).get('counter');
+    const b = await (new Entrypoint(HOST) as any).get('counter')._subscribe();
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
     await new Promise(r => setTimeout(()=> r(true), 10));
     expect(b.value._last()).toEqual(4);
   })
   it('receives pull updates when it subscribes (python object)', async () => {
-    const a = await (new PublicUser(HOST) as any).get('counter_python');
-    const b = await (new PublicUser(HOST) as any).get('counter_python')._subscribe();
+    const a = await (new Entrypoint(HOST) as any).get('counter_python');
+    const b = await (new Entrypoint(HOST) as any).get('counter_python')._subscribe();
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
     await new Promise(r => setTimeout(()=> r(true), 10));
@@ -143,13 +143,13 @@ describe("Telekinesis", () => {
     }
     const d = new Demo();
 
-    const server = new PublicUser(HOST) as any;
+    const server = new Entrypoint(HOST) as any;
     const a = new Telekinesis(d, server._session) as any;
 
     await server.update({'demo': a});
-    const b = await (new PublicUser(HOST) as any).get('demo')._subscribe();
+    const b = await (new Entrypoint(HOST) as any).get('demo')._subscribe();
     await b;
-    const getMeasures = await (new PublicUser(HOST) as any).get('get_measures')
+    const getMeasures = await (new Entrypoint(HOST) as any).get('get_measures')
 
     const m0 = (await getMeasures()).size_kb;
     d.x0 = Array(30000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "");
