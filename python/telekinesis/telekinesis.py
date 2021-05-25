@@ -111,7 +111,7 @@ class State:
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
-                        attributes[attribute_name] = target_attribute
+                        attributes[attribute_name] = target_attribute.copy() if type(target_attribute) in [dict, list, set] else target_attribute 
 
                 except Exception as e:
                     logger.error("Could not obtain handle for %s.%s: %s", target, attribute_name, e)
@@ -142,7 +142,9 @@ class State:
             if x:
                 diff[k] = x
 
-        return self.update_from_diffs(0, {self._history_offset + len(self._history) + 1: diff})
+        if diff:
+            return self.update_from_diffs(0, {self._history_offset + len(self._history) + 1: diff})
+        return self
 
     def update_from_diffs(self, last_version, diffs):
         ks = ["attributes", "methods", "repr", "doc"]
