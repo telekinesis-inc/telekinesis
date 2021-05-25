@@ -249,8 +249,18 @@ export class State {
           }
         }
         return obj1;
+      } else if (typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0).constructor.name === 'Object') {
+        const obj1 = Object.entries(obj0).reduce((p, [k, v]) => {if (diff[1][k] !== 'd') {p[k] = v}; return p}, {} as any);
+        for (const [key, value] of Object.entries(diff[1])) {
+          const code = (value as any)[0];
+          if (['c', 'r'].includes(code)) {
+            obj1[key] = (value as any)[1];
+          } else if (code === 'u') {
+            obj1[key] = State.applyDiff(obj1[key], value);
+          }
+        }
+        return obj1;
       }
-
     }
   }
 }
