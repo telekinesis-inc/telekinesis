@@ -122,12 +122,6 @@ export class State {
       if (target instanceof Function) {
         newProps.methods.set('__call__', ['(*args)', target.toString()]);
       }
-      // const props = {
-      //   attributes: this.attributes,
-      //   methods: this.methods,
-      //   repr: this.repr,
-      //   doc: this.doc,
-      // }
       if (this._historyOffset == 0) {
         const newState = State.fromObject(newProps);
         this._historyOffset = 1;
@@ -140,8 +134,16 @@ export class State {
       const diffs = {} as any;
       diffs[this._historyOffset + this._history.length + 1] = Object.getOwnPropertyNames(newProps)
         .map(k => [k, State.calcDiff((this as any)[k], (newProps as any)[k])])
-        .reduce((p, [k, v]) => { (p as any)[k as string] = v; return p }, {})
-      return this.updateFromDiffs(0, diffs);
+        .reduce((p, [k, v]) => {
+          if (v) {
+            (p as any)[k as string] = v;
+          }
+          return p;
+        }, {})
+      if (Object.keys(diffs[this._historyOffset + this._history.length + 1]).length) {
+        return this.updateFromDiffs(0, diffs);
+      }
+      return this;
     }
   }
   updateFromDiffs(lastVersion: number, diffs: any) {
