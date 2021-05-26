@@ -404,6 +404,14 @@ export class Telekinesis extends Function {
     if (lastVersion !== undefined) {
       this._state.updateFromDiffs(lastVersion, diffs)
     }
+    for (const key of Object.getOwnPropertyNames(this)) {
+      if (key[0] !== '_' && key !== 'prototype') {
+        delete (this as any)[key];
+      }
+    }
+    for (const key of Array.from(this._state.methods.keys()).concat(Array.from(this._state.attributes.keys()))) {
+      (this as any)[key] = null;
+    }
     this._onUpdateCallback && this._onUpdateCallback(this);
   }
   async _delegate(receiver: string | [string, string], parentChannel?: Channel) {
@@ -945,6 +953,18 @@ export class Telekinesis extends Function {
       outputStack.set(root, out);
       return out;
     }
+  }
+  get __signature__() {
+    if (this._state.pipeline.length) {
+      return (this._state.methods.get(this._state.pipeline[this._state.pipeline.length-1][1] as string) || [undefined])[0];
+    }
+    return (this._state.methods.get('__call__') || [undefined])[0];
+  }
+  get __doc__() {
+    if (this._state.pipeline.length) {
+      return (this._state.methods.get(this._state.pipeline[this._state.pipeline.length-1][1] as string) || [null, undefined])[1];
+    }
+    return (this._state.doc || '' ) + '\n' + (this._state.methods.get('__call__') || [null, ""])[1];
   }
   static _reuse(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
