@@ -104,7 +104,15 @@ export class State {
       const newProps = {
         attributes: Object.getOwnPropertyNames(target)
           .filter(x => x[0] !== '_')
-          .reduce((p, v) => { p.set(v, (target as any)[v]); return p }, new Map()),
+          .reduce((p, v) => {
+            const attr = (target as any)[v];
+            if (typeof attr !== 'undefined' && Object.getPrototypeOf(attr).constructor.name === 'Object') {
+              p.set(v, Object.entries(attr).reduce((pp, [kk, vv]) => {pp[kk] = vv; return pp}, {} as any))
+            } else {
+              p.set(v, attr);
+            }
+            return p 
+          }, new Map()),
         methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
           .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
           .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
