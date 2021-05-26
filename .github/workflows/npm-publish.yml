@@ -22,11 +22,10 @@ jobs:
       uses: actions/setup-node@v1
       with:
         node-version: 12
-        workspace: "./js/"
+        workspace: "~/js/"
         # Specifies the registry, this field is required!
         registry-url: https://registry.npmjs.org/
     # clean install of your projects' deps. We use "npm ci" to avoid package lock changes
-    - run: cd js/
     - run: npm ci
     # set up git since we will later push to the repo
     - run: git config --global user.name "${{ secrets.NPM_USER }}"
