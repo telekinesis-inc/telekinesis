@@ -860,11 +860,12 @@ class Telekinesis:
         return (self._state.methods.get('__call__') or [None])[0]
 
     @property
-    def __signature__(self):
+    def __doc__(self):
         gets = [g for g in self._state.pipeline if g[0] == 'get']
         if gets:
             return (self._state.methods.get(gets[-1][1]) or [None, None])[1]
         return ((self._state.doc and self._state.doc + "\n") or "") + ((self._state.methods.get('__call__') or [None, None])[1] or "") or None
+
     @staticmethod
     def _from_state(
         state,
@@ -958,7 +959,7 @@ class Telekinesis:
         out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent)
         out._state = state
         out._update_state()
-        out.__doc__ = state.doc if method_name == "__call__" else docstring
+        # out.__doc__ = state.doc if method_name == "__call__" else docstring
 
         return out
 
