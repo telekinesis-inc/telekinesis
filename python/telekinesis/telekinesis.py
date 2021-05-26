@@ -852,6 +852,19 @@ class Telekinesis:
         output_stack[root] = out
         return out
 
+    @property
+    def __signature__(self):
+        gets = [g for g in self._state.pipeline if g[0] == 'get']
+        if gets:
+            return (self._state.methods.get(gets[-1][1]) or [None])[0]
+        return (self._state.methods.get('__call__') or [None])[0]
+
+    @property
+    def __signature__(self):
+        gets = [g for g in self._state.pipeline if g[0] == 'get']
+        if gets:
+            return (self._state.methods.get(gets[-1][1]) or [None, None])[1]
+        return ((self._state.doc and self._state.doc + "\n") or "") + ((self._state.methods.get('__call__') or [None, None])[1] or "") or None
     @staticmethod
     def _from_state(
         state,
