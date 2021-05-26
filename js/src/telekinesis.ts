@@ -222,6 +222,29 @@ export class State {
           }
         }
         return;
+      } else if ((typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0).constructor.name === 'Object') && 
+      (typeof obj1 !== 'undefined' && Object.getPrototypeOf(obj1).constructor.name === 'Object')) {
+        const changes = {} as any;
+        for (const key of Object.keys(obj0)) {
+          if (Object.getOwnPropertyNames(obj1).includes(key)) {
+            const diff = State.calcDiff(obj0[key], obj1[key], maxDepth - 1)
+            if (diff) {
+              changes[key] = diff;
+            }
+          } else {
+            changes[key] = ["d"];
+          }
+        }
+        for (const key of Object.keys(obj1)) {
+          if (!Object.keys(obj0).includes(key)) {
+            changes[key] = ["c", obj1[key]];
+          }
+        }
+        if (Object.keys(changes).length) {
+          return ["u", changes];
+        } else {
+          return;
+        }
       }
     }
     return ["r", obj1];
