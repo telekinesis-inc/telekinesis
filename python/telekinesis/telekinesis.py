@@ -533,7 +533,10 @@ class Telekinesis:
                     or (type(target) == dict)
                 ):
                     raise Exception("Unauthorized!")
-                target = target.__getattribute__(arg)
+                if isinstance(target, type):
+                    target = target.__getattribute__(target, arg)
+                else:
+                    target = target.__getattribute__(arg)
             if action == "call":
                 self._logger.info("%s %s", action, target)
                 ar, kw = arg
@@ -728,7 +731,7 @@ class Telekinesis:
                             obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
                         )
                         if receiver != route.session
-                        else {"pipeline": obj._state.pipeline},
+                        else [0, {"pipeline": obj._state.pipeline}],
                         receiver,
                         channel,
                         traversal_stack,
@@ -781,11 +784,11 @@ class Telekinesis:
             route = Route(**obj[0])
             state_diff = self._decode(input_stack, caller_id, obj[1], output_stack)
 
-            if route.session == self._session.session_key.public_serial() and route.channel in self._session.channels:
+            if route.session == (self._session.session_key.public_serial(), self._session.instance_id) and route.channel in self._session.channels:
                 channel = self._session.channels.get(route.channel)
                 if channel.validate_token_chain(caller_id, route.tokens):
 
-                    if state_diff.pipeline:
+                    if state_diff[1].get('pipeline'):
                         return Telekinesis._from_state(
                             channel.telekinesis._state.clone().update_from_diffs(*state_diff),
                             channel.telekinesis._target,

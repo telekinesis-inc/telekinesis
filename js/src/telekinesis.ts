@@ -828,7 +828,7 @@ export class Telekinesis extends Function {
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
       let stateDiff = receiver !== route.session ?
         obj._state.getDiffs(obj._clients?.get(receiver.join())?.lastState || 0, this._mask, !blockRecursion && obj._clients?.get(receiver.join())?.cacheAttributes) :
-        { pipeline: obj._state.pipeline };
+        [0, { pipeline: obj._state.pipeline }];
       // console.log('>>>>', stateDiff)
       out[1] = ['obj', [
         route.toObject(),
