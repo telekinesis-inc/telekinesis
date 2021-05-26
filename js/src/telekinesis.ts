@@ -405,12 +405,14 @@ export class Telekinesis extends Function {
       this._state.updateFromDiffs(lastVersion, diffs)
     }
     for (const key of Object.getOwnPropertyNames(this)) {
-      if (key[0] !== '_' && key !== 'prototype') {
+      if (key[0] !== '_' && !['prototype', 'arguments', 'caller', 'length', 'name'].includes(key)) {
         delete (this as any)[key];
       }
     }
     for (const key of Array.from(this._state.methods.keys()).concat(Array.from(this._state.attributes.keys()))) {
-      (this as any)[key] = null;
+      if (!['length', 'name'].includes(key)) {
+        (this as any)[key] = null;
+      }
     }
     this._onUpdateCallback && this._onUpdateCallback(this);
   }
