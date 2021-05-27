@@ -59,7 +59,7 @@ class State:
                     if x:
                         filtered["attributes"] = (diff["attributes"][0], x)
                 if "methods" in diff:
-                    x = {k: v for k, v in diff["methods"] if k not in (mask or set())}
+                    x = {k: v for k, v in diff["methods"].items() if k not in (mask or set())}
                     if x:
                         filtered["methods"] = x
                 if "repr" in diff:
