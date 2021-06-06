@@ -5,6 +5,7 @@ import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
 
+const {version} = require('../package.json');
 const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
 
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
@@ -80,7 +81,7 @@ export class Connection {
       let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
       let sentMetadata = new TextEncoder().encode(
         JSON.stringify({
-          version: '0.1.6'
+          version: version
         })
       )
 
