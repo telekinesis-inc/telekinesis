@@ -45,7 +45,7 @@ export class Entrypoint {
 }
 
 export async function createEntrypoint(target: Object, url: string = 'ws://localhost:8776', sessionKey: {privateKey: {}, publicKey: {}}, 
-                                       channelKey?: { privateKey: {}, publicKey: {} }, ...args: any) {
+                                       channelKey?: { privateKey: {}, publicKey: {} }, isPublic: boolean = true, ...args: any) {
   if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
     let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
     url = url.slice(0, i) + ':8776' + url.slice(i);
@@ -56,7 +56,7 @@ export async function createEntrypoint(target: Object, url: string = 'ws://local
   await connection.connect();
 
   const tk = new Telekinesis(target, session, ...args);
-  tk._channel = new Channel(session, channelKey)
+  tk._channel = new Channel(session, channelKey, isPublic)
   tk._channel.listen();
   tk._channel.telekinesis = tk;
 
