@@ -1,4 +1,4 @@
-import { Connection, Session } from "./client";
+import { Channel, Connection, Session } from "./client";
 import { Telekinesis } from "./telekinesis";
 
 const btoa_ = typeof btoa !== 'undefined' ? btoa : require('btoa');
@@ -42,4 +42,25 @@ export class Entrypoint {
 
     return new Telekinesis(new Promise((r: any) => connection.connect().then(() => r(connection.entrypoint))), session, ...args)
   }
+}
+
+export async function createEntrypoint(target: Object, url: string = 'ws://localhost:8776', sessionKey: {privateKey: {}, publicKey: {}}, 
+                                       channelKey?: { privateKey: {}, publicKey: {} }, ...args: any) {
+  if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
+    let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
+    url = url.slice(0, i) + ':8776' + url.slice(i);
+  }
+  const session = new Session(sessionKey);
+  const connection = new Connection(session, url);
+
+  await connection.connect();
+
+  const tk = new Telekinesis(target, session, ...args);
+  tk._channel = new Channel(session, channelKey)
+  tk._channel.listen();
+  tk._channel.telekinesis = tk;
+
+  await tk._channel.execute();
+
+  return tk._channel.route, tk;
 }
