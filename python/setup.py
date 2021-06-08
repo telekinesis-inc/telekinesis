@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="telekinesis",
-    version="0.1.6",
+    version="0.1.7",
     author="Telekinesis, Inc.",
     author_email="support@telekinesis.cloud",
     description="Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
