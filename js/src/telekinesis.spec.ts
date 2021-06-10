@@ -156,7 +156,7 @@ describe("Telekinesis", () => {
     await a;
 
     expect(a.x0._last()).toEqual(d.x0);
-    await new Promise(r => setTimeout(() => r(true), 300));
+    await new Promise(r => setTimeout(() => r(true), 400));
     expect(b.x0._last()).toEqual(d.x0);
     // console.log((await getMeasures()).size_kb, m0)
     const m1 = (await getMeasures()).size_kb;

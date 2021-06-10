@@ -1,6 +1,7 @@
 import { deserialize, serialize } from "bson";
 import { randomBytes } from "crypto";
-import { deflate, inflate } from 'zlib';
+import { deflate } from 'zlib';
+import { deflate as defl, inflate } from 'pako';
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
@@ -476,9 +477,8 @@ export class Channel {
       if (payloadSer[0] === 0) {
         payload = deserialize(payloadSer.slice(1));
       } else {
-        payload = deserialize(await new Promise((r, rej) => {
-          inflate(payloadSer.slice(1), (err, buff) => err ? rej(err) : r(new Uint8Array(buff)))
-        }) as Uint8Array);
+        const pk = inflate(payloadSer.slice(1))
+        payload = deserialize(pk);
       }
       // console.log(`<<< ${source} ${destination} ${Object.keys(payload)}`)
       if (this.telekinesis instanceof Telekinesis) {
@@ -568,9 +568,12 @@ export class Channel {
       let payload = new Uint8Array(serialize(payloadObj));
 
       if (payload.length < this.MAX_COMPRESSION_LEN) {
-        payload = new Uint8Array([255, ...(await new Promise((r, rej) => {
+        const zl = await new Promise((r, rej) => {
           deflate(payload, (err, buf) => err ? rej(err) : r(new Uint8Array(buf)))
-        }) as Uint8Array)]);
+        }) as Uint8Array;
+        const pk = defl(payload);
+        // console.log(zl, pk)
+        payload = new Uint8Array([255, ...pk]);
 
       } else {
         payload = new Uint8Array([0, ...payload]);
