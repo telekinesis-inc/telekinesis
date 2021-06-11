@@ -5,7 +5,7 @@ import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
 
 const {version} = require('../package.json');
-const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : require('crypto').webcrypto;
+const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : eval("require('crypto').webcrypto");
 
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
 
@@ -38,7 +38,7 @@ export class Connection {
         this.websocket.close();
         this.websocket = undefined;
       }
-      const WS = typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? WebSocket : (require('ws'));
+      const WS = typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? WebSocket : eval("require('ws')");
       this.websocket = new WS(this.url) as WebSocket;
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
