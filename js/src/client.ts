@@ -1,5 +1,5 @@
 import { deserialize, serialize } from "bson";
-import { deflate, inflate } from 'pako';
+import { unzlibSync, zlibSync } from "fflate";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
@@ -475,8 +475,8 @@ export class Channel {
       if (payloadSer[0] === 0) {
         payload = deserialize(payloadSer.slice(1));
       } else {
-        const pk = inflate(payloadSer.slice(1))
-        payload = deserialize(pk);
+        const ff = unzlibSync(payloadSer.slice(1));
+        payload = deserialize(ff);
       }
       // console.log(`<<< ${source} ${destination} ${Object.keys(payload)}`)
       if (this.telekinesis instanceof Telekinesis) {
@@ -566,9 +566,9 @@ export class Channel {
       let payload = new Uint8Array(serialize(payloadObj));
 
       if (payload.length < this.MAX_COMPRESSION_LEN) {
-        const pk = deflate(payload);
-        // console.log(zl, pk)
-        payload = new Uint8Array([255, ...pk]);
+        const ff = zlibSync(payload, {});
+
+        payload = new Uint8Array([255, ...ff]);
 
       } else {
         payload = new Uint8Array([0, ...payload]);
