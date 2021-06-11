@@ -1,7 +1,5 @@
 import { deserialize, serialize } from "bson";
-import { randomBytes } from "crypto";
-import { deflate } from 'zlib';
-import { deflate as defl, inflate } from 'pako';
+import { deflate, inflate } from 'pako';
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
 import { Telekinesis } from "./telekinesis";
@@ -270,7 +268,7 @@ export class Session {
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
-    this.instanceId = b64encode(Uint8Array.from(randomBytes(6)));
+    this.instanceId = b64encode(Uint8Array.from(webcrypto.getRandomValues(new Uint8Array(6))));
     this.channels = new Map();
     this.connections = [];
     this.seenMessages = [new Set(), new Set(), 0];
@@ -568,10 +566,7 @@ export class Channel {
       let payload = new Uint8Array(serialize(payloadObj));
 
       if (payload.length < this.MAX_COMPRESSION_LEN) {
-        const zl = await new Promise((r, rej) => {
-          deflate(payload, (err, buf) => err ? rej(err) : r(new Uint8Array(buf)))
-        }) as Uint8Array;
-        const pk = defl(payload);
+        const pk = deflate(payload);
         // console.log(zl, pk)
         payload = new Uint8Array([255, ...pk]);
 
