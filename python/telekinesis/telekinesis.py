@@ -1,6 +1,5 @@
 import sys
 import io
-import time
 import asyncio
 import inspect
 import traceback
@@ -685,8 +684,12 @@ class Telekinesis:
         if receiver is None:
             receiver = (self._session.session_key.public_serial(), self._session.instance_id)
 
-        if type(target) in (int, float, str, bytes, bool, type(None)):
+        if type(target) in (str, bytes, bool, type(None)):
             tup = (type(target).__name__, target)
+        elif isinstance(target, float):
+            tup = ('float', target)
+        elif isinstance(target, int) or re.match('<class \'numpy\.[\w]*int', str(type(target))):
+            tup = ('int', int(target))
         elif type(target) in (range, slice):
             tup = (type(target).__name__, (target.start, target.stop, target.step))
         elif type(target) in (list, tuple, set):
