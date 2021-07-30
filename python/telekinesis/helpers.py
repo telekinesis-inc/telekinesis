@@ -29,6 +29,9 @@ def Entrypoint(url="ws://localhost:8776", session_key_file=None, **kwargs):
 
 
 async def create_entrypoint(target, url="ws://localhost:8776", session_key_file=None, channel_key_file=None, is_public=True, **kwargs):
+    """
+    Returns a tuple (tk._channel.route, tk) with tk being a Telekinesis object pointing to `target`.
+    """
     s = Session(session_key_file)
 
     if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
