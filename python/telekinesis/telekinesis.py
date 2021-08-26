@@ -421,10 +421,7 @@ class Telekinesis:
                     isinstance(ret, Telekinesis)
                     and isinstance(ret._target, Route)
                     and ret._state.pipeline
-                    and (
-                        ret._target.session != self._session.session_key.public_serial()
-                        or ret._target._channel not in self._session.channels
-                    )
+                    and ret._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
                 ):
                     await ret._forward(
                         ret._state.pipeline,
@@ -506,7 +503,7 @@ class Telekinesis:
                 and isinstance(target, Telekinesis)
                 and isinstance(target._target, Route)
                 and (
-                    target._target.session != self._session.session_key.public_serial()
+                    target._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
                     or target._target.channel not in self._session.channels
                 )
             ):
