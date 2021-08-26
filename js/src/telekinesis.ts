@@ -505,7 +505,7 @@ export class Telekinesis extends Function {
         let ret = await this._execute(metadata, pipeline, true);
 
         if (ret instanceof Telekinesis && ret._target instanceof Route && (
-          ret._target.session !== await this._session.sessionKey.publicSerial() ||
+          ret._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
           !this._session.channels.has(ret._target.channel)
         )) {
           await (ret as Telekinesis)._forward(
@@ -606,7 +606,7 @@ export class Telekinesis extends Function {
 
     for (let step in pipeline) {
       if (breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && (
-        target._target.session !== await this._session.sessionKey.publicSerial() ||
+        target._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
         !this._session.channels.has(target._target.channel)
       )) {
         const oldState = target._state;
@@ -619,7 +619,6 @@ export class Telekinesis extends Function {
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
-        // console.log(`${action} ${arg} ${target}`);
         if (arg[0] === '_' || this._mask.has(arg)) {
           throw 'Unauthorized!';
         }
@@ -696,6 +695,9 @@ export class Telekinesis extends Function {
       this._blockThen = true;
       return this._proxy;
     }
+    if (target instanceof Telekinesis && !target._blockThen) {
+      target._blockThen = true;
+    } 
     return target;
   }
   _timeout(seconds: number) {
@@ -713,7 +715,6 @@ export class Telekinesis extends Function {
         root._updateState(lastVersion, diffs);
       }
       if (Object.getOwnPropertyNames(response).includes('return')) {
-        // console.log((response as any)['return'])
         let out = this._decode((response as any)['return'], (this._target as Route).session[0])
         if (out?._isTelekinesisObject === true) {
           out._lastUpdate = Date.now();
