@@ -685,7 +685,7 @@ class Telekinesis:
             tup = (type(target).__name__, target)
         elif isinstance(target, float):
             tup = ('float', target)
-        elif isinstance(target, int) or re.match('<class \'numpy\.[\w]*int', str(type(target))):
+        elif isinstance(target, int) or re.match(r'<class \'numpy\.[\w]*int', str(type(target))):
             tup = ('int', int(target))
         elif type(target) in (range, slice):
             tup = (type(target).__name__, (target.start, target.stop, target.step))
