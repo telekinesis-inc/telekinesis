@@ -338,6 +338,8 @@ class Telekinesis:
             max_delegation_depth = None
             if isinstance(receiver, str) and receiver == "*":
                 raise Exception("Cannot delegate remote Channel to public.")
+            if not route.tokens:
+                extend_route = False
 
         else:
             if not self._channel:
