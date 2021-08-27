@@ -85,9 +85,15 @@ class State:
             ]:
                 try:
                     if isinstance(target, type):
-                        target_attribute = target.__getattribute__(target, attribute_name)
+                        try:
+                            target_attribute = target.__getattribute__(target, attribute_name)
+                        except AttributeError:
+                            target_attribute = target.__getattr__(target, attribute_name)
                     else:
-                        target_attribute = target.__getattribute__(attribute_name)
+                        try:
+                            target_attribute = target.__getattribute__(attribute_name)
+                        except AttributeError:
+                            target_attribute = target.__getattr__(attribute_name)
 
                     if "__call__" in dir(target_attribute):
                         if attribute_name == "__call__" or (isinstance(target, type) and attribute_name == "__init__"):
@@ -532,9 +538,15 @@ class Telekinesis:
                 ):
                     raise Exception("Unauthorized!")
                 if isinstance(target, type):
-                    target = target.__getattribute__(target, arg)
+                    try:
+                        target = target.__getattribute__(target, arg)
+                    except AttributeError:
+                        target = target.__getattr__(target, arg)
                 else:
-                    target = target.__getattribute__(arg)
+                    try:
+                        target = target.__getattribute__(arg)
+                    except AttributeError:
+                        target = target.__getattr__(arg)
             if action == "call":
                 self._logger.info("%s %s", action, target)
                 ar, kw = arg
