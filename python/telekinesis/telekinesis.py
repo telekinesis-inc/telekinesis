@@ -196,8 +196,10 @@ class State:
 
     @staticmethod
     def calc_diff(obj0, obj1, max_depth=10):
-        if obj0 == obj1:
-            return
+        try:
+            if obj0 == obj1:
+                return
+        except Exception: pass
         if max_depth > 0:
             if type(obj0) == type(obj1) == dict:
                 changes = {}
