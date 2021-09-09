@@ -537,11 +537,11 @@ export class Telekinesis extends Function {
         }
       }
     } catch (e) {
-      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${e.message}` +
-        this._exposeTb ? '\n' + e.stack : '')
+      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${(e as Error).message}` +
+        this._exposeTb ? '\n' + (e as Error).stack : '')
       this._state.pipeline = [];
       try {
-        const errMessage = { error: (this._exposeTb ? e : e.name) };
+        const errMessage = { error: (this._exposeTb ? e : (e as Error).name) };
         if (replyTo !== undefined) {
           const newChannel = new Channel(this._session)
           try {

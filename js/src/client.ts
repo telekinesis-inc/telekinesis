@@ -742,7 +742,8 @@ export class RequestMetadata {
 
   constructor(session: Session, caller: Route, rawMessages: {}[]) {
     this._session = session;
-    this.sessionPublicKey = session.sessionKey.publicSerial().then((s: string) => { this.sessionPublicKey = s }) && "";
+    this.sessionPublicKey = "";
+    session.sessionKey.publicSerial().then((s: string) => { this.sessionPublicKey = s })
     this.caller = caller;
     this.rawMessages = rawMessages;
   }
