@@ -130,7 +130,7 @@ class Token:
 
     def encode(self):
         if not self.signature:
-            raise Exception("You need to sign the token before encoding it")
+            raise RuntimeError("You need to sign the token before encoding it")
         return self.signature + "." + self._to_string()
 
     def sign(self, signing_key):

@@ -146,7 +146,7 @@ class Connection:
                 s, mm = encode(header, payload, message_id, retry + 1)
                 self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
-        raise Exception("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
+        raise ConnectionError("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
 
     async def expect_ack(self, message_id, lock):
         await lock.wait()
@@ -188,7 +188,7 @@ class Connection:
 
             if n_tries > self.MAX_SEND_RETRIES:
                 self.is_connecting_lock.set()
-                raise Exception("%s Max tries reached" % self.session.session_key.public_serial()[:4])
+                raise ConnectionError("%s Max tries reached" % self.session.session_key.public_serial()[:4])
             n_tries += 1
 
     async def recv(self):
@@ -237,7 +237,7 @@ class Connection:
                                 ):
                                     channel.handle_message(source, destination, payload, message[: 73 + len_h + 65 + 32])
                             else:
-                                raise Exception("Authentication Error: message payload does not match signed hash")
+                                raise AssertionError("Message payload does not match signed hash")
 
     def ack(self, source_id, message_id):
         # print(self.session.session_key.public_serial()[:4], 'received ack', message_id[:4], 'from', source_id[:4])
@@ -405,7 +405,7 @@ class Channel:
                 elif payload[4] == 255:
                     message_tuple = (metadata, bson.loads(zlib.decompress(payload[5:])))
                 else:
-                    raise Exception("Received message with different encoding")
+                    raise BufferError("Received message with different encoding")
             else:
                 ir, nr, mmid, chunk = payload[:2], payload[2:4], payload[4:8], payload[8:]
                 i, n = int.from_bytes(ir, "big"), int.from_bytes(nr, "big")
@@ -427,7 +427,7 @@ class Channel:
                     elif payload[0] == 255:
                         message_tuple = (combined_metadata, bson.loads(zlib.decompress(payload[1:])))
                     else:
-                        raise Exception("Received message with different encoding")
+                        raise BufferError("Received message with different encoding")
 
             if message_tuple:
                 # print('<<<', source, destination, {k: v is None for k, v in message_tuple[1].items()})
@@ -470,7 +470,7 @@ class Channel:
                     chunk = b"\x00" * 4 + payload
                 else:
                     if n > 2 ** 16:
-                        raise Exception(f"Payload size {len(payload)/2**20} MiB is too large")
+                        raise MemoryError(f"Payload size {len(payload)/2**20} MiB is too large")
                     chunk = i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload : (i + 1) * max_payload]
 
                 nonce = os.urandom(16)

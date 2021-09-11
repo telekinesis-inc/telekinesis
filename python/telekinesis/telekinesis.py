@@ -345,7 +345,7 @@ class Telekinesis:
             route = self._target.clone()
             max_delegation_depth = None
             if isinstance(receiver, str) and receiver == "*":
-                raise Exception("Cannot delegate remote Channel to public.")
+                raise PermissionError("Cannot delegate remote Channel to public.")
             if not route.tokens:
                 extend_route = False
 
@@ -538,7 +538,7 @@ class Telekinesis:
                     or arg in (self._mask or [])
                     or (type(target) == dict)
                 ):
-                    raise Exception("Unauthorized!")
+                    raise PermissionError("Unauthorized!")
                 if isinstance(target, type):
                     try:
                         target = target.__getattribute__(target, arg)
@@ -669,7 +669,7 @@ class Telekinesis:
 
     def __setattr__(self, attribute, value):
         if attribute[0] != "_":
-            raise Exception("Attributes for Telekinesis objects cannot be set directy")
+            raise PermissionError("Attributes for Telekinesis objects cannot be set directy")
         super().__setattr__(attribute, value)
 
     def __await__(self):
@@ -817,7 +817,7 @@ class Telekinesis:
                         )
                     out = channel.telekinesis._target
                 else:
-                    raise Exception(f"Unauthorized! {caller_id} {route.tokens}")
+                    raise PermissionError(f"Unauthorized! {caller_id} {route.tokens}")
             elif self._parent and (
                 ("__call__" not in self._state.methods)
                 or ("methods" not in state_diff[1])
