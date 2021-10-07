@@ -170,7 +170,9 @@ export class State {
             this.pipeline = diffs.pipeline;
           } else {
             const diff = diffs[(nextVersion + parseInt(i)).toString()];
-            this._history.push(diff);
+            if (diff !== undefined) {
+              this._history.push(diff);
+            }
             // if (diff === undefined) {
             //   console.log(diffs, nextVersion, i)
             // }
@@ -340,6 +342,7 @@ export class Telekinesis extends Function {
     this._blockThen = false;
     this._isTelekinesisObject = true;
 
+
     this._proxy = new Proxy(this, {
       get(target: Telekinesis, prop: string) {
         if (prop[0] === '_') {
@@ -448,7 +451,7 @@ export class Telekinesis extends Function {
     if (extendRoute) {
       tokenHeaders.push(await this._session.extendRoute(route, receiver instanceof Array ? receiver[0] : receiver, maxDelegationDepth) as Header);
       if (this._session.routes.has(route._hash)) {
-        this._session.routes.get(route._hash).add(receiver instanceof Array ? receiver : [receiver, null]);
+        this._session.routes.get(route._hash).delegations.add(receiver instanceof Array ? receiver : [receiver, null]);
       }
     }
     route._parentChannel = parentChannel || this._channel;
@@ -634,10 +637,14 @@ export class Telekinesis extends Function {
 
         let ar = (pipeline[step][1] as [string[], {}])[0] as [];
         let args: any[] = [];
-        for (let i in ar) {
-          args[i] = exc(ar[i]);
-          if (args[i] instanceof Promise) {
-            args[i] = await args[i];
+        if (target._tk_block_arg_evaluation === true) {
+          args = ar;
+        } else {
+          for (let i in ar) {
+            args[i] = exc(ar[i]);
+            if (args[i] instanceof Promise) {
+              args[i] = await args[i];
+            }
           }
         }
 
@@ -986,5 +993,9 @@ export class Telekinesis extends Function {
 }
 export function injectFirstArg(func: any) {
   func._tk_inject_first = true;
+  return func;
+}
+export function blockArgEvaluation(func: any) {
+  func._tk_block_arg_evaluation = true;
   return func;
 }

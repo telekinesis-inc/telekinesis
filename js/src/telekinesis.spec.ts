@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { Connection, Entrypoint, Session, Telekinesis } from "./index";
+import { Connection, Entrypoint, Session, Telekinesis, injectFirstArg, blockArgEvaluation } from "./index";
 
 let subprocess: any;
 const HOST = 'ws://localhost:8777';
@@ -169,6 +169,34 @@ describe("Telekinesis", () => {
     const m2 = (await getMeasures()).size_kb;
     expect(m2 - m1).toBeLessThan(0.3 * (m1 - m0));
     // console.log((await getMeasures()).size_kb, m0)
+  })
+  it('injects metadata as first argument', async () => {
+    const returnCaller = injectFirstArg((metadata: any) => metadata.caller.session[0]);
+
+    await (new Entrypoint(HOST) as any).update({returnCaller: returnCaller});
+    const tkReturnCaller = await (new Entrypoint(HOST) as any).get('returnCaller');
+
+    expect(await tkReturnCaller() == await tkReturnCaller._session.sessionKey.publicSerial());
+  })
+  it('blocks argument evaluation', async () => {
+    const blocks = blockArgEvaluation((x: any) => null);
+    const doesNotBlock = (x: any) => null;
+    
+    let val = 0;
+    const increment = () => {val += 1};
+
+    await (new Entrypoint(HOST) as any).update({blocks: blocks});
+    await (new Entrypoint(HOST) as any).update({doesNotBlock: doesNotBlock});
+    await (new Entrypoint(HOST) as any).update({increment: increment});
+    
+    const ep = await (new Entrypoint(HOST) as any);
+    const tkIncrement = await ep.get('increment');
+    
+    await ep.get('doesNotBlock')(tkIncrement());
+    expect(val === 1);
+    await ep.get('blocks')(tkIncrement());
+
+    expect(val === 1);
   })
 
 });
