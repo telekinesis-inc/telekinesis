@@ -274,6 +274,7 @@ class Telekinesis:
         self._subscription = None
         self._subscribers = set()
         self._state = State()
+        self._block_gc = False
 
         if isinstance(target, Route):
             if parent is None:
@@ -347,6 +348,8 @@ class Telekinesis:
             if isinstance(receiver, str) and receiver == "*":
                 raise PermissionError("Cannot delegate remote Channel to public.")
             if not route.tokens:
+                extend_route = False
+            if receiver == self._session.session_key.public_serial():
                 extend_route = False
 
         else:
@@ -552,7 +555,10 @@ class Telekinesis:
             if action == "call":
                 self._logger.info("%s %s", action, target)
                 ar, kw = arg
-                args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
+                if "_tk_block_arg_evaluation" in dir(target) and target._tk_block_arg_evaluation:
+                    args, kwargs = [ar, kw]
+                else:
+                    args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
 
                 if "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg:
                     target = target(metadata, *args, **kwargs)
@@ -635,7 +641,7 @@ class Telekinesis:
                     self._session.targets.pop(id(self._target))
                 self._channel and await self._channel.close()
         except Exception:
-            self._session.logger("Error closing Telekinesis Object: %s", self._target, exc_info=True)
+            self._session.logger.error("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
     async def _forward(self, pipeline, reply_to=None, **kwargs):
         async with Channel(self._session) as new_channel:
@@ -679,7 +685,7 @@ class Telekinesis:
         return "\033[92m\u2248\033[0m " + str(self._state.repr)
 
     def __del__(self):
-        if self._parent is None:
+        if self._parent is None and not self._block_gc:
             self._session.pending_tasks.add(asyncio.get_event_loop().create_task(self._close()))
 
     def _encode(self, target, receiver=None, channel=None, traversal_stack=None, block_recursion=False):
@@ -1003,4 +1009,9 @@ def check_signature(signature):
 
 def inject_first_arg(func):
     func._tk_inject_first_arg = True
+    return func
+
+
+def block_arg_evaluation(func):
+    func._tk_block_arg_evaluation = True
     return func

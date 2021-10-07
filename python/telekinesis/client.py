@@ -277,6 +277,7 @@ class Session:
         self.seen_messages = [set(), set(), 0]
         self.issued_tokens = {}
         self.pending_tasks = set()
+        self.logger = logging.getLogger(__name__)
 
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())

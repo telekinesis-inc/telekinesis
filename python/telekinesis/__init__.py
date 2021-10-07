@@ -1,6 +1,6 @@
 from .client import Session, Connection, Channel, Route
 from .broker import Broker
-from .telekinesis import Telekinesis, inject_first_arg, State
+from .telekinesis import Telekinesis, inject_first_arg, block_arg_evaluation, State
 from .helpers import Entrypoint, authenticate, create_entrypoint
 
 from pkg_resources import get_distribution
@@ -19,5 +19,6 @@ __all__ = [
     "Channel",
     "Route",
     "inject_first_arg",
+    "block_arg_evaluation",
     "State",
 ]
