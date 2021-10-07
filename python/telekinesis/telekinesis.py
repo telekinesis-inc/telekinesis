@@ -164,7 +164,7 @@ class State:
             next_version = self._history_offset + len(self._history) + 1
             diffs_int = {int(k): v for k, v in diffs.items() if k != "pipeline"}
             if next_version in diffs_int:
-                for i in range(len(diffs_int)):
+                for i in range(len(diffs_int)-next_version+min(diffs_int.keys())):
                     self._history.append(diffs_int[i + next_version])
                     for k in ks:
                         if k in diffs_int[i + next_version]:

@@ -56,11 +56,16 @@ async def test_serialize():
     await ser.deserialize()
     assert await registry_1.get("data") == 2
 
-    # await registry_0.update({"lambda": lambda x: print(x)})
-    # prt = await registry_2.get("print")
+    await registry_0.update({"print": print})
+    prt = await registry_2.get("print")
 
-    # with pytest.raises(PermissionError):
-    #     await ser.serialize(Telekinesis(prt._target, ser._session)("I'm shouldn't have permissions"))
+    olddata = serializer._data
+    with pytest.raises(Exception):
+        await ser.serialize(Telekinesis(prt._target, ser._session)("I'm shouldn't have permissions"))
+    
+    assert serializer._data == olddata
+    
+    
 
 
 
