@@ -5,9 +5,7 @@ import inspect
 import traceback
 import logging
 from functools import partialmethod
-
 import re
-import makefun
 
 from .client import Route, Channel
 
@@ -257,7 +255,7 @@ class Telekinesis:
         mask=None,
         expose_tb=True,
         max_delegation_depth=None,
-        compile_signatures=True,
+        block_gc=True,
         parent=None,
     ):
         self._logger = logging.getLogger(__name__)
@@ -266,7 +264,7 @@ class Telekinesis:
         self._mask = mask or []
         self._expose_tb = expose_tb
         self._max_delegation_depth = max_delegation_depth
-        self._compile_signatures = compile_signatures
+        self._block_gc = block_gc
         self._parent = parent
         self._channel = None
         self._clients = {}
@@ -287,8 +285,8 @@ class Telekinesis:
             self._state.update_from_target(target)
             self._update_state()
 
-    def __getattribute__(self, attr):
-        if attr[0] == "_":
+    def __getattribute__(self, attr, override=False):
+        if attr[0] == "_" and not override:
             return super().__getattribute__(attr)
 
         state = self._state.clone()
@@ -301,7 +299,7 @@ class Telekinesis:
             self._mask,
             self._expose_tb,
             self._max_delegation_depth,
-            self._compile_signatures,
+            self._block_gc,
             self,
         )
 
@@ -395,7 +393,7 @@ class Telekinesis:
             None,
             self._expose_tb,
             self._max_delegation_depth,
-            self._compile_signatures,
+            self._block_gc,
         )
         self._state.pipeline.append(("subscribe", self._subscription))
 
@@ -479,7 +477,12 @@ class Telekinesis:
 
     async def _execute(self, metadata=None, pipeline=None, break_on_telekinesis=False):
         if asyncio.iscoroutine(self._target):
-            self._target = await self._target
+            target = await self._target
+            x = self
+            while x:
+                x._target = target
+                x = x._parent
+
             if isinstance(self._target, Route):
                 if (self._target.session, self._target.channel) not in self._session.routes:
                     self._session.routes[(self._target.session, self._target.channel)] = {
@@ -527,7 +530,7 @@ class Telekinesis:
                     target._mask,
                     target._expose_tb,
                     target._max_delegation_depth,
-                    target._compile_signatures,
+                    target._block_gc,
                     target._parent,
                 )
                 target._state = new_state
@@ -539,9 +542,13 @@ class Telekinesis:
                 if (
                     (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"])
                     or arg in (self._mask or [])
-                    or (type(target) == dict)
                 ):
-                    raise PermissionError("Unauthorized!")
+                    raise PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely")
+                elif type(target) in (dict, list, set) and arg not in (
+                    'get', 'index', 'count', '__getitem__', 'copy', 'difference', 'intersection', 'isdisjoint', 'issubset', 'issuperset', 
+                    'symmetric_difference', 'union' 
+                ):
+                    raise PermissionError("dicts, lists and sets cannot be modified remotely")
                 if isinstance(target, type):
                     try:
                         target = target.__getattribute__(target, arg)
@@ -581,7 +588,7 @@ class Telekinesis:
                         self._mask,
                         self._expose_tb,
                         self._max_delegation_depth,
-                        self._compile_signatures,
+                        self._block_gc,
                         None,
                     )
                     if arg._target.session not in tk._clients:
@@ -669,7 +676,7 @@ class Telekinesis:
             self._mask,
             self._expose_tb,
             self._max_delegation_depth,
-            self._compile_signatures,
+            self._block_gc,
             self,
         )
 
@@ -677,6 +684,18 @@ class Telekinesis:
         if attribute[0] != "_":
             raise PermissionError("Attributes for Telekinesis objects cannot be set directy")
         super().__setattr__(attribute, value)
+
+    def __getitem__(self, key):
+        return self.__getattribute__('__getitem__', True)(key)
+
+    def __setitem__(self, key, val):
+        return asyncio.create_task(self.__getattribute__('__setitem__', True)(key, val)._execute())
+ 
+    def __add__(self, val):
+        return self.__getattribute__('__add__', True)(val)
+
+    def __mul__(self, val):
+        return self.__getattribute__('__mul__', True)(val)
 
     def __await__(self):
         return self._execute().__await__()
@@ -733,7 +752,7 @@ class Telekinesis:
                     self._mask,
                     self._expose_tb,
                     self._max_delegation_depth,
-                    self._compile_signatures,
+                    self._block_gc,
                 )
             if not isinstance(obj._target, Route):
                 if receiver not in obj._clients:
@@ -818,7 +837,7 @@ class Telekinesis:
                             self._mask,
                             self._expose_tb,
                             self._max_delegation_depth,
-                            self._compile_signatures,
+                            self._block_gc,
                             channel.telekinesis,
                         )
                     out = channel.telekinesis._target
@@ -868,7 +887,7 @@ class Telekinesis:
                     self._mask,
                     self._expose_tb,
                     self._max_delegation_depth,
-                    self._compile_signatures,
+                    self._block_gc,
                 )
 
         output_stack[root] = out
@@ -896,92 +915,12 @@ class Telekinesis:
         mask=None,
         expose_tb=True,
         max_delegation_depth=None,
-        compile_signatures=True,
+        block_gc=True,
         parent=None,
     ):
-        def signatured_subclass(signature, method_name, docstring):
-            class Telekinesis_(Telekinesis):
-                @makefun.with_signature(
-                    signature,
-                    func_name=method_name,
-                    doc=docstring if method_name == "__call__" else None,
-                    module_name="telekinesis.telekinesis",
-                )
-                def __call__(self, *args, **kwargs):
-                    return Telekinesis.__call__(self, *args, **kwargs)
-
-            return Telekinesis_
-
-        method_name = state.pipeline[-1][1] if state.pipeline and state.pipeline[-1][0] == "get" else "__call__"
-
-        reset = "call" in [x[0] for x in state.pipeline[:-1]]
-        if method_name in state.methods or reset:
-            signature, docstring = (not reset and state.methods.get(method_name)) or (None, None)
-            signature = signature or "(*args, **kwargs)"
-            signature = signature.replace("(", "(self, ")
-
-            stderr = sys.stderr
-            sys.stderr = io.StringIO()
-
-            try:
-                if compile_signatures and check_signature(signature):
-                    Telekinesis_ = signatured_subclass(signature, method_name, docstring)
-                else:
-                    Telekinesis_ = signatured_subclass("(self, *args, **kwargs)", method_name, docstring)
-            except Exception:
-                Telekinesis_ = signatured_subclass("(self, *args, **kwargs)", method_name, docstring)
-
-            sys.stderr = stderr
-
-        else:
-            Telekinesis_ = Telekinesis
-            docstring = None
-
-        if method_name == "__call__":
-
-            def dundermethod(self, method, key):
-                state = self._state.clone()
-                state.pipeline.append(("get", method))
-                state.pipeline.append(("call", ((key,), {})))
-                return Telekinesis._from_state(
-                    state,
-                    self._target,
-                    self._session,
-                    self._mask,
-                    self._expose_tb,
-                    self._max_delegation_depth,
-                    self._compile_signatures,
-                    self,
-                )
-
-            def setitem(self, key, value):
-                state = self._state
-                state.pipeline.append(("get", "__setitem__"))
-                state.pipeline.append(("call", ((key, value), {})))
-                return Telekinesis._from_state(
-                    state,
-                    self._target,
-                    self._session,
-                    self._mask,
-                    self._expose_tb,
-                    self._max_delegation_depth,
-                    self._compile_signatures,
-                    self,
-                )
-
-            if "__getitem__" in state.methods:
-                Telekinesis_.__getitem__ = partialmethod(dundermethod, "__getitem__")
-            if "__add__" in state.methods:
-                Telekinesis_.__add__ = partialmethod(dundermethod, "__add__")
-            if "__mul__" in state.methods:
-                Telekinesis_.__mul__ = partialmethod(dundermethod, "__mul__")
-            if "__setitem__" in state.methods:
-                Telekinesis_.__setitem__ = setitem
-
-        out = Telekinesis_(target, session, mask, expose_tb, max_delegation_depth, compile_signatures, parent)
+        out = Telekinesis(target, session, mask, expose_tb, max_delegation_depth, block_gc, parent)
         out._state = state
         out._update_state()
-        # out.__doc__ = state.doc if method_name == "__call__" else docstring
 
         return out
 
@@ -992,7 +931,7 @@ class Telekinesis:
         mask=None,
         expose_tb=True,
         max_delegation_depth=None,
-        compile_signatures=True,
+        block_gc=True,
         parent=None,
     ):
         kwargs = locals()
@@ -1001,10 +940,6 @@ class Telekinesis:
             if all((kwargs[x] == tk.__getattribute__("_" + x) for x in kwargs)):
                 return tk
         return Telekinesis(**kwargs)
-
-
-def check_signature(signature):
-    return not ("\n" in signature or (signature != re.sub(r"(?:[^A-Za-z0-9_])lambda(?=[\)\s\:])", "", signature)))
 
 
 def inject_first_arg(func):
