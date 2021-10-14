@@ -485,8 +485,10 @@ class Broker:
                 event = asyncio.Event()
                 session.expecting_tokens[token.signature] = (event, token)
                 session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
-                await asyncio.wait_for(event.wait(), 2)
-
+                try:
+                    await asyncio.wait_for(event.wait(), 2)
+                except asyncio.TimeoutError:
+                    return False
                 return True
         else:
             event = asyncio.Event()

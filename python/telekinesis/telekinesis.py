@@ -267,7 +267,7 @@ class Telekinesis:
         mask=None,
         expose_tb=True,
         max_delegation_depth=None,
-        block_gc=True,
+        block_gc=False,
         parent=None,
     ):
         self._logger = logging.getLogger(__name__)
@@ -284,7 +284,6 @@ class Telekinesis:
         self._subscription = None
         self._subscribers = set()
         self._state = State()
-        self._block_gc = False
 
         if isinstance(target, Route):
             if parent is None:
@@ -666,7 +665,7 @@ class Telekinesis:
             else:
                 # print('closing', id(self._target), self._session.targets.get(id(self._target)))
                 if id(self._target) in self._session.targets:
-                    self._session.targets[id(self._target)].remove(self)
+                    self._session.targets[id(self._target)].discard(self)
                     if not self._session.targets[id(self._target)]:
                         self._session.targets.pop(id(self._target))
                     self._channel and await self._channel.close()
