@@ -654,10 +654,12 @@ class Telekinesis:
                     async with Channel(self._session) as new_channel:
                         await new_channel.send(self._target, {"close": list(o["delegations"])})
             else:
-                self._session.targets[id(self._target)].remove(self)
-                if not self._session.targets[id(self._target)]:
-                    self._session.targets.pop(id(self._target))
-                self._channel and await self._channel.close()
+                # print('closing', id(self._target), self._session.targets.get(id(self._target)))
+                if id(self._target) in self._session.targets:
+                    self._session.targets[id(self._target)].remove(self)
+                    if not self._session.targets[id(self._target)]:
+                        self._session.targets.pop(id(self._target))
+                    self._channel and await self._channel.close()
         except Exception:
             self._session.logger.error("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
