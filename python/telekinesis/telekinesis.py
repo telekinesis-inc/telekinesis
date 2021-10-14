@@ -582,7 +582,10 @@ class Telekinesis:
                 else:
                     args, kwargs = [await exc(x) for x in ar], {x: await exc(kw[x]) for x in kw}
 
-                if "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg:
+                if (
+                    "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg or
+                    isinstance(target, type) and "_tk_inject_first_arg" in dir(target.__init__) and target.__init__._tk_inject_first_arg
+                ):
                     target = target(metadata, *args, **kwargs)
                 else:
                     target = target(*args, **kwargs)
