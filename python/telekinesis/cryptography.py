@@ -15,26 +15,14 @@ class PrivateKey:
         if key_file and os.path.exists(key_file):
             with open(key_file, "rb") as kf:
                 data = kf.read()
-            self.key = serialization.load_pem_private_key(
-                data, None if password is None else password.encode(), default_backend()
-            )
+            self.key = PrivateKey.from_private_serial(data, password).key
             return
 
         self.key = ec.generate_private_key(curve=ec.SECP256R1, backend=default_backend())
 
         if key_file:
             with open(key_file, "wb") as kf:
-                enc = (
-                    serialization.NoEncryption()
-                    if password is None
-                    else serialization.BestAvailableEncryption(password.encode())
-                )
-                data = self.key.private_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PrivateFormat.PKCS8,
-                    encryption_algorithm=enc,
-                )
-                kf.write(data)
+                kf.write(self._private_serial(password))
 
     def sign(self, m):
         signature = self.key.sign(m, ec.ECDSA(hashes.SHA256()))
@@ -44,6 +32,30 @@ class PrivateKey:
     def public_serial(self):
         Q = self.key.public_key().public_numbers()
         return base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
+
+    def _private_serial(self, password=None):
+        enc = (
+            serialization.NoEncryption()
+            if password is None
+            else serialization.BestAvailableEncryption(password.encode())
+        )
+        return self.key.private_bytes(
+            encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=enc,
+        )
+
+    @staticmethod
+    def from_private_serial(data, password=None):
+        out = PrivateKey()
+        out.key = serialization.load_pem_private_key(
+            data, None if password is None else password.encode(), default_backend()
+        )
+        return out
+
+    def __getstate__(self):
+        return {'private_serial': self._private_serial()}
+
+    def __setstate__(self, state):
+        self.key = PrivateKey.from_private_serial(state['private_serial']).key
 
 
 class PublicKey:

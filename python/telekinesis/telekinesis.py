@@ -251,6 +251,13 @@ class State:
                         obj1.discard(key)
                 return obj1
 
+    def __getstate__(self):
+        return {'channel': self.channel, 'coro_callback': self.coro_callback}
+
+    def __setstate__(self, state):
+        self.channel = state['channel']
+        self.set_callback(state['coro_callback'])
+
 
 class Telekinesis:
     def __init__(
