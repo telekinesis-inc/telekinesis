@@ -83,15 +83,15 @@ async def test_walkthrough():
 
     assert await counter.increment().increment().value._timeout(4) == 2
 
-    with pytest.raises(Exception, match=r".*Unauthorized.*"):
+    with pytest.raises(PermissionError):
         await counter.to_be_masked()
 
-    with pytest.raises(Exception, match=r".*Unauthorized.*"):
+    with pytest.raises(PermissionError):
         c = counter.increment()
         c._state.pipeline[0] = ("get", "to_be_masked")
         await c
 
-    with pytest.raises(Exception, match=r".*Unauthorized.*"):
+    with pytest.raises(PermissionError):
         c = counter.increment()
         c._state.pipeline[0] = ("get", "_private")
         await c

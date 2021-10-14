@@ -107,10 +107,15 @@ class State:
                                     .replace("( ", "(", 1)
                                 )
                         except Exception:
-                            logger.debug("Could not obtain signature from %s.%s", target, attribute_name)
+                            logger.info("Could not obtain signature from %s.%s", target, attribute_name)
 
                         if attribute_name == "__init__" and isinstance(target, type):
                             methods["__call__"] = (signature, target.__init__.__doc__)
+                        elif attribute_name == '__call__':
+                            methods[attribute_name] = (
+                                signature, 
+                                target_attribute.__doc__+'\n\n'+target_attribute.__call__.__doc__
+                            )
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
@@ -458,7 +463,7 @@ class Telekinesis:
                             },
                         )
 
-        except Exception:
+        except Exception as e:
             if pipeline is None:
                 self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
             else:
@@ -466,7 +471,10 @@ class Telekinesis:
 
             self._state.pipeline.clear()
             try:
-                err_message = {"error": traceback.format_exc() if self._expose_tb else ""}
+                err_message = {
+                    "error": traceback.format_exc() if self._expose_tb else "", 
+                    "error_type": type(e).__name__
+                }
                 if reply_to:
                     async with Channel(self._session) as new_channel:
                         await new_channel.send(reply_to, err_message)
@@ -628,7 +636,10 @@ class Telekinesis:
                 root._update_state(diffs)
 
             if "error" in response:
-                raise Exception(response["error"])
+                if response.get("error_type") == "PermissionError":
+                    raise PermissionError(response["error"])
+                else:
+                    raise Exception(response["error"])
 
             if "return" in response:
                 ret = self._decode(response["return"], metadata.caller.session[0])
