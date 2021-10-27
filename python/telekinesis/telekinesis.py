@@ -114,7 +114,7 @@ class State:
                         elif attribute_name == '__call__':
                             methods[attribute_name] = (
                                 signature, 
-                                target_attribute.__doc__+'\n\n'+target_attribute.__call__.__doc__
+                                (target_attribute.__doc__ or '')+'\n\n'+(target_attribute.__call__.__doc__ or '')
                             )
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
