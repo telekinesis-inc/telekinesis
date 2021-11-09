@@ -1,6 +1,6 @@
-import { b64decode, b64encode } from "./helpers";
+import { b64decode, b64encode } from "./utils";
 
-const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : eval("require('crypto').webcrypto");
+const webcrypto = global.crypto;
 
 export class PrivateKey {
   _algorithm: "ECDSA" | "ECDH";
@@ -66,7 +66,7 @@ export class PrivateKey {
           name: "ECDSA",
           hash: { name: "SHA-256" },
         },
-        this.key.privateKey,
+        this.key.privateKey as CryptoKey,
         message
       )
       return new Uint8Array(signatureBuf)
@@ -77,7 +77,7 @@ export class PrivateKey {
       await this.generate();
     }
     if (this.key !== undefined) {
-      let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey)).slice(1);
+      let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey as CryptoKey)).slice(1);
       let out = b64encode(new Uint8Array(publicKey))
       if (this.repr === undefined) {
         this.repr = out;
@@ -92,8 +92,8 @@ export class PrivateKey {
       }
       if (this.key !== undefined) {
         this.exportedKey = {
-          privateKey: await webcrypto.subtle.exportKey('jwk', this.key.privateKey),
-          publicKey: await webcrypto.subtle.exportKey('jwk', this.key.publicKey)
+          privateKey: await webcrypto.subtle.exportKey('jwk', this.key.privateKey as CryptoKey),
+          publicKey: await webcrypto.subtle.exportKey('jwk', this.key.publicKey as CryptoKey)
         }
       }
     }
@@ -171,7 +171,7 @@ export class SharedKey {
           name: "ECDH",
           public: (await new PublicKey('derive', this.publicSerial).generate()).key
         },
-        this.privateKey.key.privateKey,
+        this.privateKey.key.privateKey as CryptoKey,
         {
           name: "AES-CTR",
           length: 256

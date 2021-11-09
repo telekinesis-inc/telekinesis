@@ -1,5 +1,5 @@
 import { Channel, Header, RequestMetadata, Route, Session } from './client';
-import { eqSet } from './helpers';
+import { eqSet } from './utils';
 
 export class State {
   attributes: Map<string, any> | Set<string>;

@@ -1,11 +1,10 @@
 import { deserialize, serialize } from "bson";
 import { unzlibSync, zlibSync } from "fflate";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
-import { bytesToInt, intToBytes, b64encode, b64decode } from "./helpers";
-import { Telekinesis } from "./telekinesis";
+import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
 const {version} = require('../package.json');
-const webcrypto = (typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined') ? crypto : eval("require('crypto').webcrypto");
+const webcrypto = global.crypto;
 
 export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
 
@@ -38,7 +37,7 @@ export class Connection {
         this.websocket.close();
         this.websocket = undefined;
       }
-      const WS = typeof WebSocket !== 'undefined' && typeof jest === 'undefined' ? WebSocket : eval("require('ws')");
+      const WS = global.WebSocket;
       this.websocket = new WS(this.url) as WebSocket;
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
@@ -263,7 +262,7 @@ export class Session {
   connections: Connection[];
   seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
   issuedTokens: Map<string, [Token, Token?]>;
-  targets: Map<any, Set<Telekinesis>>;
+  targets: Map<any, Set<any>>;
   routes: Map<string, any>;
 
   constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
@@ -391,7 +390,7 @@ export class Channel {
   waiting: (([]) => void)[];
   initLocks: ((channel: Channel) => void)[];
 
-  telekinesis?: Telekinesis;
+  telekinesis?: any;
 
   then: ((resolve: (ret: any) => void) => void) | undefined;
 
@@ -479,7 +478,7 @@ export class Channel {
         payload = deserialize(ff);
       }
       // console.log(`<<< ${source} ${destination} ${Object.keys(payload)}`)
-      if (this.telekinesis instanceof Telekinesis) {
+      if (this.telekinesis && this.telekinesis._handleRequest) {
         this.telekinesis._handleRequest(this, metadata, payload)
       } else if (this.waiting.length > 0) {
         let resolve = this.waiting.pop();
