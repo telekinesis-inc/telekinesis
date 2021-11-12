@@ -566,13 +566,19 @@ class Telekinesis:
                 if isinstance(target, type):
                     try:
                         target = target.__getattribute__(target, arg)
-                    except AttributeError:
-                        target = target.__getattr__(target, arg)
+                    except AttributeError as ae:
+                        try:
+                            target = target.__getattr__(target, arg)
+                        except AttributeError:
+                            raise ae
                 else:
                     try:
                         target = target.__getattribute__(arg)
-                    except AttributeError:
-                        target = target.__getattr__(arg)
+                    except AttributeError as ae:
+                        try:
+                            target = target.__getattr__(arg)
+                        except AttributeError:
+                            raise ae
             if action == "call":
                 self._logger.info("%s %s", action, target)
                 ar, kw = arg
