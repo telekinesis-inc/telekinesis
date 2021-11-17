@@ -27,6 +27,9 @@ async def test_state_diffing():
     class Container:
         def set(self, attr, val):
             self.__setattr__(attr, val)
+        def add_method(self, doc):
+            self.method = lambda x: x
+            self.method.__doc__ = doc
 
     bro.entrypoint, container = await create_entrypoint(Container(), "ws://localhost:8783")
 
@@ -45,3 +48,8 @@ async def test_state_diffing():
     await registry
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
     assert registry.y._last() == container.y._last()
+
+    await container.add_method("some docstring")
+    
+    await registry
+    assert registry._state.methods.get('method')[1] == "some docstring"

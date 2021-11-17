@@ -83,6 +83,8 @@ async def test_walkthrough():
 
     assert await counter.increment().increment().value._timeout(4) == 2
 
+    assert 'to_be_masked' not in counter._state.methods
+
     with pytest.raises(PermissionError):
         await counter.to_be_masked()
 

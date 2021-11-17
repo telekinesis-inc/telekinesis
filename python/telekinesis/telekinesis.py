@@ -1,10 +1,7 @@
-import sys
-import io
 import asyncio
 import inspect
 import traceback
 import logging
-from functools import partialmethod
 import re
 
 from .client import Route, Channel
@@ -12,7 +9,7 @@ from .client import Route, Channel
 
 class State:
     def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None):
-        self.attributes = (set(attributes) if isinstance(attributes, list) else attributes) or {}
+        self.attributes = {} if attributes is None else (set(attributes) if isinstance(attributes, list) else attributes) 
         self.methods = methods or {}
         self.pipeline = pipeline or []
         self.repr = repr or ""
@@ -40,30 +37,29 @@ class State:
         return out
 
     def get_diffs(self, last_version=0, mask=None, cache_attributes=False):
-        if last_version < self._history_offset and last_version >= 0:
+        if last_version < self._history_offset:
             return self._history_offset + len(self._history), self.to_dict(mask, cache_attributes)
         out = {}
-        if last_version >= 0:
-            for i, diff in enumerate(self._history[last_version - self._history_offset :]):
-                filtered = {}
-                if "attributes" in diff:
-                    if cache_attributes:
-                        x = {k: v for k, v in diff["attributes"][1].items() if k not in (mask or set())}
-                    else:
-                        x = {
-                            k: v[0] for k, v in diff["attributes"][1].items() if k not in (mask or set()) and v[0] in ["c", "d"]
-                        }
-                    if x:
-                        filtered["attributes"] = (diff["attributes"][0], x)
-                if "methods" in diff:
-                    x = {k: v for k, v in diff["methods"].items() if k not in (mask or set())}
-                    if x:
-                        filtered["methods"] = x
-                if "repr" in diff:
-                    filtered["repr"] = diff["repr"]
-                if "doc" in diff:
-                    filtered["doc"] = diff["doc"]
-                out[i + last_version + 1] = filtered
+        for i, diff in enumerate(self._history[last_version - self._history_offset :]):
+            filtered = {}
+            if "attributes" in diff:
+                if cache_attributes:
+                    x = {k: v for k, v in diff["attributes"][1].items() if k not in (mask or set())}
+                else:
+                    x = {
+                        k: v[0] for k, v in diff["attributes"][1].items() if k not in (mask or set()) and v[0] in ["c", "d"]
+                    }
+                if x:
+                    filtered["attributes"] = (diff["attributes"][0], x)
+            if "methods" in diff:
+                x = {k: v for k, v in diff["methods"][1].items() if k not in (mask or set())}
+                if x:
+                    filtered["methods"] = (diff['methods'][0], x)
+            if "repr" in diff:
+                filtered["repr"] = diff["repr"]
+            if "doc" in diff:
+                filtered["doc"] = diff["doc"]
+            out[i + last_version + 1] = filtered
         out["pipeline"] = self.pipeline
         return 0, out
 
@@ -93,7 +89,7 @@ class State:
                         except AttributeError:
                             target_attribute = target.__getattr__(attribute_name)
 
-                    if "__call__" in dir(target_attribute):
+                    if "__call__" in dir(target_attribute) and not isinstance(target_attribute, Telekinesis):
                         if attribute_name == "__call__" or (isinstance(target, type) and attribute_name == "__init__"):
                             target_attribute = target
                         signature = None
@@ -151,6 +147,7 @@ class State:
                 diff[k] = x
 
         if diff:
+
             return self.update_from_diffs(0, {self._history_offset + len(self._history) + 1: diff})
         return self
 
@@ -273,7 +270,7 @@ class Telekinesis:
         self._logger = logging.getLogger(__name__)
         self._target = target
         self._session = session
-        self._mask = mask or []
+        self._mask = [mask] if isinstance(mask, str) else mask or []
         self._expose_tb = expose_tb
         self._max_delegation_depth = max_delegation_depth
         self._block_gc = block_gc
@@ -789,18 +786,17 @@ class Telekinesis:
                         obj._clients.pop((receiver[0], None), None)
 
             route = obj._delegate(receiver[0], channel or self._channel)
+            diffs = obj._state.get_diffs(
+                obj._clients[receiver]["last_state"] if receiver in obj._clients else 0,
+                self._mask,
+                obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
+            ) if receiver != route.session else [0, {"pipeline": obj._state.pipeline}]
             tup = (
                 "obj",
                 (
                     route.to_dict(),
                     self._encode(
-                        obj._state.get_diffs(
-                            obj._clients[receiver]["last_state"] if receiver in obj._clients else 0,
-                            self._mask,
-                            obj._clients.get(receiver) and obj._clients[receiver]["cache_attributes"] and not block_recursion,
-                        )
-                        if receiver != route.session
-                        else [0, {"pipeline": obj._state.pipeline}],
+                        diffs,
                         receiver,
                         channel,
                         traversal_stack,
@@ -858,6 +854,7 @@ class Telekinesis:
                 if channel.validate_token_chain(caller_id, route.tokens):
 
                     if state_diff[1].get('pipeline'):
+                        
                         return Telekinesis._from_state(
                             channel.telekinesis._state.clone().update_from_diffs(*state_diff),
                             channel.telekinesis._target,
