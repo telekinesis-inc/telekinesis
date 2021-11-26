@@ -433,6 +433,7 @@ class Telekinesis:
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
+                    metadata.reply_to = reply_to
 
                 ret = await self._execute(metadata, pipeline, True)
 

@@ -646,3 +646,4 @@ class RequestMetadata:
         self.session_public_key = session.session_key.public_serial()
         self.caller = caller
         self.raw_messages = raw_messages
+        self.reply_to = None

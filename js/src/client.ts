@@ -738,6 +738,7 @@ export class RequestMetadata {
   sessionPublicKey: string;
   caller: Route;
   rawMessages: {}[];
+  replyTo?: Route;
 
   constructor(session: Session, caller: Route, rawMessages: {}[]) {
     this._session = session;
