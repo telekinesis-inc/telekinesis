@@ -52,6 +52,15 @@ afterAll(() => {
   subprocess.kill()
 })
 
+describe("Session", () => {
+  it("saves and loads private keys", async () => {
+    const session = new Session();
+    const sessionKey = await session.sessionKey.exportKey();
+    const session2 = new Session(sessionKey);
+
+    expect(await session.sessionKey.publicSerial()).toEqual(await session2.sessionKey.publicSerial())
+  });
+});
 describe("Connection", () => {
   it("connects", async () => {
     const c = new Connection(new Session(), HOST);

@@ -1,6 +1,6 @@
 {
   "name": "telekinesis-js",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
   "main": "./lib/index.js",
   "browser": "./lib/browser.js",
@@ -48,6 +48,7 @@
     "atob": "^2.1.2",
     "bson": "^4.5.3",
     "btoa": "^1.2.1",
-    "fflate": "^0.7.1"
+    "fflate": "^0.7.1",
+    "ws": "^0.3.0"
   }
 }

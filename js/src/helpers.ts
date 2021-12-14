@@ -1,7 +1,7 @@
 import { Channel, Connection, Session } from "./client";
 import { Telekinesis } from "./telekinesis";
 
-export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} },
+export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: string,
   printCallback: ((output: any) => void) = console.log, kwargs?: any) {
 
   let user = (new Entrypoint(url, sessionKey) as any)
@@ -11,7 +11,7 @@ export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: {
 }
 
 export class Entrypoint {
-  constructor(url: string = 'ws://localhost:8776', sessionKey?: { privateKey: {}, publicKey: {} }, ...args: any) {
+  constructor(url: string = 'ws://localhost:8776', sessionKey?: string, ...args: any) {
     if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
       let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
       url = url.slice(0, i) + ':8776' + url.slice(i);
@@ -23,8 +23,8 @@ export class Entrypoint {
   }
 }
 
-export async function createEntrypoint(target: Object, url: string = 'ws://localhost:8776', sessionKey: {privateKey: {}, publicKey: {}}, 
-                                       channelKey?: { privateKey: {}, publicKey: {} }, isPublic: boolean = true, ...args: any) {
+export async function createEntrypoint(target: Object, url: string = 'ws://localhost:8776', sessionKey: string, 
+                                       channelKey?: string, isPublic: boolean = true, ...args: any) {
   if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(url)) {
     let i = (/[\w\d]+:\/\/[\w\d.]+/.exec(url) as any)[0].length;
     url = url.slice(0, i) + ':8776' + url.slice(i);

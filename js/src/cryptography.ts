@@ -7,9 +7,9 @@ export class PrivateKey {
   _usage: ["sign"] | ["deriveKey"];
   repr?: string;
   key?: CryptoKeyPair;
-  exportedKey?: { privateKey: {}, publicKey: {} };
+  exportedKey?: string;
 
-  constructor(use: "sign" | "derive", importedKey?: { privateKey: {}, publicKey: {} }) {
+  constructor(use: "sign" | "derive", importedKey?: string) {
     this.exportedKey = importedKey;
     if (use === 'sign') {
       this._algorithm = 'ECDSA';
@@ -18,25 +18,28 @@ export class PrivateKey {
     }
     this._algorithm = 'ECDH';
     this._usage = ['deriveKey'];
-    // this.publicSerial(); // <- weird s**t wreaks havoc!
+    // this.publicSerial(); // <- don't do this!
     return
   }
   async generate() {
     if (this.exportedKey !== undefined) {
+      let privateKey, jwk;
+      privateKey = await webcrypto.subtle.importKey(
+        "pkcs8",
+        b64decode(this.exportedKey.split('\n').slice(1,-1).join('')),
+        {
+          name: this._algorithm,
+          namedCurve: "P-256"
+        },
+        true,
+        this._usage
+      );
+      jwk = await webcrypto.subtle.exportKey("jwk", privateKey);
       this.key = {
-        privateKey: await webcrypto.subtle.importKey(
-          'jwk',
-          this.exportedKey.privateKey,
-          {
-            name: this._algorithm,
-            namedCurve: "P-256"
-          },
-          true,
-          this._usage
-        ),
+        privateKey: privateKey,
         publicKey: await webcrypto.subtle.importKey(
           'jwk',
-          this.exportedKey.publicKey,
+          {alg: jwk.alg, crv: jwk.crv, ext: true, key_ops: [], kty: jwk.kty, x: jwk.x, y: jwk.y},
           {
             name: this._algorithm,
             namedCurve: "P-256"
@@ -91,10 +94,10 @@ export class PrivateKey {
         await this.generate();
       }
       if (this.key !== undefined) {
-        this.exportedKey = {
-          privateKey: await webcrypto.subtle.exportKey('jwk', this.key.privateKey as CryptoKey),
-          publicKey: await webcrypto.subtle.exportKey('jwk', this.key.publicKey as CryptoKey)
-        }
+        this.exportedKey = 
+          "-----BEGIN PRIVATE KEY-----\n" +
+          b64encode(new Uint8Array(await webcrypto.subtle.exportKey("pkcs8", this.key.privateKey as CryptoKey))) +
+          "\n-----END PRIVATE KEY-----"
       }
     }
     return this.exportedKey;

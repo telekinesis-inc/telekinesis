@@ -265,7 +265,7 @@ export class Session {
   targets: Map<any, Set<any>>;
   routes: Map<string, any>;
 
-  constructor(sessionKey?: { privateKey: {}, publicKey: {} }) {
+  constructor(sessionKey?: string) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
     this.instanceId = b64encode(Uint8Array.from(webcrypto.getRandomValues(new Uint8Array(6))));
     this.channels = new Map();
@@ -394,7 +394,7 @@ export class Channel {
 
   then: ((resolve: (ret: any) => void) => void) | undefined;
 
-  constructor(session: Session, channelKey?: { privateKey: {}, publicKey: {} }, isPublic = false) {
+  constructor(session: Session, channelKey?: string, isPublic = false) {
     this.MAX_PAYLOAD_LEN = 2 ** 19;
     this.MAX_COMPRESSION_LEN = 2 ** 19;
     this.MAX_OUTBOX = 2 ** 4;
