@@ -27,16 +27,20 @@ jobs:
         registry-url: https://registry.npmjs.org/
     # clean install of your projects' deps. We use "npm ci" to avoid package lock changes
     - run: npm ci
+      working-directory: "~/js/"
     # set up git since we will later push to the repo
     - run: git config --global user.name "${{ secrets.NPM_USER }}"
     - run: git config --global user.email "${{ secrets.NPM_EMAIL }}"
     # upgrade npm version in package.json to the tag used in the release.
     - run: npm version ${{ github.event.release.tag_name }}
+      working-directory: "~/js/"
     # build the project
     - run: npm run build
+      working-directory: "~/js/"
     # run tests just in case
 #     - run: npm testnp
     - run: npm publish
+      working-directory: "~/js/"
       env:
         # Use a token to publish to NPM. See below for how to set it up
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
