@@ -1,5 +1,6 @@
 import { deserialize, serialize } from "bson";
 import { unzlibSync, zlibSync } from "fflate";
+import { type } from "os";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
@@ -55,7 +56,7 @@ export class Connection {
       );
 
       this.websocket.onmessage = async (m: MessageEvent) => {
-        let a = typeof URL.createObjectURL === 'undefined' ?
+        let a = typeof URL.createObjectURL === 'undefined' || typeof fetch === 'undefined' ?
           m.data :
           await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
 
@@ -123,7 +124,7 @@ export class Connection {
   }
   async recv(messageObj: MessageEvent) {
 
-    let a = typeof URL.createObjectURL === 'undefined' ?
+    let a = typeof URL.createObjectURL === 'undefined' || typeof fetch === 'undefined' ?
       messageObj.data :
       await fetch(URL.createObjectURL(messageObj.data)).then(r => r.arrayBuffer());
 

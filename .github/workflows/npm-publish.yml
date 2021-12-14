@@ -33,7 +33,7 @@ jobs:
     - run: git config --global user.name "${{ secrets.NPM_USER }}"
     - run: git config --global user.email "${{ secrets.NPM_EMAIL }}"
     # upgrade npm version in package.json to the tag used in the release.
-    - run: npm version ${{ github.event.release.tag_name }}
+    - run: npm version ${{ github.event.release.tag_name }} --allow-same-version
     # build the project
     - run: npm run build
     # run tests just in case
