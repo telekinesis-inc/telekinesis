@@ -545,7 +545,7 @@ export class Telekinesis extends Function {
         this._exposeTb ? '\n' + (e as Error).stack : '')
       this._state.pipeline = [];
       try {
-        const errMessage = { error: (this._exposeTb ? e : (e as Error).name) };
+        const errMessage = { error: (this._exposeTb ? (e as Error).stack : (e as Error).name), error_type: (e as Error).name};
         if (replyTo !== undefined) {
           const newChannel = new Channel(this._session)
           try {
@@ -623,13 +623,22 @@ export class Telekinesis extends Function {
       let action = pipeline[step][0];
       if (action === 'get') {
         let arg = pipeline[step][1] as string;
-        if (arg[0] === '_' || this._mask.has(arg)) {
-          throw 'Unauthorized!';
+        if (arg !== '__getitem__' && arg[0] === '_' || this._mask.has(arg)) {
+          throw new PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely");
         }
         prevTarget = target;
-        target = (target as any)[arg];
+        if (arg === '__getitem__') {
+          target = (x: string) => {
+            if (x[0] === '_' || this._mask.has(x)) {
+              throw new PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely");
+            }
+            return (target as any)[x];
+          }
+        } else {
+          target = (target as any)[arg];
+        }
         if (target === undefined) {
-          throw TypeError(`Attribute ${arg} not found`)
+          throw ReferenceError(`Attribute ${arg} not found`)
         }
         if (target instanceof Function) {
           target.bind(prevTarget)
@@ -999,4 +1008,11 @@ export function injectFirstArg(func: any) {
 export function blockArgEvaluation(func: any) {
   func._tk_block_arg_evaluation = true;
   return func;
+}
+
+class PermissionError extends Error {
+  constructor(message: any) {
+    super(message); // (1)
+    this.name = "PermissionError"; // (2)
+  }
 }
