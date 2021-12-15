@@ -632,7 +632,7 @@ export class Telekinesis extends Function {
             if (x[0] === '_' || this._mask.has(x)) {
               throw new PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely");
             }
-            return (target as any)[x];
+            return (prevTarget as any)[x];
           }
         } else {
           target = (target as any)[arg];
