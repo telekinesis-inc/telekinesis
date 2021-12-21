@@ -819,15 +819,19 @@ export class Telekinesis extends Function {
         object: 'NoneType',
         undefined: 'NoneType',
       } as any)[typeof target] as string, target]
-    } else if (typeof target !== 'undefined' && target instanceof Uint8Array) {
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Uint8Array') {
       out[1] = ['bytes', target];
-    } else if (typeof target !== 'undefined' && (target instanceof Array || target instanceof Set)) {
+    } else if (
+      typeof target !== 'undefined' && (
+        Object.getPrototypeOf(target).constructor.name === 'Array' || 
+        Object.getPrototypeOf(target).constructor.name === 'Set')
+    ) {
       let children: string[] = [];
       let arr = target instanceof Array ? target : Array.from(target.values());
       for (let v in arr) {
         children[v] = await this._encode(arr[v], receiver, channel, traversalStack, blockRecursion)
       }
-      out[1] = [target instanceof Array ? 'list' : 'set', children];
+      out[1] = [Object.getPrototypeOf(target).constructor.name === 'Array' ? 'list' : 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
