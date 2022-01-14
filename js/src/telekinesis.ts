@@ -305,7 +305,6 @@ export class Telekinesis extends Function {
   _mask: Set<string>;
   _exposeTb: boolean;
   _maxDelegationDepth?: number;
-  _compileSignatures: boolean;
   _parent?: Telekinesis;
 
   _state: State;
@@ -323,7 +322,7 @@ export class Telekinesis extends Function {
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
-    maxDelegationDepth?: number, compileSignatures: boolean = true, parent?: Telekinesis
+    maxDelegationDepth?: number, parent?: Telekinesis
   ) {
     super();
     this._target = target;
@@ -332,7 +331,6 @@ export class Telekinesis extends Function {
       || new Set();
     this._exposeTb = exposeTb;
     this._maxDelegationDepth = maxDelegationDepth;
-    this._compileSignatures = compileSignatures;
     this._parent = parent;
     this._state = new State();
 
@@ -364,7 +362,6 @@ export class Telekinesis extends Function {
           target._mask,
           target._exposeTb,
           target._maxDelegationDepth,
-          target._compileSignatures,
           target._proxy,
         )
         out._state = state;
@@ -467,7 +464,7 @@ export class Telekinesis extends Function {
         const pipeline = this._state.pipeline;
         this._updateState(...tk._state.getDiffs(0, undefined, true))
         this._state.pipeline = pipeline;
-      }, this._session, undefined, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+      }, this._session, undefined, this._exposeTb, this._maxDelegationDepth
     )
     this._state.pipeline.push(['subscribe', this._subscription])
     return this
@@ -569,7 +566,6 @@ export class Telekinesis extends Function {
       this._mask,
       this._exposeTb,
       this._maxDelegationDepth,
-      this._compileSignatures,
       this._proxy)
     out._state.pipeline = state.pipeline;
     return out;
@@ -614,7 +610,7 @@ export class Telekinesis extends Function {
         !this._session.channels.has(target._target.channel)
       )) {
         const oldState = target._state;
-        target = new Telekinesis(target._target, target._session, target._mask, target._exposeTb, target._maxDelegationDepth, target._compileSignatures, target._parent);
+        target = new Telekinesis(target._target, target._session, target._mask, target._exposeTb, target._maxDelegationDepth, target._parent);
         target._state = oldState.clone();
         target._state.pipeline.push(...pipeline.slice(parseInt(step)));
         target._blockThen = true;
@@ -682,7 +678,7 @@ export class Telekinesis extends Function {
         const r = cb._target as Route;
         if (metadata && r.validateTokenChain(metadata.caller.session[0])) {
           const tk = Telekinesis._reuse(
-            target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, this._compileSignatures
+            target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth
           )
           // console.log(r.toObject())
           if (tk._clients && !tk._clients.has(r.session.join())) {
@@ -845,8 +841,7 @@ export class Telekinesis extends Function {
       if (target._isTelekinesisObject === true) {
         obj = target;
       } else {
-        obj = Telekinesis._reuse(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth,
-          this._compileSignatures, undefined)
+        obj = Telekinesis._reuse(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, undefined)
       }
       if (!(target._target instanceof Route)) {
         if (obj._clients?.has(receiver.join()) === false) {
@@ -969,7 +964,6 @@ export class Telekinesis extends Function {
             this._mask,
             this._exposeTb,
             this._maxDelegationDepth,
-            this._compileSignatures,
           )
         }
       }
@@ -1002,7 +996,7 @@ export class Telekinesis extends Function {
             eqSet(c['_' + cc[0]], cc[1]) :
             c['_' + cc[0]] === cc[1]
         ), true) && c), undefined) ||
-      new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, compileSignatures, parent)
+      new Telekinesis(target, session, mask, exposeTb, maxDelegationDepth, parent)
   }
 }
 export function injectFirstArg(func: any) {

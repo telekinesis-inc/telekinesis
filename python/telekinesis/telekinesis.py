@@ -467,7 +467,7 @@ class Telekinesis:
                             },
                         )
 
-        except Exception as e:
+        except (Exception, KeyboardInterrupt) as e:
             if pipeline is None:
                 self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
             else:
@@ -930,8 +930,8 @@ class Telekinesis:
     def __doc__(self):
         gets = [g for g in self._state.pipeline if g[0] == 'get']
         if gets:
-            return (self._state.methods.get(gets[-1][1]) or [None, None])[1]
-        return ((self._state.doc and self._state.doc + "\n") or "") + ((self._state.methods.get('__call__') or [None, None])[1] or "") or None
+            return '\n'.join((self._state.methods.get(gets[-1][1]) or ['', '']))
+        return ((self._state.doc and self._state.doc + "\n") or "") + '\n'.join(self._state.methods.get('__call__') or ['', ''])
 
     @staticmethod
     def _from_state(
