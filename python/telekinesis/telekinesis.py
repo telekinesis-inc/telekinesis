@@ -342,6 +342,14 @@ class Telekinesis:
         if self._on_update_callback:
             self._on_update_callback(self)
 
+        gets = [g for g in self._state.pipeline if g[0] == 'get']
+        if gets:
+            self.__doc__ = '\n'.join([s or '' for s in self._state.methods.get(gets[-1][1]) or ['', '']])
+        else:
+            self.__doc__ = ((self._state.doc and self._state.doc + "\n") or "") + '\n'.join([s or '' for s in self._state.methods.get('__call__') or ['', '']])
+
+
+
         return self
 
     def _delegate(self, receiver, parent_channel=None):
@@ -926,12 +934,12 @@ class Telekinesis:
             return (self._state.methods.get(gets[-1][1]) or [None])[0]
         return (self._state.methods.get('__call__') or [None])[0]
 
-    @property
-    def __doc__(self):
-        gets = [g for g in self._state.pipeline if g[0] == 'get']
-        if gets:
-            return '\n'.join((self._state.methods.get(gets[-1][1]) or ['', '']))
-        return ((self._state.doc and self._state.doc + "\n") or "") + '\n'.join(self._state.methods.get('__call__') or ['', ''])
+    # @property
+    # def __doc__(self):
+    #     gets = [g for g in self._state.pipeline if g[0] == 'get']
+    #     if gets:
+    #         return '\n'.join([s or '' for s in self._state.methods.get(gets[-1][1]) or ['', '']])
+    #     return ((self._state.doc and self._state.doc + "\n") or "") + '\n'.join([s or '' for s in self._state.methods.get('__call__') or ['', '']])
 
     @staticmethod
     def _from_state(
