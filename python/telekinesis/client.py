@@ -270,8 +270,8 @@ class Connection:
 
 
 class Session:
-    def __init__(self, session_key_file=None, session_key_pass=None):
-        self.session_key = PrivateKey(session_key_file, session_key_pass)
+    def __init__(self, session_key=None, session_key_pass=None):
+        self.session_key = session_key if isinstance(session_key, PrivateKey) else PrivateKey(session_key, session_key_pass)
         self.instance_id = base64.b64encode(os.urandom(6)).decode()
         self.channels = {}
         self.targets = {}
@@ -373,13 +373,13 @@ class Session:
 
 
 class Channel:
-    def __init__(self, session, channel_key_file=None, channel_key_pass=None, is_public=False):
+    def __init__(self, session, channel_key=None, channel_key_pass=None, is_public=False):
         self.MAX_PAYLOAD_LEN = 2 ** 19
         self.MAX_COMPRESSION_LEN = 2 ** 19
         self.MAX_OUTBOX = 2 ** 4
 
         self.session = session
-        self.channel_key = PrivateKey(channel_key_file, channel_key_pass)
+        self.channel_key = channel_key if isinstance(channel_key, PrivateKey) else PrivateKey(channel_key, channel_key_pass)
         self.is_public = is_public
         self.route = Route(
             list(set(c.broker_id for c in self.session.connections)),

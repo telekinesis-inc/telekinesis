@@ -21,8 +21,7 @@ class PrivateKey:
         self.key = ec.generate_private_key(curve=ec.SECP256R1, backend=default_backend())
 
         if key_file:
-            with open(key_file, "wb") as kf:
-                kf.write(self._private_serial(password))
+            self.save_key_file(key_file, password)
 
     def sign(self, m):
         signature = self.key.sign(m, ec.ECDSA(hashes.SHA256()))
@@ -42,6 +41,9 @@ class PrivateKey:
         return self.key.private_bytes(
             encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=enc,
         )
+    def save_key_file(self, key_file, password=None):
+        with open(key_file, "wb") as kf:
+            kf.write(self._private_serial(password))
 
     @staticmethod
     def from_private_serial(data, password=None):
