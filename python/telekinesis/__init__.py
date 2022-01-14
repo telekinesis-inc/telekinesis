@@ -2,7 +2,8 @@ from .client import Session, Connection, Channel, Route
 from .broker import Broker
 from .telekinesis import Telekinesis, inject_first_arg, block_arg_evaluation, State
 from .helpers import Entrypoint, authenticate, create_entrypoint
-import cryptography
+from .cryptography import PrivateKey, PublicKey, SharedKey, Token
+from . import cryptography
 
 from pkg_resources import get_distribution
 
