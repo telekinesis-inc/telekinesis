@@ -114,7 +114,7 @@ export class State {
             return p 
           }, new Map()),
         methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target) || {})
-          .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
+          .filter(x => !['constructor', 'arguments', 'caller', 'callee', 'prototype'].includes(x) && x[0] !== '_')
           .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
         repr: (target.toString && target.toString()) || '',
         doc: (target as any).__doc__,
