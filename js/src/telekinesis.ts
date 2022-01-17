@@ -106,14 +106,14 @@ export class State {
           .filter(x => x[0] !== '_')
           .reduce((p, v) => {
             const attr = (target as any)[v];
-            if (typeof attr !== 'undefined' && Object.getPrototypeOf(attr).constructor.name === 'Object') {
+            if (typeof attr !== 'undefined' && Object.getPrototypeOf(attr)?.constructor.name === 'Object') {
               p.set(v, Object.entries(attr).reduce((pp, [kk, vv]) => {pp[kk] = vv; return pp}, {} as any))
             } else {
               p.set(v, attr);
             }
             return p 
           }, new Map()),
-        methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target))
+        methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target) || {})
           .filter(x => !['constructor', 'arguments', 'caller', 'callee'].includes(x) && x[0] !== '_')
           .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
         repr: (target.toString && target.toString()) || '',
@@ -226,8 +226,8 @@ export class State {
           }
         }
         return;
-      } else if ((typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0).constructor.name === 'Object') && 
-      (typeof obj1 !== 'undefined' && Object.getPrototypeOf(obj1).constructor.name === 'Object')) {
+      } else if ((typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0)?.constructor.name === 'Object') && 
+      (typeof obj1 !== 'undefined' && Object.getPrototypeOf(obj1)?.constructor.name === 'Object')) {
         const changes = {} as any;
         for (const key of Object.keys(obj0)) {
           if (Object.getOwnPropertyNames(obj1).includes(key)) {
@@ -284,7 +284,7 @@ export class State {
           }
         }
         return obj1;
-      } else if (typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0).constructor.name === 'Object') {
+      } else if (typeof obj0 !== 'undefined' && Object.getPrototypeOf(obj0)?.constructor.name === 'Object') {
         const obj1 = Object.entries(obj0).reduce((p, [k, v]) => {if (diff[1][k] !== 'd') {p[k] = v}; return p}, {} as any);
         for (const [key, value] of Object.entries(diff[1])) {
           const code = (value as any)[0];
@@ -815,20 +815,20 @@ export class Telekinesis extends Function {
         object: 'NoneType',
         undefined: 'NoneType',
       } as any)[typeof target] as string, target]
-    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Uint8Array') {
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Uint8Array') {
       out[1] = ['bytes', target];
     } else if (
       typeof target !== 'undefined' && (
-        Object.getPrototypeOf(target).constructor.name === 'Array' || 
-        Object.getPrototypeOf(target).constructor.name === 'Set')
+        Object.getPrototypeOf(target)?.constructor.name === 'Array' || 
+        Object.getPrototypeOf(target)?.constructor.name === 'Set')
     ) {
       let children: string[] = [];
       let arr = target instanceof Array ? target : Array.from(target.values());
       for (let v in arr) {
         children[v] = await this._encode(arr[v], receiver, channel, traversalStack, blockRecursion)
       }
-      out[1] = [Object.getPrototypeOf(target).constructor.name === 'Array' ? 'list' : 'set', children];
-    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target).constructor.name === 'Object') {
+      out[1] = [Object.getPrototypeOf(target)?.constructor.name === 'Array' ? 'list' : 'set', children];
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Object') {
       let children = {};
       for (let v in target) {
         (children as any)[v] = await this._encode(target[v], receiver, channel, traversalStack, blockRecursion);
