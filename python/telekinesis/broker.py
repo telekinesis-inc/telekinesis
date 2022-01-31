@@ -172,7 +172,7 @@ class Channel:
                     asset = token.signature
 
             else:
-                broker.logger.info("||| token failed broker.check_token ")
+                broker.logger.info("||| token failed broker.check_token %s", token.signature[:4])
         return False
 
 
@@ -252,45 +252,46 @@ class Broker:
         s = Route(**source)
         d = Route(**destination)
 
-        dest_session = self.sessions.get(d.session[0])
-        if dest_session:
-            dest_channel = await dest_session.expect_channel(d.channel)
+        if d.brokers and self.broker_key.public_serial() in d.brokers:
+            dest_session = self.sessions.get(d.session[0])
+            if dest_session:
+                dest_channel = await dest_session.expect_channel(d.channel)
 
-            if dest_session.channels.get(d.channel):
-                if await dest_channel.validate_token_chain(s.session[0], d.tokens, self):
-                    self.logger.info(
-                        "%s: send %s %s >>> %s >>> %s %s",
-                        self.broker_key.public_serial()[:4],
-                        source["session"][0][:4],
-                        source["channel"][:4],
-                        str(len(message) // 2 ** 10),
-                        destination["session"][0][:4],
-                        destination["channel"][:4],
-                    )
-                    if connection.session.session_id != s.session[0]:
-                        try:
-                            len_h = int.from_bytes(message[68:70], "big")
-                            PublicKey(s.session[0]).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
-                        except InvalidSignature:
-                            return
+                if dest_session.channels.get(d.channel):
+                    if await dest_channel.validate_token_chain(s.session[0], d.tokens, self):
+                        self.logger.info(
+                            "%s: send %s %s >>> %s >>> %s %s",
+                            self.broker_key.public_serial()[:4],
+                            source["session"][0][:4],
+                            source["channel"][:4],
+                            str(len(message) // 2 ** 10),
+                            destination["session"][0][:4],
+                            destination["channel"][:4],
+                        )
+                        if connection.session.session_id != s.session[0]:
+                            try:
+                                len_h = int.from_bytes(message[68:70], "big")
+                                PublicKey(s.session[0]).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
+                            except InvalidSignature:
+                                return
 
-                    for connection in dest_channel.connections:
-                        await connection.websocket.send(message)
-                    return
+                        for connection in dest_channel.connections:
+                            await connection.websocket.send(message)
+                        return
+                    else:
+                        # print('|||||', [Token.decode(t) for t in s.tokens], [Token.decode(t) for t in d.tokens])
+                        self.logger.info(
+                            "%s: send %s %s ||| %s ||| %s %s",
+                            self.broker_key.public_serial()[:4],
+                            source["session"][0][:4],
+                            source["channel"][:4],
+                            str(len(message) // 2 ** 10),
+                            destination["session"][0][:4],
+                            destination["channel"][:4],
+                        )
                 else:
-                    # print('|||||', [Token.decode(t) for t in s.tokens], [Token.decode(t) for t in d.tokens])
-                    self.logger.info(
-                        "%s: send %s %s ||| %s ||| %s %s",
-                        self.broker_key.public_serial()[:4],
-                        source["session"][0][:4],
-                        source["channel"][:4],
-                        str(len(message) // 2 ** 10),
-                        destination["session"][0][:4],
-                        destination["channel"][:4],
-                    )
-            else:
-                if self.broker_key.public_serial() in (d.brokers or []):
-                    return
+                    if self.broker_key.public_serial() in (d.brokers or []):
+                        return
 
         if d.brokers:
             for depth in sorted(self.topology_cache):
