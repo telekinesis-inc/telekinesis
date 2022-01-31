@@ -28,11 +28,11 @@ def Entrypoint(url="ws://localhost:8776", session_key=None, **kwargs):
     return Telekinesis(await_entrypoint(), s, **kwargs)
 
 
-async def create_entrypoint(target, url="ws://localhost:8776", session_key_file=None, channel_key_file=None, is_public=True, **kwargs):
+async def create_entrypoint(target, url="ws://localhost:8776", session_key=None, channel_key=None, is_public=True, **kwargs):
     """
     Returns a tuple (tk._channel.route, tk) with tk being a Telekinesis object pointing to `target`.
     """
-    s = Session(session_key_file)
+    s = Session(session_key)
 
     if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
         i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
@@ -41,7 +41,7 @@ async def create_entrypoint(target, url="ws://localhost:8776", session_key_file=
     c = await Connection(s, url)
 
     tk = Telekinesis(target, s, **kwargs)
-    tk._channel = await Channel(s, channel_key_file, is_public=is_public).listen()
+    tk._channel = await Channel(s, channel_key, is_public=is_public).listen()
     tk._channel.telekinesis = tk
 
     return tk._channel.route, tk
