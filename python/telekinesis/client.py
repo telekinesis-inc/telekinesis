@@ -468,22 +468,22 @@ class Channel:
     async def send(self, destination, payload_obj):
         # if payload_obj:
         # print('>>>', self.route, destination, {k: v is None for k, v in payload_obj.items()})
-        def encrypt_slice(payload, max_payload, shared_key, mid, n, i):
+        def encrypt_slice(payload, max_payload, shared_key, message_id, n, i):
             if i < n:
                 if n == 1:
                     chunk = b"\x00" * 4 + payload
                 else:
                     if n > 2 ** 16:
                         raise MemoryError(f"Payload size {len(payload)/2**20} MiB is too large")
-                    chunk = i.to_bytes(2, "big") + n.to_bytes(2, "big") + mid + payload[i * max_payload : (i + 1) * max_payload]
+                    chunk = i.to_bytes(2, "big") + n.to_bytes(2, "big") + message_id + payload[i * max_payload : (i + 1) * max_payload]
 
                 nonce = os.urandom(16)
                 yield nonce + shared_key.encrypt(chunk, nonce)
-                yield from encrypt_slice(payload, max_payload, shared_key, mid, n, i + 1)
+                yield from encrypt_slice(payload, max_payload, shared_key, message_id, n, i + 1)
 
-        async def execute(header, encrypted_slice_generator, mid):
+        async def execute(header, encrypted_slice_generator, message_id):
             for encrypted_slice in encrypted_slice_generator:
-                await self.execute(header, encrypted_slice, mid)
+                await self.execute(header, encrypted_slice, message_id)
 
         source_route = self.route.clone()
         self.header_buffer.append(self.session.extend_route(source_route, destination.session[0]))
@@ -496,22 +496,22 @@ class Channel:
         else:
             payload = b"\x00" + payload
 
-        mid = os.urandom(4)
+        message_id = os.urandom(4)
         shared_key = SharedKey(self.channel_key, PublicKey(destination.channel))
 
         header = ("send", {"source": source_route.to_dict(), "destination": destination.to_dict()})
 
         n = (len(payload) - 1) // self.MAX_PAYLOAD_LEN + 1
         n_tasks = min(n, self.MAX_OUTBOX)
-        gen = encrypt_slice(payload, self.MAX_PAYLOAD_LEN, shared_key, mid, n, 0)
+        gen = encrypt_slice(payload, self.MAX_PAYLOAD_LEN, shared_key, message_id, n, 0)
 
         try:
-            await asyncio.gather(*(execute(header, gen, mid) for _ in range(n_tasks)))
+            await asyncio.gather(*(execute(header, gen, message_id) for _ in range(n_tasks)))
         except asyncio.CancelledError:
-            self.session.clear(mid)
+            self.session.clear(message_id)
             raise asyncio.CancelledError
         finally:
-            self.session.clear(mid)
+            self.session.clear(message_id)
 
         return self
 

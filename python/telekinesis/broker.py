@@ -299,26 +299,27 @@ class Broker:
                 if brokers:
                     for broker_id in brokers:
                         for broker_connection in self.topology_cache[depth][broker_id]:
-                            for enc_token in d.tokens:
-                                token = Token.decode(enc_token, False)
-                                if (
-                                    self.broker_key.public_serial() in token.brokers
-                                    and token.issuer in self.sessions
-                                    and token.signature in self.sessions[token.issuer].active_tokens
-                                    and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode()
-                                ):
-                                    await broker_connection.send((("token", ("approve", enc_token)),))
-                            await broker_connection.websocket.send(message)
-                            self.logger.info(
-                                "%s: send %s %s ))) %s ))) %s %s (%s)",
-                                self.broker_key.public_serial()[:4],
-                                source["session"][0][:4],
-                                source["channel"][:4],
-                                str(len(message) // 2 ** 10),
-                                destination["session"][0][:4],
-                                destination["channel"][:4],
-                                broker_id[:4],
-                            )
+                            if broker_connection.websocket.closed == False:
+                                for enc_token in d.tokens:
+                                    token = Token.decode(enc_token, False)
+                                    if (
+                                        self.broker_key.public_serial() in token.brokers
+                                        and token.issuer in self.sessions
+                                        and token.signature in self.sessions[token.issuer].active_tokens
+                                        and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode()
+                                    ):
+                                        await broker_connection.send((("token", ("approve", enc_token)),))
+                                await broker_connection.websocket.send(message)
+                                self.logger.info(
+                                    "%s: send %s %s ))) %s ))) %s %s (%s)",
+                                    self.broker_key.public_serial()[:4],
+                                    source["session"][0][:4],
+                                    source["channel"][:4],
+                                    str(len(message) // 2 ** 10),
+                                    destination["session"][0][:4],
+                                    destination["channel"][:4],
+                                    broker_id[:4],
+                                )
                     return
             for peer in set().union(*self.topology_cache[0].values()):
                 await peer.send(
@@ -390,6 +391,17 @@ class Broker:
                     prev_token = tokens[1]
                     if await self.check_token(prev_token):
                         connection.session.approve_token(token)
+                    else:
+                        self.logger.error(
+                            "%s: tokens %s %s XX %s: %s (%s) - failed token check: [%s]",
+                            self.broker_key.public_serial()[:4],
+                            token.issuer[:4],
+                            action,
+                            token.signature[:4],
+                            str(token.receiver[:4]),
+                            token.asset[:4],
+                            prev_token.signature[:4]
+                        )
 
         if action == "revoke":
             token = connection.session.active_tokens.get(args[0])
