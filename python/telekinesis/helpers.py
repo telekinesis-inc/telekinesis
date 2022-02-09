@@ -7,7 +7,7 @@ from .telekinesis import Telekinesis
 
 def authenticate(url="ws://localhost:8776", session_key=None, print_callback=print, **kwargs):
 
-    user = Entrypoint(url, session_key).authenticate(print_callback, **kwargs)
+    user = Entrypoint(url, session_key).authenticate(print_callback, **kwargs)._subscribe()
 
     return user
 

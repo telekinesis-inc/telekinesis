@@ -297,7 +297,12 @@ class Telekinesis:
         if attr[0] == "_" and not override:
             return super().__getattribute__(attr)
 
-        state = self._state.clone()
+        if isinstance(self._state.attributes, dict) and isinstance(self._state.attributes.get(attr), Telekinesis):
+            state = self._state.attributes[attr]._state.clone()
+            state.pipeline = self._state.pipeline.copy()
+        else: 
+            state = self._state.clone()
+
         state.pipeline.append(("get", attr))
 
         return Telekinesis._from_state(
