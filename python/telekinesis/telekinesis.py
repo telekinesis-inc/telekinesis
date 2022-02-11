@@ -115,6 +115,8 @@ class State:
                         else:
                             methods[attribute_name] = (signature, target_attribute.__doc__)
                     else:
+                        if asyncio.iscoroutine(target_attribute):
+                            target_attribute.close()
                         attributes[attribute_name] = target_attribute.copy() if type(target_attribute) in [dict, list, set] else target_attribute 
 
                 except Exception as e:
@@ -590,6 +592,9 @@ class Telekinesis:
                             target = target.__getattr__(arg)
                         except AttributeError:
                             raise ae
+                if asyncio.iscoroutine(target):
+                    target = await target
+                
             if action == "call":
                 self._logger.info("%s %s", action, target)
                 ar, kw = arg
