@@ -280,6 +280,7 @@ class Session:
         self.seen_messages = [set(), set(), 0]
         self.issued_tokens = {}
         self.pending_tasks = set()
+        self.message_listener = None
         self.logger = logging.getLogger(__name__)
 
     def check_no_repeat(self, signature, timestamp):
@@ -434,6 +435,8 @@ class Channel:
                         raise BufferError("Received message with different encoding")
 
             if message_tuple:
+                if self.session.message_listener:
+                    self.session.message_listener(message_tuple[0])
                 # print('<<<', source, destination, {k: v is None for k, v in message_tuple[1].items()})
                 if not self.telekinesis:
                     self.messages.appendleft(message_tuple)
