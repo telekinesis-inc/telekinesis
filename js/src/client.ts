@@ -265,6 +265,7 @@ export class Session {
   issuedTokens: Map<string, [Token, Token?]>;
   targets: Map<any, Set<any>>;
   routes: Map<string, any>;
+  messageListener?: (requestMetadata: RequestMetadata) => null
 
   constructor(sessionKey?: string) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
@@ -477,6 +478,10 @@ export class Channel {
       } else {
         const ff = unzlibSync(payloadSer.slice(1));
         payload = deserialize(ff);
+      }
+
+      if (this.session.messageListener) {
+        this.session.messageListener(metadata)
       }
       // console.log(`<<< ${source} ${destination} ${Object.keys(payload)}`)
       if (this.telekinesis && this.telekinesis._handleRequest) {
