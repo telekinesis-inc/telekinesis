@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { Connection, Entrypoint, Session, Telekinesis, injectFirstArg, blockArgEvaluation } from "./index";
 
 let subprocess: any;
-const HOST = 'ws://localhost:8777';
+const HOST = 'ws://localhost:18778';
 const startBroker = `
 import telekinesis as tk
 import asyncio

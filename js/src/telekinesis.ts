@@ -595,7 +595,7 @@ export class Telekinesis extends Function {
       return await this._forward(pipeline);
     }
     function exc(x: any) {
-      if (x._blockThen !== undefined && x._lastUpdate && x._state && x._state.pipeline.length) {
+      if (x?._blockThen !== undefined && x?._lastUpdate && x?._state?.pipeline?.length) {
         return new Promise(r => x._execute(metadata).then(r));
       }
       return x;
