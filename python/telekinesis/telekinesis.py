@@ -284,6 +284,8 @@ class Telekinesis:
         self._subscription = None
         self._subscribers = set()
         self._state = State()
+        self._last_magic = None
+        self._magic_history = []
 
         if isinstance(target, Route):
             if parent is None:
@@ -709,6 +711,26 @@ class Telekinesis:
                 pipeline=self._encode(pipeline, self._target.session, new_channel),
                 **kwargs,
             )
+
+    def _register_magic(self, ipython, name=None):
+        self_name =[ k for k,v in ipython.ns_table['user_global'].items() 
+            if v is self and k != '_'][0]
+        
+        name = name or self_name
+
+        def inject_code(line, cell):
+            args, kwargs = [], {}
+            method, *rest = line.split('(')
+            eval(
+                "(lambda *a, **kw: _tkj_args.extend(a) or _tkj_kwargs.update(kw))"+'('.join(['', *rest]),
+                {**ipython.ns_table['user_global'], '_tkj_args': args, '_tkj_kwargs': kwargs}
+            )
+            f = eval(self_name+method.strip(), ipython.ns_table['user_global'])
+            t = asyncio.create_task(f(cell, *args, **kwargs)._execute())
+            self._magic_task = t
+            self._magic_history.append(t)
+        
+        ipython.register_magic_function(inject_code, 'cell', name)
 
     def __call__(self, *args, **kwargs):
         state = self._state.clone()
