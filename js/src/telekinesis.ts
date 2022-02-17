@@ -945,7 +945,7 @@ export class Telekinesis extends Function {
         const o = this._session.routes.get(route._hash) as any;
         o.state.updateFromDiffs(lastVersion, stateDiffs)
 
-        if (this._parent) {
+        if (this._parent && root === '0') {
           this._target = route;
           o.refcount += 1;
           // console.log('pb', this._state)

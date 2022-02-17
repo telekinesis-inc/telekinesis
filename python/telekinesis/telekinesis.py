@@ -105,8 +105,9 @@ class State:
                         except Exception:
                             logger.info("Could not obtain signature from %s.%s", target, attribute_name)
 
-                        if attribute_name == "__init__" and isinstance(target, type):
-                            methods["__call__"] = (signature, target.__init__.__doc__)
+                        if attribute_name == "__init__":
+                            if isinstance(target, type):
+                                methods["__call__"] = (signature, target.__init__.__doc__)
                         elif attribute_name == '__call__':
                             methods[attribute_name] = (
                                 signature, 
@@ -887,11 +888,12 @@ class Telekinesis:
                     out = channel.telekinesis._target
                 else:
                     raise PermissionError(f"Unauthorized! {caller_id} {route.tokens}")
-            elif self._parent and (
-                ("__call__" not in self._state.methods)
-                or ("methods" not in state_diff[1])
-                or ("__call__" not in state_diff[1]["methods"])
-            ):
+            # elif self._parent and (
+            #     ("__call__" not in self._state.methods)
+            #     or ("methods" not in state_diff[1])
+            #     or ("__call__" not in state_diff[1]["methods"])
+            # ):
+            elif self._parent and root == '0':
                 self._target = route
                 self._parent = None
                 if (self._target.session, self._target.channel) not in self._session.routes:
