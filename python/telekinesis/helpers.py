@@ -6,6 +6,17 @@ from .telekinesis import Telekinesis
 
 
 def authenticate(url="ws://localhost:8776", session_key=None, print_callback=print, **kwargs):
+    """
+        Connect to a telekinesis server and call the authenticate method at the entrypoint
+        
+        url: string - url of the telekinesis Broker. example: "wss://telekinesis.cloud"
+
+        session_key: string | tk.Session | None - session private key used to identify yourself
+
+        print_callback: function - Callback generally used to guide the user through the authentication process
+
+        **kwargs: additional arguments the broker's authenticator may implement
+    """
 
     user = Entrypoint(url, session_key).authenticate(print_callback, **kwargs)._subscribe()
 
@@ -13,6 +24,15 @@ def authenticate(url="ws://localhost:8776", session_key=None, print_callback=pri
 
 
 def Entrypoint(url="ws://localhost:8776", session_key=None, **kwargs):
+    """
+        Connect to a telekinesis server and connect to the entrypoint object
+        
+        url: string - url of the telekinesis Broker. example: "wss://telekinesis.cloud"
+
+        session_key: string | tk.Session | None - session private key used to identify yourself
+
+        **kwargs: additional arguments passed to the Telekinesis init
+    """
     s = Session(session_key)
 
     if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
