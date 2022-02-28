@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import types
 import traceback
 import logging
 import re
@@ -85,7 +86,11 @@ class State:
                             target_attribute = target.__getattr__(target, attribute_name)
                     else:
                         try:
-                            target_attribute = target.__getattribute__(attribute_name)
+                            if attribute_name in dir(type(target)) and isinstance(type(target).__getattribute__(type(target), attribute_name), types.GetSetDescriptorType):
+                                # Hack to avoid duplicating memory usage with numpy arrays
+                                target_attribute = None
+                            else:
+                                target_attribute = target.__getattribute__(attribute_name)
                         except AttributeError:
                             target_attribute = target.__getattr__(attribute_name)
 
@@ -502,6 +507,8 @@ class Telekinesis:
                         await new_channel.send(reply_to, err_message)
                 else:
                     await channel.send(metadata.caller, err_message)
+            except Exception as e:
+                pass
             finally:
                 pass
 
