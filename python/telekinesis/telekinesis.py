@@ -1,4 +1,5 @@
 import asyncio
+from cmath import isfinite
 import inspect
 import types
 import traceback
@@ -75,6 +76,8 @@ class State:
                 "__init__",
                 "__getitem__",
                 "__setitem__",
+                "__aiter__",
+                "__anext__",
                 "__add__",
                 "__mul__",
             ]:
@@ -494,10 +497,11 @@ class Telekinesis:
                         )
 
         except (Exception, KeyboardInterrupt) as e:
-            if pipeline is None:
-                self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
-            else:
-                self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
+            if not isinstance(e, StopAsyncIteration):
+                if pipeline is None:
+                    self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
+                else:
+                    self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
 
             self._state.pipeline.clear()
             try:
@@ -580,7 +584,7 @@ class Telekinesis:
             if action == "get":
                 self._logger.info("%s %s %s", action, arg, target)
                 if (
-                    (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__add__", "__mul__"])
+                    (arg[0] == "_" and arg not in ["__getitem__", "__setitem__", "__aiter__", "__anext__", "__add__", "__mul__"])
                     or arg in (self._mask or [])
                 ):
                     raise PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely")
@@ -682,6 +686,8 @@ class Telekinesis:
             if "error" in response:
                 if response.get("error_type") == "PermissionError":
                     raise PermissionError(response["error"])
+                if response.get("error_type") == "StopAsyncIteration":
+                    raise StopAsyncIteration(response["error"])
                 else:
                     raise Exception(response["error"])
 
@@ -768,6 +774,12 @@ class Telekinesis:
     def __setitem__(self, key, val):
         return asyncio.create_task(self.__getattribute__('__setitem__', True)(key, val)._execute())
  
+    def __aiter__(self):
+        return self.__getattribute__('__aiter__', True)()
+
+    def __anext__(self):
+        return self.__getattribute__('__anext__', True)()
+
     def __add__(self, val):
         return self.__getattribute__('__add__', True)(val)
 
