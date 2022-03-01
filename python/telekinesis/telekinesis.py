@@ -86,10 +86,13 @@ class State:
                             target_attribute = target.__getattr__(target, attribute_name)
                     else:
                         try:
-                            if attribute_name in dir(type(target)) and isinstance(type(target).__getattribute__(type(target), attribute_name), types.GetSetDescriptorType):
-                                # Hack to avoid duplicating memory usage with numpy arrays
-                                target_attribute = None
-                            else:
+                            try:
+                                if attribute_name in dir(type(target)) and isinstance(type(target).__getattribute__(type(target), attribute_name), types.GetSetDescriptorType):
+                                    # Hack to avoid duplicating memory usage with numpy arrays
+                                    target_attribute = None
+                                else:
+                                    target_attribute = target.__getattribute__(attribute_name)
+                            except TypeError:
                                 target_attribute = target.__getattribute__(attribute_name)
                         except AttributeError:
                             target_attribute = target.__getattr__(attribute_name)
