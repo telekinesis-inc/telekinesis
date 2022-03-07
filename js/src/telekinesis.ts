@@ -829,9 +829,12 @@ export class Telekinesis extends Function {
       }
       out[1] = [Object.getPrototypeOf(target)?.constructor.name === 'Array' ? 'list' : 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Object') {
-      let children = {};
+      let children = [];
       for (let v in target) {
-        (children as any)[v] = await this._encode(target[v], receiver, channel, traversalStack, blockRecursion);
+        children.push([
+          await this._encode(v, receiver, channel, traversalStack, blockRecursion),
+          await this._encode(target[v], receiver, channel, traversalStack, blockRecursion)
+        ]);
       }
       out[1] = ['dict', children];
     } else if (typeof target !== 'undefined' && target instanceof Route) {
@@ -927,9 +930,9 @@ export class Telekinesis extends Function {
         out = {}
         outputStack.set(root, out);
 
-        for (let i in Object.getOwnPropertyNames(obj)) {
-          let k = Object.getOwnPropertyNames(obj)[i];
-          out[k] = this._decode(inputStack, callerId, obj[k], outputStack);
+        for (let [k_raw, v_raw] of obj) {
+          let k = this._decode(inputStack, callerId, k_raw, outputStack);;
+          out[k] = this._decode(inputStack, callerId, v_raw, outputStack);
         }
         outputStack.set(root, out);
       } else if (typ === 'route') {

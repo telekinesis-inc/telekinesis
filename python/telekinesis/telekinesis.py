@@ -827,7 +827,10 @@ class Telekinesis:
         elif type(target) == dict:
             tup = (
                 "dict",
-                {x: self._encode(target[x], receiver, channel, traversal_stack, block_recursion) for x in target},
+                [(
+                    self._encode(x, receiver, channel, traversal_stack, block_recursion),
+                    self._encode(target[x], receiver, channel, traversal_stack, block_recursion) 
+                ) for x in target],
             )
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
@@ -905,8 +908,8 @@ class Telekinesis:
         elif typ == "dict":
             out = {}
             output_stack[root] = out
-            for k, v in obj.items():
-                out[k] = self._decode(input_stack, caller_id, v, output_stack)
+            for k, v in obj:
+                out[self._decode(input_stack, caller_id, k, output_stack)] = self._decode(input_stack, caller_id, v, output_stack)
         elif typ == "route":
             out = Route(**obj)
         else:
