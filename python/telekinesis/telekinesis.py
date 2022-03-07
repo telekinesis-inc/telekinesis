@@ -931,7 +931,7 @@ class Telekinesis:
                         )
                     out = channel.telekinesis._target
                 else:
-                    raise PermissionError(f"Unauthorized! {caller_id} {route.tokens}")
+                    raise PermissionError(f"Unauthorized! {caller_id} {route} {route.tokens}")
             # elif self._parent and (
             #     ("__call__" not in self._state.methods)
             #     or ("methods" not in state_diff[1])
