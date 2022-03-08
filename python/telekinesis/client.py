@@ -81,8 +81,6 @@ class Connection:
         self.entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
 
         headers = []
-        for token, prev_token in self.session.issued_tokens.values():
-            headers.append(("token", ("issue", token.encode(), prev_token and prev_token.encode())))
         for channel in self.session.channels.values():
             listen_dict = channel.route.to_dict()
             listen_dict["is_public"] = channel.is_public
@@ -95,12 +93,13 @@ class Connection:
         return self
 
     async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
-        self.logger.info(
-            "%s sending: %s %s",
-            self.session.session_key.public_serial()[:4],
-            " ".join(h[0] for h in header),
-            len(payload),
-        )
+        if not ack_message_id:
+            self.logger.info(
+                "%s sending: %s %s",
+                self.session.session_key.public_serial()[:4],
+                " ".join(h[0] for h in header),
+                len(payload),
+            )
 
         def encode(header, payload, message_id, retry):
             h = ujson.dumps(header, escape_forward_slashes=False).encode()
@@ -334,12 +333,8 @@ class Session:
 
     def revoke_tokens(self, asset):
         children = [tid for tid, t in self.issued_tokens.items() if t[0].asset == asset]
-        headers = [h for hs in [self.revoke_tokens(tid) for tid in children] for h in hs]
-
-        tokens = self.issued_tokens.pop(asset, None)
-        if tokens:
-            return [("token", ("revoke", tokens[0].signature))] + headers
-        return headers
+        [self.revoke_tokens(tid) for tid in children]
+        self.issued_tokens.pop(asset, None)
 
     def extend_route(self, route, receiver, max_depth=None):
 
@@ -489,7 +484,7 @@ class Channel:
                 await self.execute(header, encrypted_slice, message_id)
 
         source_route = self.route.clone()
-        self.header_buffer.append(self.session.extend_route(source_route, destination.session[0]))
+        self.session.extend_route(source_route, destination.session[0])
         self.listen()
 
         payload = bson.dumps(payload_obj)
@@ -529,7 +524,7 @@ class Channel:
 
     def close(self):
         self.header_buffer.append(("close", self.route.to_dict()))
-        self.header_buffer += self.session.revoke_tokens(self.channel_key.public_serial())
+        self.session.revoke_tokens(self.channel_key.public_serial())
 
         self.session.channels.pop(self.channel_key.public_serial(), None)
 
@@ -575,7 +570,7 @@ class Channel:
         )
 
     async def __aenter__(self):
-        return self.listen()
+        return self#.listen()
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()

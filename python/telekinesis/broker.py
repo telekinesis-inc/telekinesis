@@ -84,42 +84,7 @@ class Session:
         self.expecting_channels = {}
         self.connections = set()
         self.broker_connections = {}
-        self.active_tokens = {}
         self.cached_tokens = {}
-        self.expecting_tokens = {}
-        self.tasks = set()
-
-    async def validate_peer_token(self, token, event):
-        if token.signature in self.cached_tokens and token.encode() == self.cached_tokens[token.signature].encode():
-            event.set()
-            return True
-        self.expecting_tokens[token.signature] = (event, token)
-        for broker in self.broker_connections.values():
-            await broker.send((("token", ("validate", token.encode())),))
-        self.tasks.add(asyncio.get_event_loop().create_task(self.clean_expecting_token(token)))
-
-        return False
-
-    async def clean_expecting_token(self, token):
-        await asyncio.sleep(2)
-        self.expecting_tokens.pop(token.signature, None)
-
-    async def timeout_cached_token(self, token):
-        await asyncio.sleep(15)
-        self.cached_tokens.pop(token.signature, None)
-
-    def approve_token(self, token):
-        self.tasks = set(x for x in self.tasks if not x.done())
-        if token.issuer == self.session_id:
-            self.active_tokens[token.signature] = token
-        else:
-            self.cached_tokens[token.signature] = token
-            self.tasks.add(asyncio.get_event_loop().create_task(self.timeout_cached_token(token)))
-
-        event, expected_token = self.expecting_tokens.get(token.signature, (None, None))
-        if expected_token and expected_token.encode() == token.encode():
-            self.expecting_tokens.pop(token.signature, None)
-            event.set()
 
     async def expect_channel(self, channel_id):
         if channel_id not in self.channels:
@@ -220,8 +185,6 @@ class Broker:
             for action, args in headers:
                 if action == "listen":
                     self.handle_listen(connection, **args)
-                if action == "token":
-                    await self.handle_tokens(connection, *args)
                 if action == "broker":
                     await self.handle_broker_action(connection, *args)
                 if action == "send":
@@ -240,15 +203,15 @@ class Broker:
             await connection.close(self.sessions)
 
     async def handle_send(self, connection, message, source, destination):
-        self.logger.info(
-            "%s: send %s %s ??? %s ??? %s %s",
-            self.broker_key.public_serial()[:4],
-            source["session"][0][:4],
-            source["channel"][:4],
-            str(len(message) // 2 ** 10),
-            destination["session"][0][:4],
-            destination["channel"][:4],
-        )
+        # self.logger.info(
+        #     "%s: send %s %s ??? %s ??? %s %s",
+        #     self.broker_key.public_serial()[:4],
+        #     source["session"][0][:4],
+        #     source["channel"][:4],
+        #     str(len(message) // 2 ** 10),
+        #     destination["session"][0][:4],
+        #     destination["channel"][:4],
+        # )
         s = Route(**source)
         d = Route(**destination)
 
@@ -259,6 +222,17 @@ class Broker:
 
                 if dest_session.channels.get(d.channel):
                     if await dest_channel.validate_token_chain(s.session[0], d.tokens, self):
+                        if connection.session.session_id != s.session[0]:
+                            try:
+                                len_h = int.from_bytes(message[68:70], "big")
+                                PublicKey(s.session[0]).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
+                            except InvalidSignature:
+                                self.logger.info(
+                                    'Invalid forwarded message signature - source: %s connection: %s',
+                                    s.session[0][:4],
+                                    connection.session.session_id[:4]
+                                )
+                                return
                         self.logger.info(
                             "%s: send %s %s >>> %s >>> %s %s",
                             self.broker_key.public_serial()[:4],
@@ -268,12 +242,6 @@ class Broker:
                             destination["session"][0][:4],
                             destination["channel"][:4],
                         )
-                        if connection.session.session_id != s.session[0]:
-                            try:
-                                len_h = int.from_bytes(message[68:70], "big")
-                                PublicKey(s.session[0]).verify(message[:64], message[64 : 73 + len_h + 65 + 32])
-                            except InvalidSignature:
-                                return
 
                         for connection in dest_channel.connections:
                             await connection.websocket.send(message)
@@ -300,15 +268,6 @@ class Broker:
                     for broker_id in brokers:
                         for broker_connection in self.topology_cache[depth][broker_id]:
                             if broker_connection.websocket.closed == False:
-                                for enc_token in d.tokens:
-                                    token = Token.decode(enc_token, False)
-                                    if (
-                                        self.broker_key.public_serial() in token.brokers
-                                        and token.issuer in self.sessions
-                                        and token.signature in self.sessions[token.issuer].active_tokens
-                                        and enc_token == self.sessions[token.issuer].active_tokens.get(token.signature).encode()
-                                    ):
-                                        await broker_connection.send((("token", ("approve", enc_token)),))
                                 await broker_connection.websocket.send(message)
                                 self.logger.info(
                                     "%s: send %s %s ))) %s ))) %s %s (%s)",
@@ -371,76 +330,6 @@ class Broker:
                 if not channel_obj.connections:
                     channel_obj.close()
 
-    async def handle_tokens(self, connection, action, *args):
-        if action == "issue":
-            tokens = [Token.decode(x) for x in args if x]
-            token = tokens[0]
-            if connection.session.session_id == token.issuer:
-                self.logger.info(
-                    "%s: tokens %s %s -> %s: %s (%s)",
-                    self.broker_key.public_serial()[:4],
-                    token.issuer[:4],
-                    action,
-                    token.signature[:4],
-                    str(token.receiver[:4]),
-                    token.asset[:4],
-                )
-                if token.token_type == "root":
-                    connection.session.active_tokens[token.signature] = token
-                elif token.token_type == "extension":
-                    prev_token = tokens[1]
-                    if await self.check_token(prev_token):
-                        connection.session.approve_token(token)
-                    else:
-                        self.logger.error(
-                            "%s: tokens %s %s XX %s: %s (%s) - failed token check: [%s]",
-                            self.broker_key.public_serial()[:4],
-                            token.issuer[:4],
-                            action,
-                            token.signature[:4],
-                            str(token.receiver[:4]),
-                            token.asset[:4],
-                            prev_token.signature[:4]
-                        )
-
-        if action == "revoke":
-            token = connection.session.active_tokens.get(args[0])
-            if token:
-                self.logger.info(
-                    "%s: tokens %s %s %s",
-                    self.broker_key.public_serial()[:4],
-                    str(token.issuer[:4]),
-                    action,
-                    str(token.signature[:4]),
-                )
-                connection.session.active_tokens.pop(token.signature, None)
-
-        if action == "validate":
-            token = Token.decode(args[0], False)
-            if token.issuer in self.sessions:
-                if await self.check_token(token):
-                    broker_connection = connection.session.broker_connections.get(connection)
-                    if broker_connection:
-                        self.logger.info(
-                            "%s: tokens %s %s %s",
-                            self.broker_key.public_serial()[:4],
-                            str(token.issuer[:4]),
-                            action,
-                            str(token.signature[:4]),
-                        )
-                        await broker_connection.send((("token", ("approve", token.encode())),))
-
-        if action == "approve":
-            token = Token.decode(args[0])
-            self.logger.info(
-                "%s: tokens %s %s %s",
-                self.broker_key.public_serial()[:4],
-                str(token.issuer[:4]),
-                action,
-                str(token.signature[:4]),
-            )
-            connection.session.approve_token(token)
-
     async def handle_broker_action(self, connection, action, params=None):
         if action == "open":
             peer = Peer(connection.websocket, self)
@@ -492,28 +381,17 @@ class Broker:
     async def check_token(self, token):
         session = self.sessions.get(token.issuer)
         if session:
-            if token.signature in session.active_tokens:
-                return token.encode() == session.active_tokens.get(token.signature).encode()
+            if token.signature in session.cached_tokens:
+                return token.encode() == session.cached_tokens.get(token.signature).encode()
             else:
-                event = asyncio.Event()
-                session.expecting_tokens[token.signature] = (event, token)
-                session.tasks.add(asyncio.get_event_loop().create_task(session.clean_expecting_token(token)))
-                try:
-                    await asyncio.wait_for(event.wait(), 2)
-                except asyncio.TimeoutError:
+                if token.verify(token.signature):
+                    session.cached_tokens[token.signature] = token
+                    return True
+                else:
                     return False
-                return True
+
         else:
-            event = asyncio.Event()
-            for broker in token.brokers:
-                if broker in self.sessions and await self.sessions[broker].validate_peer_token(token, event):
-                    break
-            else:
-                try:
-                    await asyncio.wait_for(event.wait(), 2)
-                except asyncio.exceptions.TimeoutError:
-                    return False
-            return True
+            return token.verify(token.signature)
 
     def check_no_repeat(self, message):
         signature, timestamp = message[:64], int.from_bytes(message[64:68], "big")

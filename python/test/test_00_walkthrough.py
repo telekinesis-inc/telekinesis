@@ -16,7 +16,7 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 async def test_walkthrough():
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
         async def handle_send(self, *args, **kwargs):
-            if random.random() < 0.005:
+            if random.random() < 0.01:
                 self.logger.error("Gotcha!!!")
                 kwargs["message"] = Exception("Random Fault Injection")
             await super().handle_send(*args, **kwargs)

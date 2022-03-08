@@ -99,7 +99,6 @@ class Token:
         max_depth=None,
         valid_from=None,
         valid_until=None,
-        fail_mode="CLOSED",
         metadata=None,
     ):
         self.issuer = issuer
@@ -111,7 +110,6 @@ class Token:
         self.valid_from = valid_from or time.time()
         self.valid_until = valid_until
         self.metadata = metadata or {}
-        self.fail_mode = fail_mode
         self.signature = None
 
     def verify(self, signature):
@@ -134,7 +132,6 @@ class Token:
                 "max_depth",
                 "valid_from",
                 "valid_until",
-                "fail_mode",
                 "metadata",
             ]
         }

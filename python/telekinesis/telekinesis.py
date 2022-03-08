@@ -404,9 +404,7 @@ class Telekinesis:
                 token_header += [self._channel.header_buffer.pop()]
 
         if extend_route:
-            token_header += [
-                self._session.extend_route(route, receiver[0] if isinstance(receiver, tuple) else receiver, max_delegation_depth)
-            ]
+            self._session.extend_route(route, receiver[0] if isinstance(receiver, tuple) else receiver, max_delegation_depth)
             if (route.session, route.channel) in self._session.routes:
                 self._session.routes[(route.session, route.channel)]["delegations"].add(
                     receiver if isinstance(receiver, tuple) else (receiver, None)
@@ -458,7 +456,7 @@ class Telekinesis:
                 await channel.channel.send(metadata.caller, {"pong": True})
             elif "pipeline" in payload:
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
-                self._logger.info("%s called %s", metadata.caller.session, len(pipeline))
+                self._logger.info("%s %s called %s %s", metadata.caller.session[0][:4], metadata.caller.session[1][:2], self, len(pipeline))
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
@@ -716,8 +714,7 @@ class Telekinesis:
     async def _forward(self, pipeline, reply_to=None, **kwargs):
         async with Channel(self._session) as new_channel:
             if reply_to:
-                token_header = self._session.extend_route(reply_to, self._target.session[0])
-                new_channel.header_buffer.append(token_header)
+                self._session.extend_route(reply_to, self._target.session[0])
             for key, value in kwargs.items():
                 if isinstance(value, tuple) and isinstance(value[0], Telekinesis):
                     kwargs[key] = value[0]._encode(value[0], value[1], new_channel)
