@@ -7,7 +7,7 @@ import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 const {version} = require('../package.json');
 const webcrypto = global.crypto;
 
-export type Header = ["send", any] | ["token", any] | ["listen", any] | ["close", any]
+export type Header = ["send", any] | ["listen", any] | ["close", any]
 
 export class Connection {
   RESEND_TIMEOUT: number;
@@ -341,14 +341,12 @@ export class Session {
       this.issuedTokens.set(signature, [token, prevToken])
     }
 
-    return ["token", ["issue", token && token.encode(), prevToken && prevToken.encode()]]
+    return token && token.encode()
   }
   async extendRoute(route: Route, receiver: string, maxDepth?: number) {
-    let tokenHeader;
+    let newTokenStr;
     if (route.session[0] === await this.sessionKey.publicSerial()) {
-      tokenHeader = await this.issueToken(route.channel, receiver, maxDepth)
-      route.tokens = [tokenHeader[1][1] as string]
-      return tokenHeader;
+      newTokenStr = await this.issueToken(route.channel, receiver, maxDepth)
     } else {
       for (var i in route.tokens) {
         let token = await Token.decode(route.tokens[i]) as Token;
@@ -357,10 +355,9 @@ export class Session {
         }
       }
       let token = await Token.decode(route.tokens[route.tokens.length - 1]) as Token;
-      tokenHeader = await this.issueToken(token, receiver, maxDepth);
+      newTokenStr = await this.issueToken(token, receiver, maxDepth);
     }
-    route.tokens.push(tokenHeader[1][1] as string);
-    return tokenHeader;
+    route.tokens.push(newTokenStr as string);
   }
   clear(bundleId: Uint8Array) {
     for (var i in this.connections) {
@@ -565,7 +562,7 @@ export class Channel {
         }
       }
       let sourceRoute = this.route.clone();
-      this.headerBuffer.push(await this.session.extendRoute(sourceRoute, destination.session[0]) as Header);
+      await this.session.extendRoute(sourceRoute, destination.session[0]);
       this.listen();
 
       let payload = new Uint8Array(serialize(payloadObj));

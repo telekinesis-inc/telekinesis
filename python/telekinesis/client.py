@@ -351,7 +351,6 @@ class Session:
         token = Token.decode(route.tokens[-1], False)
         token_header = self.issue_token(token, receiver, max_depth)
         route.tokens.append(token_header[1][1])
-        return token_header
 
     def clear(self, bundle_id):
         for connection in self.connections:

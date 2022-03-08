@@ -446,7 +446,7 @@ export class Telekinesis extends Function {
     }
 
     if (extendRoute) {
-      tokenHeaders.push(await this._session.extendRoute(route, receiver instanceof Array ? receiver[0] : receiver, maxDelegationDepth) as Header);
+      await this._session.extendRoute(route, receiver instanceof Array ? receiver[0] : receiver, maxDelegationDepth);
       if (this._session.routes.has(route._hash)) {
         this._session.routes.get(route._hash).delegations.add(receiver instanceof Array ? receiver : [receiver, null]);
       }
@@ -766,8 +766,7 @@ export class Telekinesis extends Function {
     let newChannel = new Channel(this._session);
     try {
       if (replyTo !== undefined) {
-        const tokenHeader = await this._session.extendRoute(replyTo, (this._target as Route).session[0])
-        newChannel.headerBuffer.push(tokenHeader as Header)
+        await this._session.extendRoute(replyTo, (this._target as Route).session[0])
       }
       if (kwargs) {
         for (let [key, value] of Object.entries(kwargs)) {
