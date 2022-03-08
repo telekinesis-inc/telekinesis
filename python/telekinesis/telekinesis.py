@@ -113,8 +113,8 @@ class State:
                                     .replace("(,", "(", 1)
                                     .replace("( ", "(", 1)
                                 )
-                        except Exception:
-                            logger.info("Could not obtain signature from %s.%s", target, attribute_name)
+                        except Exception as e:
+                            logger.debug("Could not obtain signature from %s.%s: %s", target, attribute_name, e)
 
                         if attribute_name == "__init__":
                             if isinstance(target, type):
