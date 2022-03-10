@@ -476,23 +476,26 @@ class Telekinesis:
                         root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session),
                     )
                 else:
-                    if reply_to:
-                        async with Channel(self._session) as new_channel:
-                            await new_channel.send(
-                                reply_to,
+                    try:
+                        if reply_to:
+                            async with Channel(self._session) as new_channel:
+                                await new_channel.send(
+                                    reply_to,
+                                    {
+                                        "return": self._encode(ret, reply_to.session, new_channel),
+                                        "root_parent": payload.get("root_parent"),
+                                    },
+                                )
+                        else:
+                            await channel.send(
+                                metadata.caller,
                                 {
-                                    "return": self._encode(ret, reply_to.session, new_channel),
-                                    "root_parent": payload.get("root_parent"),
+                                    "return": self._encode(ret, metadata.caller.session),
+                                    "root_parent": None if ret is self else self._encode(self, metadata.caller.session, channel),
                                 },
                             )
-                    else:
-                        await channel.send(
-                            metadata.caller,
-                            {
-                                "return": self._encode(ret, metadata.caller.session),
-                                "root_parent": None if ret is self else self._encode(self, metadata.caller.session, channel),
-                            },
-                        )
+                    except ConnectionError:
+                        pass
 
         except (Exception, KeyboardInterrupt) as e:
             if not isinstance(e, StopAsyncIteration):
