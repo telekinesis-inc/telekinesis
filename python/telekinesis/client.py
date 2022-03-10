@@ -148,7 +148,12 @@ class Connection:
                 s, mm = encode(header, payload, message_id, retry + 1)
                 self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
 
-        raise ConnectionError("%s Max send retries reached" % self.session.session_key.public_serial()[:4])
+        raise ConnectionError(["%s send %s %s - %s max retries reached" % (
+            self.session.session_key.public_serial()[:4],
+            h['destination']['session'][0][:4], 
+            h['destination']['session'][1][:2],
+            h['destination']['channel'][:4],
+            ) for a, h in header if a == 'send'][0])
 
     async def expect_ack(self, message_id, lock):
         await lock.wait()
