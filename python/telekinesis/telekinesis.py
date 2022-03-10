@@ -711,6 +711,8 @@ class Telekinesis:
                     if not self._session.targets[id(self._target)]:
                         self._session.targets.pop(id(self._target))
                     self._channel and await self._channel.close()
+        except ConnectionError:
+            self._session.logger.info("Error closing Telekinesis Object: %s", self._target, exc_info=True)
         except Exception:
             self._session.logger.error("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
