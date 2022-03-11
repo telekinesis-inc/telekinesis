@@ -529,7 +529,7 @@ class Channel:
                 acc_len += l + 1
             else:
                 groups.append([h])
-                acc_len = l + 1
+                acc_len = l + 2
 
         for group in groups:
             await self.session.send(group, payload if 'send' in set(h[0] for h in group) else b'', bundle_id)

@@ -30,7 +30,14 @@ async def main():
         def increment(self, amount=1):
             self.value += amount
             return self
+
     reg['counter_python'] = Counter()
+
+    async def call_all(lst):
+        await asyncio.gather(*[l(i)._execute() for i, l in enumerate(lst)])
+
+    reg['call_all'] = call_all
+
     broker.entrypoint, _ = await tk.create_entrypoint(reg, '${HOST}')
     lock = asyncio.Event()
     await lock.wait()
@@ -77,6 +84,15 @@ describe("Telekinesis", () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")
     expect(await echo(largeMessage)).toEqual(largeMessage);
+  });
+  it('handles large headers', async () => {
+    const callAll = await (new Entrypoint(HOST) as any).get('call_all');
+    let i = 0;
+    const N = 50 
+
+    await callAll(Array(N).fill((x: number) => {i = i > x ? i : x}))._timeout(2).catch(() => null)
+
+    expect(i).toEqual(N-1);
   });
   it('sends telekinesis objects', async () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');

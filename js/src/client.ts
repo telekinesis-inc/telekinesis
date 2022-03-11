@@ -609,11 +609,30 @@ export class Channel {
     }
     if (this.route !== undefined) {
       if (this.headerBuffer.length > 0 || header !== undefined) {
-        await this.session.send(
-          header !== undefined ? this.headerBuffer.concat([header]) : this.headerBuffer,
-          payload,
-          bundleId)
-        this.headerBuffer = [];
+        let allHeaders = header !== undefined ? this.headerBuffer.concat([header]) : this.headerBuffer;
+        let accLen = 1;
+        let groups = [[]] as Header[][];
+
+
+        for (let h of allHeaders) {
+          let l = JSON.stringify(h).length
+          if (accLen + l + 1 < 256**2) {
+            groups[groups.length-1].push(h);
+            accLen += l + 1;
+          } else {
+            groups.push([h])
+            accLen = l + 2
+          }
+        }
+
+        for (let headerGroup of groups) {
+          await this.session.send(
+            headerGroup,
+            headerGroup.map(([a, _]) => a).includes('send') ? payload : undefined,
+            bundleId)
+          this.headerBuffer = [];
+
+        }
       }
     }
     this.then = undefined;
