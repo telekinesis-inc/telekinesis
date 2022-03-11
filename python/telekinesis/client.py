@@ -518,7 +518,21 @@ class Channel:
         return self
 
     async def execute(self, header=None, payload=b"", bundle_id=None):
-        await self.session.send([h for h in (self.header_buffer + [header]) if h], payload, bundle_id)
+        all_headers = [h for h in self.header_buffer + [header] if h]
+        lens = tuple((len(ujson.dumps(h, escape_forward_slashes=False)), h) for h in all_headers)
+
+        groups = [[]]
+        acc_len = 1
+        for l, h in lens:
+            if acc_len + l + 1 < 256**2:
+                groups[-1].append(h)
+                acc_len += l + 1
+            else:
+                groups.append([h])
+                acc_len = l + 1
+
+        for group in groups:
+            await self.session.send(group, payload if 'send' in set(h[0] for h in group) else b'', bundle_id)
         self.header_buffer = []
 
         return self
