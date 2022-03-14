@@ -337,7 +337,8 @@ class Telekinesis:
             return self._parent._get_root_parent()
         return self
 
-    def _last(self):
+    @property
+    def _last_value(self):
         if (
             (len(self._state.pipeline) == 1)
             and (self._state.pipeline[0][0] == "get")
@@ -745,7 +746,8 @@ class Telekinesis:
             )
             f = eval(self_name+method.strip(), ipython.ns_table['user_global'])
             t = asyncio.create_task(f(cell, *args, **kwargs)._execute())
-            self._magic_task = t
+            
+            self._last_magic = t
             self._magic_history.append(t)
         
         ipython.register_magic_function(inject_code, 'cell', name)

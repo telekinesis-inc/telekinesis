@@ -114,17 +114,17 @@ describe("Telekinesis", () => {
     const d = new Demo();
     const tk = new Telekinesis(d, new Session()) as any;
 
-    expect(tk.x._last()).toEqual(d.x);
+    expect(tk.x._lastValue).toEqual(d.x);
 
     d.x = 'hello';
     await tk;
 
-    expect(tk.x._last()).toEqual(d.x);
+    expect(tk.x._lastValue).toEqual(d.x);
 
     d.x = 'bye';
     await tk;
 
-    expect(tk.x._last()).toEqual(d.x);
+    expect(tk.x._lastValue).toEqual(d.x);
 
   })
 
@@ -146,7 +146,7 @@ describe("Telekinesis", () => {
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
     await new Promise(r => setTimeout(() => r(true), 10));
-    expect(b.value._last()).toEqual(4);
+    expect(b.value._lastValue).toEqual(4);
   })
   it('receives pull updates when it subscribes (python object)', async () => {
     const a = await (new Entrypoint(HOST) as any).get('counter_python');
@@ -154,7 +154,7 @@ describe("Telekinesis", () => {
 
     expect(await a.increment().increment().increment(2).value).toEqual(4);
     await new Promise(r => setTimeout(() => r(true), 10));
-    expect(b.value._last()).toEqual(4);
+    expect(b.value._lastValue).toEqual(4);
   })
   it('transfers only the difference between updates', async () => {
     class Demo {
@@ -180,9 +180,9 @@ describe("Telekinesis", () => {
 
     await a;
 
-    expect(a.x0._last()).toEqual(d.x0);
+    expect(a.x0._lastValue).toEqual(d.x0);
     await new Promise(r => setTimeout(() => r(true), 400));
-    expect(b.x0._last()).toEqual(d.x0);
+    expect(b.x0._lastValue).toEqual(d.x0);
     // console.log((await getMeasures()).size_kb, m0)
     const m1 = (await getMeasures()).size_kb;
 
@@ -190,7 +190,7 @@ describe("Telekinesis", () => {
     await a;
     await new Promise(r => setTimeout(() => r(true), 100));
 
-    expect(b.x1._last()).toEqual(d.x1);
+    expect(b.x1._lastValue).toEqual(d.x1);
     const m2 = (await getMeasures()).size_kb;
     expect(m2 - m1).toBeLessThan(0.3 * (m1 - m0));
     // console.log((await getMeasures()).size_kb, m0)

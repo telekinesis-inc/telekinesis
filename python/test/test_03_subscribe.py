@@ -35,9 +35,9 @@ async def test_subscribe():
     counter0 = await Entrypoint("ws://localhost:8780").get("counter")
     counter1 = await Entrypoint("ws://localhost:8780").get("counter")._subscribe()
 
-    assert counter1.value._last() == 2
+    assert counter1.value._last_value == 2
 
     await counter0.increment(3).increment(1)
 
     await asyncio.sleep(0.1)
-    assert counter1.value._last() == 6
+    assert counter1.value._last_value == 6

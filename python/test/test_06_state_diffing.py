@@ -41,13 +41,13 @@ async def test_state_diffing():
 
     await registry
     assert 2 ** 10 < measures["size_kb"] < 1.1 * 2 ** 10
-    assert registry.x._last() == container.x._last()
+    assert registry.x._last_value == container.x._last_value
 
     await container.set("y", os.urandom(2 ** 20))
 
     await registry
     assert 2 ** 11 < measures["size_kb"] < 1.1 * 2 ** 11
-    assert registry.y._last() == container.y._last()
+    assert registry.y._last_value == container.y._last_value
 
     await container.add_method("some docstring")
     

@@ -394,7 +394,7 @@ export class Telekinesis extends Function {
     }
     return this;
   }
-  _last() {
+  get _lastValue() {
     if ((this._state.pipeline.length === 1) && (this._state.pipeline[0][0] === 'get') && (this._state.attributes instanceof Map)) {
       return (this._state.attributes as Map<string, any>).get(this._state.pipeline[0][1] as string);
     }
