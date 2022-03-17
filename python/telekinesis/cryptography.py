@@ -12,6 +12,7 @@ from cryptography.exceptions import InvalidSignature
 
 class PrivateKey:
     def __init__(self, key_file=None, password=None):
+        self._public_serial_cache = None
         if key_file and os.path.exists(key_file):
             with open(key_file, "rb") as kf:
                 data = kf.read()
@@ -29,8 +30,10 @@ class PrivateKey:
         return b"".join([x.to_bytes(32, "big") for x in (r, s)])
 
     def public_serial(self):
-        Q = self.key.public_key().public_numbers()
-        return base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
+        if not self._public_serial_cache:
+            Q = self.key.public_key().public_numbers()
+            self._public_serial_cache = base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
+        return self._public_serial_cache
 
     def _private_serial(self, password=None):
         enc = (
