@@ -95,7 +95,7 @@ class State:
                                     target_attribute = None
                                 else:
                                     target_attribute = target.__getattribute__(attribute_name)
-                            except TypeError:
+                            except (AttributeError, TypeError):
                                 target_attribute = target.__getattribute__(attribute_name)
                         except AttributeError:
                             target_attribute = target.__getattr__(attribute_name)
