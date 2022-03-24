@@ -522,6 +522,8 @@ export class Telekinesis extends Function {
                 return: await this._encode(ret, replyTo.session, newChannel),
                 root_parent: (payload as any).root_parent,
               })
+            } catch (e) {
+              null;
             } finally {
               await newChannel.close();
             }
@@ -547,12 +549,16 @@ export class Telekinesis extends Function {
           const newChannel = new Channel(this._session)
           try {
             await newChannel.send(replyTo, errMessage);
+          } catch (e) {
+            null;
           } finally {
             await newChannel.close();
           }
         } else {
           await channel.send(metadata.caller, errMessage);
         }
+      } catch (e) {
+        null;
       } finally { }
     }
   }
@@ -783,6 +789,8 @@ export class Telekinesis extends Function {
           ...kwargs
         }
       )
+    } catch (e) {
+      null;
     } finally {
       await newChannel.close()
     }
