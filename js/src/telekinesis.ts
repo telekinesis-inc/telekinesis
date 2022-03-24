@@ -535,7 +535,7 @@ export class Telekinesis extends Function {
               return: await this._encode(ret, metadata.caller.session),
               root_parent: ret === this || ret === this._target && ret === this._proxy ?
                 null : parent
-            })
+            }).catch(e => null)
           }
         }
       }
@@ -555,7 +555,7 @@ export class Telekinesis extends Function {
             await newChannel.close();
           }
         } else {
-          await channel.send(metadata.caller, errMessage);
+          await channel.send(metadata.caller, errMessage).catch(e => null);
         }
       } catch (e) {
         null;
