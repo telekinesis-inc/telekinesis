@@ -228,7 +228,7 @@ export class Connection {
         } else if (parseInt(i) === this.MAX_SEND_RETRIES) {
           this.awaitingAck.delete(messageId);
           const h = headers.filter(([a, _]) => a === 'send')[0] as any; 
-          rej(`${h.source.session[0].slice(0, 4)} send ${h.destination.session[0].slice(0, 4)} ${h.destination[0].slice(0, 2)} - ${h.destionation.channel.slice(0,4)} max retries reached `);// ${bundleId}`);
+          rej(`${h?.source?.session[0].slice(0, 4)} send ${h?.destination?.session[0].slice(0, 4)} ${h.destination[0].slice(0, 2)} - ${h?.destination?.channel?.slice(0,4)} max retries reached `);// ${bundleId}`);
         } else {
           [s, mm] = await encode(messageId, parseInt(i));
         }
