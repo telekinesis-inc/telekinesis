@@ -325,7 +325,11 @@ export class Session {
           if (this.connections[j].brokerId && token.brokers.includes(this.connections[j].brokerId as string)) {
             prevToken = tokens[1];
             cached = true;
+            break;
           }
+        }
+        if (cached) {
+          break;
         }
       }
     }
@@ -347,12 +351,18 @@ export class Session {
   async extendRoute(route: Route, receiver: string, maxDepth?: number) {
     let newTokenStr;
     if (route.session[0] === await this.sessionKey.publicSerial()) {
-      newTokenStr = await this.issueToken(route.channel, receiver, maxDepth)
+      newTokenStr = await this.issueToken(route.channel, receiver, maxDepth) as string;
+      route.tokens = [newTokenStr];
+      return;
     } else {
       for (var i in route.tokens) {
         let token = await Token.decode(route.tokens[i]) as Token;
         if (token.receiver === await this.sessionKey.publicSerial()) {
           route.tokens = route.tokens.slice(0, parseInt(i) + 1);
+        }
+        if (token.receiver === receiver) {
+          route.tokens = route.tokens.slice(0, parseInt(i) + 1);
+          return;
         }
       }
       let token = await Token.decode(route.tokens[route.tokens.length - 1]) as Token;
@@ -369,7 +379,7 @@ export class Session {
   async send(headers: Header[], payload: Uint8Array = new Uint8Array([]), bundleId?: Uint8Array) {
     for (var i in this.connections) {
       let connection = this.connections[i]
-      await connection.send(headers, payload, bundleId)
+      await connection.send(headers, payload, bundleId)//.catch(e => {throw e})
     }
   }
 }
@@ -597,9 +607,10 @@ export class Channel {
       let gen = encryptSlice(payload, this.MAX_PAYLOAD_LEN, sharedKey, mid, n, 0);
 
       try {
-        await Promise.all(Array(nTasks).fill(0).map(() => new Promise(r => { execute(this, header, gen, mid).then(r) })))
-      } catch {
+        await Promise.all(Array(nTasks).fill(0).map(() => new Promise((r, re) => { execute(this, header, gen, mid).then(r).catch(re) })))
+      } catch (e) {
         this.session.clear(mid);
+        throw e;
       }
       return new Promise(r => r(this));
     }
@@ -644,7 +655,7 @@ export class Channel {
       this.then = undefined;
       resolve(this);
     } else {
-      this.execute().then(() => resolve(this))
+      this.execute().then(() => resolve(this)).catch(e => console.log('Error in channel._then', e))
     }
   }
   async close() {

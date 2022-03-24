@@ -340,7 +340,6 @@ export class Telekinesis extends Function {
     this._blockThen = false;
     this._isTelekinesisObject = true;
 
-
     this._proxy = new Proxy(this, {
       get(target: Telekinesis, prop: string) {
         if (prop[0] === '_') {
@@ -470,6 +469,7 @@ export class Telekinesis extends Function {
     return this
   }
   async _handleRequest(channel: Channel, metadata: RequestMetadata, payload: {}) {
+    // console.log('>>>>>>', payload)
     let pipeline;
     let replyTo;
 
@@ -522,8 +522,8 @@ export class Telekinesis extends Function {
                 return: await this._encode(ret, replyTo.session, newChannel),
                 root_parent: (payload as any).root_parent,
               })
-            } catch (e) {
-              null;
+            } catch (_) {
+              null
             } finally {
               await newChannel.close();
             }
@@ -531,11 +531,13 @@ export class Telekinesis extends Function {
             // console.log(metadata.caller.session, this._clients, this._state)
             const parent = await this._encode(this, metadata.caller.session, channel);
             // console.log(this._decode(parent))
+            // console.log('about to send')
             await channel.send(metadata.caller, {
               return: await this._encode(ret, metadata.caller.session),
               root_parent: ret === this || ret === this._target && ret === this._proxy ?
                 null : parent
-            }).catch(e => null)
+            }).catch(_ => null)
+            // console.log('done sending');
           }
         }
       }
@@ -550,12 +552,12 @@ export class Telekinesis extends Function {
           try {
             await newChannel.send(replyTo, errMessage);
           } catch (e) {
-            null;
+            null
           } finally {
             await newChannel.close();
           }
         } else {
-          await channel.send(metadata.caller, errMessage).catch(e => null);
+          await channel.send(metadata.caller, errMessage)//.catch(_ => null);
         }
       } catch (e) {
         null;
