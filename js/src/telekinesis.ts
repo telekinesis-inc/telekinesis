@@ -723,7 +723,11 @@ export class Telekinesis extends Function {
     return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then(res) })
   }
   async _sendRequest(channel: Channel, request: {}) {
-    await channel.send(this._target as Route, request);
+    try {
+      await channel.send(this._target as Route, request);
+    } catch (e) {
+      throw e;
+    }
 
     if ((request as any).reply_to === undefined) {
       let [metadata, response] = await channel.recv() as [RequestMetadata, {}];
