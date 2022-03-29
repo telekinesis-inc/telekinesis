@@ -317,6 +317,7 @@ export class Telekinesis extends Function {
 
   _lastUpdate: number;
   _blockThen: boolean;
+  _catchFn?: any;
   _isTelekinesisObject: boolean;
   _proxy: any;
 
@@ -338,6 +339,7 @@ export class Telekinesis extends Function {
 
     this._lastUpdate = Date.now();
     this._blockThen = false;
+    this._catchFn;
     this._isTelekinesisObject = true;
 
     this._proxy = new Proxy(this, {
@@ -349,7 +351,12 @@ export class Telekinesis extends Function {
           if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
             return new Promise(r => r(target));
           }
-          return (async (r: any) => r(await target._execute()))
+          return (async (r: any) => {
+            r(await target._execute().catch(e => {if (target._catchFn) {target._catchFn(e)} else {throw e}}));
+            target._catchFn = undefined;
+          })
+        } else if (prop === 'catch') {
+          return (fn: any) => {target._catchFn = fn; return target._proxy}
         }
 
         let state = target._state.clone();
@@ -739,7 +746,10 @@ export class Telekinesis extends Function {
         const [lastVersion, diffs] = root._decode((response as any).root_parent, metadata.caller.session[0])._state.getDiffs(0, undefined, true);
         root._updateState(lastVersion, diffs);
       }
-      if (Object.getOwnPropertyNames(response).includes('return')) {
+      // console.log(response)
+      if (Object.getOwnPropertyNames(response).includes('error')) {
+        throw (response as any).error;
+      } else if (Object.getOwnPropertyNames(response).includes('return')) {
         let out = this._decode((response as any)['return'], (this._target as Route).session[0])
         if (out?._isTelekinesisObject === true) {
           out._lastUpdate = Date.now();
@@ -747,8 +757,6 @@ export class Telekinesis extends Function {
         }
         // console.log(out)
         return out
-      } else if (Object.getOwnPropertyNames(response).includes('error')) {
-        throw (response as any).error;
       }
     }
   }
@@ -796,7 +804,9 @@ export class Telekinesis extends Function {
         }
       )
     } catch (e) {
-      null;
+      if (replyTo === undefined) {
+        throw e;
+      }
     } finally {
       await newChannel.close()
     }
