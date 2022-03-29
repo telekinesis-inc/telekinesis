@@ -86,7 +86,21 @@ class Connection:
             listen_dict["is_public"] = channel.is_public
             listen_dict.pop("tokens")
             headers.append(("listen", listen_dict))
-        await self.send(headers)
+
+        lens = tuple((len(ujson.dumps(h, escape_forward_slashes=False)), h) for h in headers)
+
+        groups = [[]]
+        acc_len = 1
+        for l, h in lens:
+            if acc_len + l + 1 < 256**2:
+                groups[-1].append(h)
+                acc_len += l + 1
+            else:
+                groups.append([h])
+                acc_len = l + 2
+
+        for group in groups:
+            await self.send(group)
 
         self.is_connecting_lock.set()
 
