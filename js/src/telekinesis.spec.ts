@@ -80,11 +80,11 @@ describe("Telekinesis", () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');
     expect(await echo('hello!')).toEqual('hello!');
   });
-  // it("throws errors", async () => {
-  //   const counterPython = await (new Entrypoint(HOST) as any).get('counter_python')
-  //   expect(async () => {await counterPython.increment('asdf').catch((e: any) => {console.warn(e); throw e})}).toThrow('Telekinesis');
-  //   // expect(() => {throw Error('asd')}).toThrow('asd')
-  // })
+  it("throws errors", async () => {
+    const counterPython = await (new Entrypoint(HOST) as any).get('counter_python')
+    expect(async () => {await counterPython.increment('asdf').catch((e: any) => {console.warn(e); throw e})}).toThrow('Telekinesis');
+    // expect(() => {throw Error('asd')}).toThrow('asd')
+  })
   it('handles large messages', async () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")

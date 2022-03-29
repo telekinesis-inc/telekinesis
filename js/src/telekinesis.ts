@@ -351,9 +351,10 @@ export class Telekinesis extends Function {
           if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
             return new Promise(r => r(target));
           }
-          return (async (r: any) => {
-            r(await target._execute().catch(e => {if (target._catchFn) {target._catchFn(e)} else {throw e}}));
-            target._catchFn = undefined;
+          return (async (r: any, re: any) => {
+            target._execute()
+              .catch(e => {if (target._catchFn) {target._catchFn(e)} else {re(e)}; target._catchFn = undefined})
+              .then(t => {r(t); target._catchFn = undefined});
           })
         } else if (prop === 'catch') {
           return (fn: any) => {target._catchFn = fn; return target._proxy}
