@@ -125,7 +125,7 @@ class State:
                                 (target_attribute.__doc__ or '')+'\n\n'+(target_attribute.__call__.__doc__ or '')
                             )
                         else:
-                            methods[attribute_name] = (signature, target_attribute.__doc__)
+                            methods[attribute_name] = (signature, str(target_attribute.__doc__))
                     else:
                         if asyncio.iscoroutine(target_attribute):
                             target_attribute.close()
