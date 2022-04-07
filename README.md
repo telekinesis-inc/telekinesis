@@ -31,7 +31,7 @@ import telekinesis as tk
 import pandas # For example
 
 # First let's set up a local telekinesis network
-broker = await tk.Broker.serve() # That's it
+broker = await tk.Broker().serve() # That's it
 
 # Let's put pandas behind a passkey check so it's not exposed to 
 # every tab on your web browser 
@@ -54,8 +54,6 @@ Now, for example, we can create and manipulate pandas DataFrames from javascript
 entrypoint = await new TK.Entrypoint() // Connect to our entrypoint
 
 pandas = await entrypoint('<your passkey>') // Let's get to our pandas sdk :)
-
-console.log(await pandas.version)  // we can get any attribute
 
 df = await pandas.DataFrame() // Freedom, so much!
 
