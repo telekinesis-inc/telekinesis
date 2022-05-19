@@ -45,12 +45,12 @@ async def main():
 asyncio.run(main())
 `
 
-beforeAll(() => new Promise((resolve, reject) => {
+beforeAll(() => new Promise((resolve, _) => {
   jest.setTimeout(300000);
   subprocess = spawn('python', ['-c', startBroker])
 
   subprocess.stderr.on('data', (data: any) => {
-    throw `${data}`;
+    // console.warn(`${data}`);
   });
   setTimeout(() => resolve(true), 1000)
   // resolve(true);
@@ -81,10 +81,12 @@ describe("Telekinesis", () => {
     expect(await echo('hello!')).toEqual('hello!');
   });
   it("throws errors", async () => {
-    const counterPython = await (new Entrypoint(HOST) as any).get('counter_python')
-    expect(async () => {await counterPython.increment('asdf').catch((e: any) => {console.warn(e); throw e})}).toThrow('Telekinesis');
-    // expect(() => {throw Error('asd')}).toThrow('asd')
-  })
+    
+    const counterPython = await (new Entrypoint(HOST) as any).get('counter_python') as any;
+    let ee;
+    await counterPython.increment('x').catch((e: any) => {ee = e})
+    expect(ee).toContain('TypeError')
+  });
   it('handles large messages', async () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');
     const largeMessage = Array(100000).fill(() => Math.random().toString(36).slice(3)).reduce((p, c) => p + c(), "")
