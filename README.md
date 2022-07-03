@@ -1,4 +1,4 @@
-# Just-in-time SDKs
+# Instant SDKs
 
 ## Why?
 
@@ -150,6 +150,6 @@ If you prefer written text and guides to code... I guess you'll have to wait for
 
 ## Join me
 
-So far I've been developing this by myself, mostly with the idea of making [serverless easy and powerful](https://www.telekinesis.cloud). However, if you like where this *"Just-in-time SDKs"* project is going (or think this is a cool idea like me), it'd be great to talk with you.
+So far I've been developing this by myself, mostly with the idea of making [serverless easy and powerful](https://www.telekinesis.cloud). However, if you like where this *"Instant SDKs"* project is going (or think this is a cool idea like me), it'd be great to talk with you.
 
 You can email me at [contact@telekinesis.cloud](contact@telekinesis.cloud) or chat with me on [Discord](https://discord.gg/p7Trmr2S)
