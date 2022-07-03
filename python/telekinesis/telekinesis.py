@@ -129,6 +129,7 @@ class State:
                     else:
                         if asyncio.iscoroutine(target_attribute):
                             target_attribute.close()
+                            target_attribute = None
                         attributes[attribute_name] = target_attribute.copy() if type(target_attribute) in [dict, list, set] else target_attribute 
 
                 except Exception as e:
@@ -313,23 +314,23 @@ class Telekinesis:
         if attr[0] == "_" and not override:
             return super().__getattribute__(attr)
 
-        if isinstance(self._state.attributes, dict) and isinstance(self._state.attributes.get(attr), Telekinesis):
+        if isinstance(self._state.attributes, dict) and isinstance(self._state.attributes.get(attr), Telekinesis) and not self._state.pipeline:
             state = self._state.attributes[attr]._state.clone()
-            state.pipeline = self._state.pipeline.copy()
+            target = self._state.attributes[attr]
         else: 
             state = self._state.clone()
-
-        state.pipeline.append(("get", attr))
+            state.pipeline.append(("get", attr))
+            target = self
 
         return Telekinesis._from_state(
             state,
-            self._target,
-            self._session,
-            self._mask,
-            self._expose_tb,
-            self._max_delegation_depth,
-            self._block_gc,
-            self,
+            target._target,
+            target._session,
+            target._mask,
+            target._expose_tb,
+            target._max_delegation_depth,
+            target._block_gc,
+            target,
         )
 
     def _get_root_parent(self):
