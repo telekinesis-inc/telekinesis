@@ -7,19 +7,21 @@ export class State {
   pipeline: [string, Telekinesis | string | [any[], {}]][];
   repr: string;
   doc?: string;
+  name?: string;
   _pendingChanges: {};
   _historyOffset: number;
   _history: {}[];
 
   constructor(
     attributes?: Map<string, any> | Set<string>, methods?: Map<string, [string, string]>, repr?: string, doc?: string,
-    pipeline?: [string, string | [any[], {}]][]
+    name?: string, pipeline?: [string, string | [any[], {}]][]
   ) {
     this.attributes = attributes || new Set();
     this.methods = methods || new Map();
     this.pipeline = pipeline || [];
     this.repr = repr || '';
     this.doc = doc;
+    this.name = name;
     this._pendingChanges = {};
     this._historyOffset = 0;
     this._history = [];
@@ -37,6 +39,7 @@ export class State {
       pipeline: this.pipeline.map(x => x),
       repr: this.repr,
       doc: this.doc,
+      name: this.name,
     }
   }
   clone() {
@@ -55,6 +58,7 @@ export class State {
         Object.getOwnPropertyNames(obj.methods || {}).reduce((p, v) => { p.set(v, obj.methods[v]); return p }, new Map()),
       obj.repr,
       obj.doc,
+      obj.name,
       obj.pipeline,
     );
   }
@@ -118,6 +122,7 @@ export class State {
           .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
         repr: (target.toString && target.toString()) || '',
         doc: (target as any).__doc__,
+        name: (target as any).__name__,
       };
       if (target instanceof Function) {
         newProps.methods.set('__call__', ['(*args)', target.toString()]);
@@ -692,7 +697,7 @@ export class Telekinesis extends Function {
       } else if (action === 'subscribe') {
         const cb = pipeline[step][1] as Telekinesis;
         const r = cb._target as Route;
-        if (metadata && r.validateTokenChain(metadata.caller.session[0])) {
+        if (metadata && await r.validateTokenChain(metadata.caller.session[0])) {
           const tk = Telekinesis._reuse(
             target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth
           )

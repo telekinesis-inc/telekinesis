@@ -10,12 +10,13 @@ from .client import Route, Channel
 
 
 class State:
-    def __init__(self, attributes=None, methods=None, repr=None, doc=None, pipeline=None):
+    def __init__(self, attributes=None, methods=None, repr=None, doc=None, name=None, pipeline=None):
         self.attributes = {} if attributes is None else (set(attributes) if isinstance(attributes, list) else attributes) 
         self.methods = methods or {}
         self.pipeline = pipeline or []
         self.repr = repr or ""
         self.doc = doc
+        self.name = name
         self._pending_changes = {}
         self._history_offset = 0
         self._history = []
@@ -30,6 +31,7 @@ class State:
             "pipeline": self.pipeline,
             "repr": self.repr,
             "doc": self.doc,
+            "name": self.name,
         }
 
     def clone(self):
@@ -61,6 +63,8 @@ class State:
                 filtered["repr"] = diff["repr"]
             if "doc" in diff:
                 filtered["doc"] = diff["doc"]
+            if "name" in diff:
+                filtered["name"] = diff["name"]
             out[i + last_version + 1] = filtered
         out["pipeline"] = self.pipeline
         return 0, out
@@ -122,7 +126,7 @@ class State:
                         elif attribute_name == '__call__':
                             methods[attribute_name] = (
                                 signature, 
-                                (target_attribute.__doc__ or '')+'\n\n'+(target_attribute.__call__.__doc__ or '')
+                                (target_attribute.__call__.__doc__ or '')
                             )
                         else:
                             methods[attribute_name] = (signature, str(target_attribute.__doc__))
@@ -135,11 +139,12 @@ class State:
                 except Exception as e:
                     logger.error("Could not obtain handle for %s.%s: %s", target, attribute_name, e)
 
+        name = target.__name__ if '__name__' in dir(target) else None
         if isinstance(target, type):
             repr_ = str(type(target))
             doc = target.__doc__
         else:
-            doc = None
+            doc = target.__doc__
             repr_ = target.__repr__()
 
         if self._history_offset == 0:
@@ -148,6 +153,7 @@ class State:
             self.methods = methods
             self.repr = repr_
             self.doc = doc
+            self.name = name
             return self
         diff = {}
         cmp = {
@@ -155,6 +161,7 @@ class State:
             "methods": (self.methods, methods),
             "repr": (self.repr, repr_),
             "doc": (self.doc, doc),
+            "name": (self.name, name)
         }
         for k in cmp:
             x = self.calc_diff(*cmp[k])
@@ -162,12 +169,11 @@ class State:
                 diff[k] = x
 
         if diff:
-
             return self.update_from_diffs(0, {self._history_offset + len(self._history) + 1: diff})
         return self
 
     def update_from_diffs(self, last_version, diffs):
-        ks = ["attributes", "methods", "repr", "doc"]
+        ks = ["attributes", "methods", "repr", "doc", "name"]
         if last_version:
             self._history = []
             self._history_offset = last_version
@@ -369,7 +375,7 @@ class Telekinesis:
         if gets:
             self.__doc__ = '\n'.join([s or '' for s in self._state.methods.get(gets[-1][1]) or ['', '']])
         else:
-            self.__doc__ = ((self._state.doc and self._state.doc + "\n") or "") + '\n'.join([s or '' for s in self._state.methods.get('__call__') or ['', '']])
+            self.__doc__ = ((self._state.doc and (self._state.doc + "\n")) or "") + '\n'.join([s or '' for s in self._state.methods.get('__call__') or ['', '']])
 
 
 
