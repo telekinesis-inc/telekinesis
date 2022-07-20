@@ -138,8 +138,11 @@ class State:
 
                 except Exception as e:
                     logger.error("Could not obtain handle for %s.%s: %s", target, attribute_name, e)
+        try:
+            name = target.__name__
+        except:
+            name = None
 
-        name = target.__name__ if '__name__' in dir(target) else None
         if isinstance(target, type):
             repr_ = str(type(target))
             doc = target.__doc__
