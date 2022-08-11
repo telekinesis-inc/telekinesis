@@ -1,9 +1,8 @@
 {
   "name": "telekinesis-js",
-  "version": "0.1.48",
+  "version": "0.1.49",
   "description": "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
   "main": "./lib/index.js",
-  "browser": "./lib/browser.js",
   "typings": "./lib/index.d.ts",
   "scripts": {
     "prepare": "npm run build",
@@ -13,7 +12,8 @@
     "test": "jest"
   },
   "files": [
-    "lib"
+    "lib",
+    "src"
   ],
   "jest": {
     "testEnvironment": "<rootDir>/env.spec.js",

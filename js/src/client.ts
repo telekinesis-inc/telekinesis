@@ -1,11 +1,10 @@
 import { deserialize, serialize } from "bson";
 import { unzlibSync, zlibSync } from "fflate";
-import { type } from "os";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
 const {version} = require('../package.json');
-const webcrypto = global.crypto;
+const webcrypto = typeof crypto == 'undefined' ? require('crypto').webcrypto : (crypto as any).webcrypto;
 
 export type Header = ["send", any] | ["listen", any] | ["close", any]
 
@@ -38,7 +37,7 @@ export class Connection {
         this.websocket.close();
         this.websocket = undefined;
       }
-      const WS = global.WebSocket;
+      const WS = typeof crypto == 'undefined' ? require('ws') : WebSocket;
       this.websocket = new WS(this.url) as WebSocket;
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
