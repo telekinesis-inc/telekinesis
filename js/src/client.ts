@@ -4,7 +4,7 @@ import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
 const {version} = require('../package.json');
-const webcrypto = typeof crypto == 'undefined' ? require('crypto').webcrypto : (crypto as any).webcrypto;
+const webcrypto = typeof crypto == 'undefined' ? require('crypto').webcrypto : crypto;
 
 export type Header = ["send", any] | ["listen", any] | ["close", any]
 
