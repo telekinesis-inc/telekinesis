@@ -1,6 +1,3 @@
-global.crypto = require('crypto').webcrypto;
-global.WebSocket = require('ws');
-
 import { Channel, Connection, Route, Session } from './client';
 import { PrivateKey, PublicKey, SharedKey, Token } from './cryptography';
 import { authenticate, Entrypoint } from './helpers';
