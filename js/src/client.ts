@@ -1,9 +1,9 @@
 import { deserialize, serialize } from "bson";
-import { unzlibSync, zlibSync } from "fflate";
+import { deflate, inflate } from "pako";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
-const {version} = require('../package.json');
+const version = '0.1.53';
 const webcrypto = typeof crypto == 'undefined' ? global.crypto : crypto;
 const WS = typeof crypto == 'undefined' ? global.WebSocket : WebSocket;
 
@@ -483,7 +483,7 @@ export class Channel {
       if (payloadSer[0] === 0) {
         payload = deserialize(payloadSer.slice(1));
       } else {
-        const ff = unzlibSync(payloadSer.slice(1));
+        const ff = inflate(payloadSer.slice(1));
         payload = deserialize(ff);
       }
 
@@ -578,7 +578,7 @@ export class Channel {
       let payload = new Uint8Array(serialize(payloadObj));
 
       if (payload.length < this.MAX_COMPRESSION_LEN) {
-        const ff = zlibSync(payload, {});
+        const ff = deflate(payload);
 
         payload = new Uint8Array([255, ...ff]);
 
