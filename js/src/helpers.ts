@@ -19,8 +19,9 @@ export class Entrypoint {
     const session = new Session(sessionKey);
     const connection = new Connection(session, url);
 
-    return new Telekinesis(new Promise((r: any) => connection.connect().then(() => r(connection.entrypoint))), session, ...args)
+    return new Telekinesis(new Promise((r: any) => connection.connect().then(() => r(connection.entrypoint))), session, ...args) as any
   }
+  get() {}
 }
 
 export async function createEntrypoint(target: Object, url: string = 'ws://localhost:8776', sessionKey: string, 

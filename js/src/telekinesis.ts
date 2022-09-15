@@ -325,6 +325,7 @@ export class Telekinesis extends Function {
   _catchFn?: any;
   _isTelekinesisObject: boolean;
   _proxy: any;
+  _prevTarget?: any;
 
   constructor(
     target: Route | Object, session: Session, mask?: string[] | Set<string>, exposeTb: boolean = true,
@@ -359,7 +360,7 @@ export class Telekinesis extends Function {
           return (async (r: any, re: any) => {
             target._execute()
               .catch(e => {if (target._catchFn) {target._catchFn(e)} else {re(e)}; target._catchFn = undefined})
-              .then(t => {r(t); target._catchFn = undefined});
+              .then((t: any) => {r(t[0]); target._catchFn = undefined});
           })
         } else if (prop === 'catch') {
           return (fn: any) => {target._catchFn = fn; return target._proxy}
@@ -516,7 +517,7 @@ export class Telekinesis extends Function {
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
-        let ret = await this._execute(metadata, pipeline, true);
+        let [ret, prevTarget] = await this._execute(metadata, pipeline, true);
 
         if (ret instanceof Telekinesis && ret._target instanceof Route && (
           ret._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
@@ -532,7 +533,7 @@ export class Telekinesis extends Function {
             const newChannel = new Channel(this._session)
             try {
               await newChannel.send(replyTo, {
-                return: await this._encode(ret, replyTo.session, newChannel),
+                return: await this._encode(ret, replyTo.session, newChannel, prevTarget),
                 root_parent: (payload as any).root_parent,
               })
             } catch (_) {
@@ -546,7 +547,7 @@ export class Telekinesis extends Function {
             // console.log(this._decode(parent))
             // console.log('about to send')
             await channel.send(metadata.caller, {
-              return: await this._encode(ret, metadata.caller.session),
+              return: await this._encode(ret, metadata.caller.session, undefined, prevTarget),
               root_parent: ret === this || ret === this._target && ret === this._proxy ?
                 null : parent
             }).catch(_ => null)
@@ -613,16 +614,16 @@ export class Telekinesis extends Function {
     this._state.pipeline = [];
 
     if (this._target instanceof Route) {
-      return await this._forward(pipeline);
+      return [await this._forward(pipeline), undefined];
     }
     function exc(x: any) {
       if (x?._blockThen !== undefined && x?._lastUpdate && x?._state?.pipeline?.length) {
-        return new Promise(r => x._execute(metadata).then(r));
+        return new Promise(r => x._execute(metadata).then((x: any) => r(x[0])));
       }
       return x;
     }
     let target: any = this._target;
-    let prevTarget = target;
+    let prevTarget = this._prevTarget || target;
     let touched: Set<Telekinesis> = this._session.targets.get(this._target) || new Set();
 
     for (let step in pipeline) {
@@ -649,7 +650,7 @@ export class Telekinesis extends Function {
             if (x[0] === '_' || this._mask.has(x)) {
               throw new PermissionError("Private attributes and methods (those starting with _) cannot be accessed remotely");
             }
-            return (prevTarget as any)[x];
+            return [(prevTarget as any)[x], prevTarget];
           }
         } else {
           target = (target as any)[arg];
@@ -692,7 +693,7 @@ export class Telekinesis extends Function {
           target = await target;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
-          target = await target._execute();
+          target = (await target._execute())[0];
         }
       } else if (action === 'subscribe') {
         const cb = pipeline[step][1] as Telekinesis;
@@ -727,15 +728,15 @@ export class Telekinesis extends Function {
     if (target === this._target && (this._target === undefined || this._target === null)) {
       this._lastUpdate = Date.now();
       this._blockThen = true;
-      return this._proxy;
+      return [this._proxy, prevTarget];
     }
     if (target instanceof Telekinesis && !target._blockThen) {
       target._blockThen = true;
     } 
-    return target;
+    return [target, prevTarget];
   }
   _timeout(seconds: number) {
-    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then(res) })
+    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then((x: any) => res(x[0])) })
   }
   async _sendRequest(channel: Channel, request: {}) {
     try {
@@ -817,7 +818,7 @@ export class Telekinesis extends Function {
       await newChannel.close()
     }
   }
-  async _encode(target: any, receiver?: [string, string], channel?: Channel, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
+  async _encode(target: any, receiver?: [string, string], channel?: Channel, prevTarget?: any, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
 
     let id = 0;
 
@@ -854,15 +855,15 @@ export class Telekinesis extends Function {
       let children: string[] = [];
       let arr = target instanceof Array ? target : Array.from(target.values());
       for (let v in arr) {
-        children[v] = await this._encode(arr[v], receiver, channel, traversalStack, blockRecursion)
+        children[v] = await this._encode(arr[v], receiver, channel, undefined, traversalStack, blockRecursion)
       }
       out[1] = [Object.getPrototypeOf(target)?.constructor.name === 'Array' ? 'list' : 'set', children];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Object') {
       let children = [];
       for (let v in target) {
         children.push([
-          await this._encode(v, receiver, channel, traversalStack, blockRecursion),
-          await this._encode(target[v], receiver, channel, traversalStack, blockRecursion)
+          await this._encode(v, receiver, channel, undefined, traversalStack, blockRecursion),
+          await this._encode(target[v], receiver, channel, undefined, traversalStack, blockRecursion)
         ]);
       }
       out[1] = ['dict', children];
@@ -882,6 +883,9 @@ export class Telekinesis extends Function {
         if (receiver[1] !== null) {
           obj._clients?.delete([receiver[0], null].join());
         }
+        if (prevTarget) {
+          obj._prevTarget = prevTarget;
+        }
       }
 
       let route = await obj._delegate(receiver[0], channel || this._channel) as Route;
@@ -895,6 +899,7 @@ export class Telekinesis extends Function {
           stateDiff,
           receiver,
           channel,
+          undefined,
           traversalStack,
           true)
       ]];

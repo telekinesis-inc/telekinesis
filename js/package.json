@@ -10,7 +10,8 @@
     "start": "node lib/index.js",
     "prestart": "npm run build",
     "build": "tsc --build tsconfig.build.json",
-    "test": "jest"
+    "test": "jest",
+    "bundle": "npm run build && npx webpack build --config ./webpack.config.js"
   },
   "files": [
     "lib",
