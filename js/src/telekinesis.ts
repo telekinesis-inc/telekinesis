@@ -360,7 +360,7 @@ export class Telekinesis extends Function {
           return (async (r: any, re: any) => {
             target._execute()
               .catch(e => {if (target._catchFn) {target._catchFn(e)} else {re(e)}; target._catchFn = undefined})
-              .then((t: any) => {r(t[0]); target._catchFn = undefined});
+              .then((t: any) => {r(t && t[0]); target._catchFn = undefined});
           })
         } else if (prop === 'catch') {
           return (fn: any) => {target._catchFn = fn; return target._proxy}
