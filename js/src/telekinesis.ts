@@ -358,7 +358,7 @@ export class Telekinesis extends Function {
             return new Promise(r => r(target));
           }
           return (async (r: any, re: any) => {
-            target._execute()
+            target.__execute()
               .catch(e => {if (target._catchFn) {target._catchFn(e)} else {re(e)}; target._catchFn = undefined})
               .then((t: any) => {r(t && t[0]); target._catchFn = undefined});
           })
@@ -517,7 +517,7 @@ export class Telekinesis extends Function {
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
-        let [ret, prevTarget] = await this._execute(metadata, pipeline, true);
+        let [ret, prevTarget] = await this.__execute(metadata, pipeline, true);
 
         if (ret instanceof Telekinesis && ret._target instanceof Route && (
           ret._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
@@ -592,7 +592,10 @@ export class Telekinesis extends Function {
     out._state.pipeline = state.pipeline;
     return out;
   }
-  async _execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][], breakOnTelekinesis: boolean = false) {
+  async _execute() {
+    return (await (this.__execute() as any))[0];
+  }
+  async __execute(metadata?: RequestMetadata, pipeline?: [string, Telekinesis | string | [string[], {}]][], breakOnTelekinesis: boolean = false) {
     if (this._target instanceof Promise) {
       this._target = await this._target;
       if (this._target instanceof Route) {
@@ -693,7 +696,7 @@ export class Telekinesis extends Function {
           target = await target;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
-          target = (await target._execute())[0];
+          target = (await target.__execute())[0];
         }
       } else if (action === 'subscribe') {
         const cb = pipeline[step][1] as Telekinesis;
@@ -736,7 +739,7 @@ export class Telekinesis extends Function {
     return [target, prevTarget];
   }
   _timeout(seconds: number) {
-    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this._execute().then((x: any) => res(x[0])) })
+    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this.__execute().then((x: any) => res(x[0])) })
   }
   async _sendRequest(channel: Channel, request: {}) {
     try {
