@@ -52,7 +52,7 @@ beforeAll(() => new Promise((resolve, _) => {
   subprocess.stderr.on('data', (data: any) => {
     // console.warn(`${data}`);
   });
-  setTimeout(() => resolve(true), 1000)
+  setTimeout(() => resolve(true), 100)
   // resolve(true);
 }))
 afterAll(() => {
@@ -80,12 +80,18 @@ describe("Telekinesis", () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');
     expect(await echo('hello!')).toEqual('hello!');
   });
-  it("throws errors", async () => {
+  it("throws errors (as client)", async () => {
     
     const counterPython = await (new Entrypoint(HOST) as any).get('counter_python') as any;
     let ee;
     await counterPython.increment('x').catch((e: any) => {ee = e})
     expect(ee).toContain('TypeError')
+  });
+  it('throws errors (in callback)', async () => {
+    const callAll = await (new Entrypoint(HOST) as any).get('call_all');
+    let ee;
+    await callAll([() => {throw Error('custom_error: Testing if error throwing works well')}]).catch((e: any) => {ee = e})._timeout(3)
+    expect(ee).toContain('custom_error')
   });
   it('handles large messages', async () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');

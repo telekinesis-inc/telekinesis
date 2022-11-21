@@ -357,13 +357,28 @@ export class Telekinesis extends Function {
           if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
             return new Promise(r => r(target));
           }
-          return (async (r: any, re: any) => {
+          return (r: any) => {
             target.__execute()
-              .catch(e => {if (target._catchFn) {target._catchFn(e)} else {re(e)}; target._catchFn = undefined})
-              .then((t: any) => {r(t && t[0]); target._catchFn = undefined});
-          })
+              .catch(e => {
+                // console.log('catch'); 
+                if (target._catchFn) {
+                  target._catchFn(e);
+                  target._catchFn = undefined;
+                } else {
+                  // console.log('here')
+                  throw e;
+                }
+              }).then((t: any) => {
+                // console.log('then', r, t); 
+                r && r(t && t[0]); 
+                target._catchFn = undefined
+              });
+          }
         } else if (prop === 'catch') {
-          return (fn: any) => {target._catchFn = fn; return target._proxy}
+          // console.log('get catch')
+          return (fn: any) => {
+            // console.log('catchFn', fn); 
+            target._catchFn = fn; return target._proxy}
         }
 
         let state = target._state.clone();
@@ -556,11 +571,16 @@ export class Telekinesis extends Function {
         }
       }
     } catch (e) {
-      console.error(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${(e as Error).message}` +
+      console.log(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${(e as Error).message}` +
         this._exposeTb ? '\n' + (e as Error).stack : '')
       this._state.pipeline = [];
       try {
-        const errMessage = { error: (this._exposeTb ? (e as Error).stack : (e as Error).name), error_type: (e as Error).name};
+        let errMessage;
+        if (e instanceof Error) {
+          errMessage = { error: e.name + ' '+ e.message + '\n' + (this._exposeTb ? e.stack : ''), error_type: e.name + ' ' + e.message};
+        } else {
+          errMessage = { error: e + '', error_type: 'Error'}
+        }
         if (replyTo !== undefined) {
           const newChannel = new Channel(this._session)
           try {
@@ -739,7 +759,10 @@ export class Telekinesis extends Function {
     return [target, prevTarget];
   }
   _timeout(seconds: number) {
-    return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this.__execute().then((x: any) => res(x[0])) })
+    return Promise.race([
+      new Promise((r: any) => setTimeout(() => {this._catchFn && this._catchFn('Timeout'); r()}, seconds * 1000)), 
+      this.__execute().catch(this._catchFn)])
+    // return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this.__execute().then((x: any) => res(x[0])).catch(rej) })
   }
   async _sendRequest(channel: Channel, request: {}) {
     try {
@@ -1047,7 +1070,6 @@ export function blockArgEvaluation(func: any) {
   func._tk_block_arg_evaluation = true;
   return func;
 }
-
 class PermissionError extends Error {
   constructor(message: any) {
     super(message); // (1)

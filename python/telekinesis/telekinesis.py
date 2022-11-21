@@ -779,7 +779,7 @@ class Telekinesis:
 
     def __setattr__(self, attribute, value):
         if attribute[0] != "_":
-            raise PermissionError("Attributes for Telekinesis objects cannot be set directy")
+            raise PermissionError("Attributes for Telekinesis objects cannot be set directly")
         super().__setattr__(attribute, value)
 
     def __getitem__(self, key):
