@@ -3,9 +3,10 @@ import { deflate, inflate } from "pako";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
+const isNode = (global as any)?.isNode == true;
 const version = '0.1.53';
-const webcrypto = typeof crypto == 'undefined' ? global.crypto : crypto;
-const WS = typeof crypto == 'undefined' ? global.WebSocket : WebSocket;
+const webcrypto = isNode ? global.crypto : crypto;
+const WS = isNode ? global.WebSocket : WebSocket;
 
 export type Header = ["send", any] | ["listen", any] | ["close", any]
 
@@ -55,7 +56,7 @@ export class Connection {
       );
 
       this.websocket.onmessage = async (m: MessageEvent) => {
-        let a = typeof URL.createObjectURL === 'undefined' || typeof fetch === 'undefined' ?
+        let a = isNode?
           m.data :
           await fetch(URL.createObjectURL(m.data)).then(r => r.arrayBuffer());
 
@@ -123,7 +124,7 @@ export class Connection {
   }
   async recv(messageObj: MessageEvent) {
 
-    let a = typeof URL.createObjectURL === 'undefined' || typeof fetch === 'undefined' ?
+    let a = isNode ?
       messageObj.data :
       await fetch(URL.createObjectURL(messageObj.data)).then(r => r.arrayBuffer());
 
