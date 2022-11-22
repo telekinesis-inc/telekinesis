@@ -454,7 +454,7 @@ export class Telekinesis extends Function {
       route = this._target.clone();
       maxDelegationDepth = undefined;
       if (receiver === '*') {
-        throw "Cannot delegate remote Route to public '*'";
+        throw Error("Cannot delegate remote Route to public '*'");
       }
     } else {
       if (this._channel === undefined || (this._channel?.isPublic && receiver === '*')) {
@@ -781,7 +781,7 @@ export class Telekinesis extends Function {
       }
       // console.log(response)
       if (Object.getOwnPropertyNames(response).includes('error')) {
-        throw (response as any).error;
+        throw Error((response as any).error);
       } else if (Object.getOwnPropertyNames(response).includes('return')) {
         let out = this._decode((response as any)['return'], (this._target as Route).session[0])
         if (out?._isTelekinesisObject === true) {
