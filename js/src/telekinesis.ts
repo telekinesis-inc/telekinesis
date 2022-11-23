@@ -761,7 +761,7 @@ export class Telekinesis extends Function {
   _timeout(seconds: number) {
     return Promise.race([
       new Promise((r: any) => setTimeout(() => {this._catchFn && this._catchFn('Timeout'); r()}, seconds * 1000)), 
-      this.__execute().catch(this._catchFn)])
+      this._execute().catch(this._catchFn)])
     // return new Promise((res: any, rej: any) => { setTimeout(() => rej('Timeout'), seconds * 1000); this.__execute().then((x: any) => res(x[0])).catch(rej) })
   }
   async _sendRequest(channel: Channel, request: {}) {
