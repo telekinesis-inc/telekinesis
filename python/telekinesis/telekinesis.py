@@ -825,6 +825,7 @@ class Telekinesis:
         if receiver is None:
             receiver = (self._session.session_key.public_serial(), self._session.instance_id)
 
+
         if type(target) in (str, bytes, bool, type(None)):
             tup = (type(target).__name__, target)
         elif isinstance(target, float):
@@ -833,6 +834,8 @@ class Telekinesis:
             tup = ('int', int(target))
         elif type(target) in (range, slice):
             tup = (type(target).__name__, (target.start, target.stop, target.step))
+        elif type(target) in (list, dict) and is_bson_encodable(target):
+            tup = ('raw_'+type(target).__name__, target)
         elif type(target) in (list, tuple, set):
             tup = (
                 type(target).__name__,
@@ -903,7 +906,7 @@ class Telekinesis:
             return output_stack[root]
 
         typ, obj = input_stack[root]
-        if typ in ("int", "float", "str", "bytes", "bool", "NoneType"):
+        if typ in ("int", "float", "str", "bytes", "bool", "NoneType", "raw_list", "raw_dict"):
             out = obj
         elif typ in ("range", "slice"):
             out = {"range": range, "slice": slice}[typ](*obj)
@@ -1057,3 +1060,14 @@ def inject_first_arg(func):
 def block_arg_evaluation(func):
     func._tk_block_arg_evaluation = True
     return func
+
+def is_bson_encodable(target, depth=0):
+    if depth > 300:
+        return False
+    elif type(target) in (str, bytes, bool, type(None), float, int):
+        return True
+    elif type(target) == list:
+        return all(is_bson_encodable(x, depth+1) for x in target)
+    elif type(target) == dict:
+        return all(is_bson_encodable(x, depth+1) and is_bson_encodable(k, depth+1) for k, x in target.items())
+    return False

@@ -873,6 +873,10 @@ export class Telekinesis extends Function {
       } as any)[typeof target] as string, target]
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Uint8Array') {
       out[1] = ['bytes', target];
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Array' && isBsonEncodable(target)) {
+      out[1] = ['raw_list', target];
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Object' && isBsonEncodable(target)) {
+      out[1] = ['raw_dict', target];
     } else if (
       typeof target !== 'undefined' && (
         Object.getPrototypeOf(target)?.constructor.name === 'Array' || 
@@ -961,7 +965,7 @@ export class Telekinesis extends Function {
       let typ = (inputStack as any)[root][0] as string;
       let obj = (inputStack as any)[root][1] as any;
 
-      if (['int', 'float', 'str', 'bool', 'NoneType'].includes(typ)) {
+      if (['int', 'float', 'str', 'bool', 'NoneType', 'raw_list', 'raw_dict'].includes(typ)) {
         // console.log(obj)
         out = obj;
       } else if (typ === 'bytes') {
@@ -1076,3 +1080,18 @@ class PermissionError extends Error {
     this.name = "PermissionError"; // (2)
   }
 }
+
+function isBsonEncodable(target: any, depth: number = 0): boolean {
+  if (depth >= 300) {
+    return false;
+  } else if (['number', 'boolean', 'string'].includes(typeof target) || target === null || target === undefined ||
+  (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Uint8Array')) { 
+    return true 
+  } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Array') {
+    return target.reduce((p: boolean, v: any) => p && isBsonEncodable(v, depth+1), true)
+  } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Object') {
+    return Array.from(Object.values(target)).reduce((p: boolean, v: any) => p && isBsonEncodable(v, depth+1), true)
+  } else {
+    return false
+  }
+} 

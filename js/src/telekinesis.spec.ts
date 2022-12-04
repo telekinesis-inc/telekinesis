@@ -83,15 +83,15 @@ describe("Telekinesis", () => {
   it("throws errors (as client)", async () => {
     
     const counterPython = await (new Entrypoint(HOST) as any).get('counter_python') as any;
-    let ee;
+    let ee = new Error();
     await counterPython.increment('x').catch((e: any) => {ee = e})
-    expect(ee).toContain('TypeError')
+    expect(ee.message).toContain('TypeError')
   });
   it('throws errors (in callback)', async () => {
     const callAll = await (new Entrypoint(HOST) as any).get('call_all');
-    let ee;
+    let ee = new Error();
     await callAll([() => {throw Error('custom_error: Testing if error throwing works well')}]).catch((e: any) => {ee = e})._timeout(3)
-    expect(ee).toContain('custom_error')
+    expect(ee.message).toContain('custom_error')
   });
   it('handles large messages', async () => {
     const echo = await (new Entrypoint(HOST) as any).get('echo');

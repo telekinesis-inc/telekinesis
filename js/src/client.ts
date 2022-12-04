@@ -4,7 +4,7 @@ import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
 
 const isNode = (global as any)?.isNode == true;
-const version = '0.1.58';
+const version = '0.1.59';
 const webcrypto = isNode ? global.crypto : crypto;
 const WS = isNode ? global.WebSocket : WebSocket;
 
