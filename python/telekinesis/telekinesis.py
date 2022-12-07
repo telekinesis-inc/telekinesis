@@ -1069,5 +1069,5 @@ def is_bson_encodable(target, depth=0):
     elif type(target) == list:
         return all(is_bson_encodable(x, depth+1) for x in target)
     elif type(target) == dict:
-        return all(is_bson_encodable(x, depth+1) and is_bson_encodable(k, depth+1) for k, x in target.items())
+        return all(isinstance(k, str) and is_bson_encodable(x, depth+1) for k, x in target.items())
     return False
