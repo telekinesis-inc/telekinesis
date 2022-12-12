@@ -357,7 +357,7 @@ export class Telekinesis extends Function {
           if (target._blockThen && (Date.now() - target._lastUpdate) < 300) {
             return new Promise(r => r(target));
           }
-          return (r: any) => {
+          return (r: any, re: any) => {
             target.__execute()
               .catch(e => {
                 // console.log('catch'); 
@@ -365,8 +365,9 @@ export class Telekinesis extends Function {
                   target._catchFn(e);
                   target._catchFn = undefined;
                 } else {
-                  // console.log('here')
-                  throw e;
+                  // console.info('here')
+                  // throw e;
+                  re(e);
                 }
               }).then((t: any) => {
                 // console.log('then', r, t); 
