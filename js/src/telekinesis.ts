@@ -528,12 +528,15 @@ export class Telekinesis extends Function {
       } else if ((payload as any)['ping'] !== undefined) {
         await channel.send(metadata.caller, { repr: this._state.repr })
       } else if ((payload as any)['pipeline'] !== undefined) {
+        let requestObj = {metadata, payload, replyTo: replyTo as any}
+        this._requests.set(channel, requestObj)
         if ((payload as any)['reply_to']) {
           replyTo = Route.fromObject((payload as any)['reply_to'])
           await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
           metadata.replyTo = replyTo;
+          requestObj.replyTo = replyTo;
+
         }
-        this._requests.set(channel, {metadata, payload, replyTo})
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 

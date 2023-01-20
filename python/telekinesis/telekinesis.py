@@ -301,6 +301,7 @@ class Telekinesis:
         self._parent = parent
         self._channel = None
         self._clients = {}
+        self._requests = {}
         self._on_update_callback = None
         self._subscription = None
         self._subscribers = set()
@@ -466,23 +467,49 @@ class Telekinesis:
             elif "ping" in payload:
                 await channel.channel.send(metadata.caller, {"pong": True})
             elif "pipeline" in payload:
+                self._requests[channel] = {'metadata': metadata, 'payload': payload}
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
                 self._logger.info("%s %s called %s %s", metadata.caller.session[0][:4], metadata.caller.session[1][:2], self, len(pipeline))
+                # print('...', self._requests.keys())
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
                     metadata.reply_to = reply_to
-
+                self._requests[channel]['reply_to'] = reply_to
                 ret = await self._execute(metadata, pipeline, True)
+                await self._respond_request(channel, ret, False)
 
+        except (Exception, KeyboardInterrupt) as e:
+            if not isinstance(e, StopAsyncIteration):
+                if pipeline is None:
+                    self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
+                else:
+                    self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
+
+            self._state.pipeline.clear()
+            err_message = {
+                "error": traceback.format_exc() if self._expose_tb else "", 
+                "error_type": type(e).__name__
+            }
+            await self._respond_request(channel, err_message, True)
+
+    async def _respond_request(self, channel, return_object, error):
+        # print('here')
+        if channel in self._requests:
+            # print('here 1')
+            reply_to = self._requests[channel].get('reply_to')
+            metadata = self._requests[channel]['metadata']
+            payload = self._requests[channel]['payload']
+            self._requests.pop(channel)
+            if not error:
                 if (
-                    isinstance(ret, Telekinesis)
-                    and isinstance(ret._target, Route)
-                    and ret._state.pipeline
-                    and ret._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
+                    isinstance(return_object, Telekinesis)
+                    and isinstance(return_object._target, Route)
+                    and return_object._state.pipeline
+                    and return_object._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
                 ):
-                    await ret._forward(
-                        ret._state.pipeline,
+                    await return_object._forward(
+                        return_object._state.pipeline,
                         reply_to or metadata.caller,
                         root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session),
                     )
@@ -493,7 +520,7 @@ class Telekinesis:
                                 await new_channel.send(
                                     reply_to,
                                     {
-                                        "return": self._encode(ret, reply_to.session, new_channel),
+                                        "return": self._encode(return_object, reply_to.session, new_channel),
                                         "root_parent": payload.get("root_parent"),
                                     },
                                 )
@@ -501,35 +528,23 @@ class Telekinesis:
                             await channel.send(
                                 metadata.caller,
                                 {
-                                    "return": self._encode(ret, metadata.caller.session),
-                                    "root_parent": None if ret is self else self._encode(self, metadata.caller.session, channel),
+                                    "return": self._encode(return_object, metadata.caller.session),
+                                    "root_parent": None if return_object is self else self._encode(self, metadata.caller.session, channel),
                                 },
                             )
                     except ConnectionError:
                         pass
-
-        except (Exception, KeyboardInterrupt) as e:
-            if not isinstance(e, StopAsyncIteration):
-                if pipeline is None:
-                    self._logger.error("Telekinesis request error with payload %s", payload, exc_info=True)
-                else:
-                    self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
-
-            self._state.pipeline.clear()
-            try:
-                err_message = {
-                    "error": traceback.format_exc() if self._expose_tb else "", 
-                    "error_type": type(e).__name__
-                }
-                if reply_to:
-                    async with Channel(self._session) as new_channel:
-                        await new_channel.send(reply_to, err_message)
-                else:
-                    await channel.send(metadata.caller, err_message)
-            except Exception as e:
-                pass
-            finally:
-                pass
+            else:
+                try:
+                    if reply_to:
+                        async with Channel(self._session) as new_channel:
+                            await new_channel.send(reply_to, return_object)
+                    else:
+                        await channel.send(metadata.caller, return_object)
+                except Exception as e:
+                    print(e)
+                finally:
+                    pass
 
     async def _execute(self, metadata=None, pipeline=None, break_on_telekinesis=False):
         if asyncio.iscoroutine(self._target):

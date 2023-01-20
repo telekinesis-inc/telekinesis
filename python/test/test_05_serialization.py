@@ -61,7 +61,7 @@ async def test_serialize():
 
     olddata = serializer._data
     with pytest.raises(Exception):
-        await ser.serialize(Telekinesis(prt._target, ser._session)("I'm shouldn't have permissions"))
+        await ser.serialize(Telekinesis(prt._target, ser._session)("I shouldn't have permissions"))
     
     assert serializer._data == olddata
     
