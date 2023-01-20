@@ -548,7 +548,16 @@ export class Telekinesis extends Function {
       console.log(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${(e as Error).message}` +
         this._exposeTb ? '\n' + (e as Error).stack : '')
       this._state.pipeline = [];
-      await this._respondRequest(channel, e, undefined, true);
+      let errorMessage;
+      if (e instanceof Error) {
+        errorMessage = { 
+          error: e.name + ' '+ e.message + '\n' + (this._exposeTb ? e.stack : ''), 
+          error_type: e.name + ' ' + e.message
+        };
+      } else {
+        errorMessage = { error: e + '', error_type: 'Error'}
+      }
+      await this._respondRequest(channel, errorMessage, undefined, true);
     }
   } 
   async _respondRequest(channel: Channel, returnObject: any, prevTarget?: any, error=false) {
@@ -593,26 +602,17 @@ export class Telekinesis extends Function {
         }
       } else {
         try {
-          let errMessage;
-          if (returnObject instanceof Error) {
-            errMessage = { 
-              error: returnObject.name + ' '+ returnObject.message + '\n' + (this._exposeTb ? returnObject.stack : ''), 
-              error_type: returnObject.name + ' ' + returnObject.message
-            };
-          } else {
-            errMessage = { error: returnObject + '', error_type: 'Error'}
-          }
           if (replyTo !== undefined) {
             const newChannel = new Channel(this._session)
             try {
-              await newChannel.send(replyTo, errMessage);
+              await newChannel.send(replyTo, returnObject);
             } catch (e) {
               null
             } finally {
               await newChannel.close();
             }
           } else {
-            await channel.send(metadata.caller, errMessage)//.catch(_ => null);
+            await channel.send(metadata.caller, returnObject)//.catch(_ => null);
           }
         } catch (e) {
           null;
