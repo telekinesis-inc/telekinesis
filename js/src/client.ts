@@ -262,7 +262,7 @@ export class Session {
   instanceId: string;
   channels: Map<string, Channel>;
   connections: Connection[];
-  seenMessages: [Set<Uint8Array>, Set<Uint8Array>, number];
+  seenMessages: [Set<string>, Set<string>, number];
   issuedTokens: Map<string, [Token, Token?]>;
   targets: Map<any, Set<any>>;
   routes: Map<string, any>;
@@ -284,6 +284,7 @@ export class Session {
   checkNoRepeat(signature: Uint8Array, timestamp: number) {
     let now = Date.now() / 1000;
     let lead = Math.floor(now / 60);
+    let encodedSignature = b64encode(signature);
 
     if (this.seenMessages[2] != lead) {
       this.seenMessages[lead % 2] = new Set();
@@ -291,8 +292,8 @@ export class Session {
     }
 
     if (((now - 60 + 4) <= timestamp) && (timestamp < (now + 4))) {
-      if (!this.seenMessages[0].has(signature) && !this.seenMessages[1].has(signature)) {
-        (this.seenMessages[lead % 2] as Set<Uint8Array>).add(signature)
+      if (!this.seenMessages[0].has(encodedSignature) && !this.seenMessages[1].has(encodedSignature)) {
+        (this.seenMessages[lead % 2] as Set<string>).add(encodedSignature)
         return true
       }
     }
