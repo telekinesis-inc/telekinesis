@@ -236,17 +236,18 @@ export class Connection {
     })
   }
   ack(sourceId: string, messageId: string) {
-    const [headers, resolve] = this.awaitingAck.get(messageId);
-    // console.log(sourceId, messageId, headers)
-    if (headers !== undefined) {
-      for (let [action, content] of headers) {
-        if (action === 'send' && content.destination.session[0] === sourceId) {
-          this.awaitingAck.delete(messageId);
-          resolve(undefined);
+    if (this.awaitingAck.has(messageId)) {
+      const [headers, resolve] = this.awaitingAck.get(messageId);
+      // console.log(sourceId, messageId, headers)
+      if (headers !== undefined) {
+        for (let [action, content] of headers) {
+          if (action === 'send' && content.destination.session[0] === sourceId) {
+            this.awaitingAck.delete(messageId);
+            resolve(undefined);
+          }
         }
       }
     }
-
   }
   clear(bundleId: Uint8Array) { }
   close() {
