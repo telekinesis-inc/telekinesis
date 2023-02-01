@@ -313,7 +313,7 @@ export class Telekinesis extends Function {
   _parent?: Telekinesis;
 
   _state: State;
-  _requests: Map<Channel, any>;
+  _requests: Map<Route, any>;
 
   _channel?: Channel;
   _clients?: Map<string, any>;
@@ -528,21 +528,19 @@ export class Telekinesis extends Function {
       } else if ((payload as any)['ping'] !== undefined) {
         await channel.send(metadata.caller, { repr: this._state.repr })
       } else if ((payload as any)['pipeline'] !== undefined) {
-        let requestObj = {metadata, payload, replyTo: replyTo as any}
-        this._requests.set(channel, requestObj)
+        let requestObj = {metadata, payload, channel};
+        this._requests.set(metadata.caller, requestObj)
         if ((payload as any)['reply_to']) {
           replyTo = Route.fromObject((payload as any)['reply_to'])
           await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
           metadata.replyTo = replyTo;
-          requestObj.replyTo = replyTo;
-
         }
         pipeline = this._decode((payload as any)['pipeline']) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
         // console.log('>>>', this._state.repr)
         let [ret, prevTarget] = await this.__execute(metadata, pipeline, true);
-        await this._respondRequest(channel, ret, prevTarget, false)
+        await this._respondRequest(metadata.caller, ret, prevTarget, false)
       }
     } catch (e) {
       console.log(`Telekinesis request error with payload ${JSON.stringify(payload, undefined, 2)}, ${(e as Error).message}` +
@@ -557,13 +555,14 @@ export class Telekinesis extends Function {
       } else {
         errorMessage = { error: e + '', error_type: 'Error'}
       }
-      await this._respondRequest(channel, errorMessage, undefined, true);
+      await this._respondRequest(metadata.caller, errorMessage, undefined, true);
     }
   } 
-  async _respondRequest(channel: Channel, returnObject: any, prevTarget?: any, error=false) {
-    if (this._requests.has(channel)) {
-      let {metadata, payload, replyTo} = this._requests.get(channel);
-      this._requests.delete(channel);
+  async _respondRequest(caller: Route, returnObject: any, prevTarget?: any, error=false) {
+    if (this._requests.has(caller)) {
+      let {metadata, payload, channel} = this._requests.get(caller);
+      let replyTo = metadata.replyTo;
+      this._requests.delete(metadata.caller);
       if (!error) {
         if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && (
           returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
@@ -596,7 +595,7 @@ export class Telekinesis extends Function {
               return: await this._encode(returnObject, metadata.caller.session, undefined, prevTarget),
               root_parent: returnObject === this || returnObject === this._target && returnObject === this._proxy ?
                 null : parent
-            }).catch(_ => null)
+            }).catch((_: any) => null)
             // console.log('done sending');
           }
         }

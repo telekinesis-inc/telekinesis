@@ -662,6 +662,9 @@ class Route:
     def __eq__(self, route):
         return self.to_dict() == route.to_dict()
 
+    def __hash__(self):
+        return ujson.dumps(self.to_dict()).__hash__()
+
     def __await__(self):
         async def await_parent_channel():
             await self._parent_channel

@@ -467,7 +467,7 @@ class Telekinesis:
             elif "ping" in payload:
                 await channel.channel.send(metadata.caller, {"pong": True})
             elif "pipeline" in payload:
-                self._requests[channel] = {'metadata': metadata, 'payload': payload}
+                self._requests[metadata.caller] = {'metadata': metadata, 'payload': payload, 'channel': channel}
                 pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
                 self._logger.info("%s %s called %s %s", metadata.caller.session[0][:4], metadata.caller.session[1][:2], self, len(pipeline))
                 # print('...', self._requests.keys())
@@ -475,9 +475,8 @@ class Telekinesis:
                     reply_to = Route(**payload["reply_to"])
                     reply_to.validate_token_chain(self._session.session_key.public_serial())
                     metadata.reply_to = reply_to
-                self._requests[channel]['reply_to'] = reply_to
                 ret = await self._execute(metadata, pipeline, True)
-                await self._respond_request(channel, ret, False)
+                await self._respond_request(metadata.caller, ret, False)
 
         except (Exception, KeyboardInterrupt) as e:
             if not isinstance(e, StopAsyncIteration):
@@ -491,16 +490,17 @@ class Telekinesis:
                 "error": traceback.format_exc() if self._expose_tb else "", 
                 "error_type": type(e).__name__
             }
-            await self._respond_request(channel, err_message, True)
+            await self._respond_request(metadata.caller, err_message, True)
 
-    async def _respond_request(self, channel, return_object, error):
+    async def _respond_request(self, caller, return_object, error):
         # print('here')
-        if channel in self._requests:
+        if caller in self._requests:
             # print('here 1')
-            reply_to = self._requests[channel].get('reply_to')
-            metadata = self._requests[channel]['metadata']
-            payload = self._requests[channel]['payload']
-            self._requests.pop(channel)
+            metadata = self._requests[caller]['metadata']
+            payload = self._requests[caller]['payload']
+            channel = self._requests[caller]['channel']
+            reply_to = metadata.reply_to
+            self._requests.pop(caller)
             if not error:
                 if (
                     isinstance(return_object, Telekinesis)
