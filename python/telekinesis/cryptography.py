@@ -35,7 +35,7 @@ class PrivateKey:
             self._public_serial_cache = base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
         return self._public_serial_cache
 
-    def _private_serial(self, password=None):
+    def private_serial(self, password=None):
         enc = (
             serialization.NoEncryption()
             if password is None
@@ -46,7 +46,7 @@ class PrivateKey:
         )
     def save_key_file(self, key_file, password=None):
         with open(key_file, "wb") as kf:
-            kf.write(self._private_serial(password))
+            kf.write(self.private_serial(password))
 
     @staticmethod
     def from_private_serial(data, password=None):
@@ -57,7 +57,7 @@ class PrivateKey:
         return out
 
     def __getstate__(self):
-        return {'private_serial': self._private_serial()}
+        return {'private_serial': self.private_serial()}
 
     def __setstate__(self, state):
         self.key = PrivateKey.from_private_serial(state['private_serial']).key
