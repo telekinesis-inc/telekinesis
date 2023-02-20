@@ -892,7 +892,7 @@ export class Telekinesis extends Function {
         object: 'NoneType',
         undefined: 'NoneType',
       } as any)[typeof target] as string, target]
-    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Uint8Array') {
+    } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Uint8Array' || target instanceof Uint8Array) {
       out[1] = ['bytes', target];
     } else if (typeof target !== 'undefined' && Object.getPrototypeOf(target)?.constructor.name === 'Array' && isBsonEncodable(target)) {
       out[1] = ['raw_list', target];
