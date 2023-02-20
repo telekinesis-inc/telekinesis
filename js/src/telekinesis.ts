@@ -733,7 +733,7 @@ export class Telekinesis extends Function {
             throw (e)
           }
         }
-        if (target && Object.getPrototypeOf(target)?.constructor.name === 'Promise') {
+        if (target instanceof Promise || target && Object.getPrototypeOf(target)?.constructor.name === 'Promise') {
           target = await target;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
