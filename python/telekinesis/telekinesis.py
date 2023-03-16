@@ -586,6 +586,7 @@ class Telekinesis:
         touched = self._session.targets.get(id(target))
         break_var = False
         for i, (action, arg) in enumerate(pipeline):
+            check_pipeline = False
             if (
                 break_on_telekinesis
                 and isinstance(target, Telekinesis)
@@ -654,13 +655,15 @@ class Telekinesis:
                 ):
                     if metadata:
                         metadata.pipeline = pipeline[i+1:]
+                        check_pipeline = True
                     target = target(metadata, *args, **kwargs)
-                    if metadata and not metadata.pipeline:
-                        break_var = True
                 else:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):
                     target = await target
+
+                if check_pipeline and metadata and not metadata.pipeline:
+                    break_var = True
                 if (
                     isinstance(target, Telekinesis)
                     and isinstance(target._target, Route)

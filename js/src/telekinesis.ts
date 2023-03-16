@@ -739,11 +739,11 @@ export class Telekinesis extends Function {
             throw (e)
           }
         }
-        if (checkPipeline && metadata && (!metadata.pipeline || !metadata.pipeline.length)) {
-          breakVar = true;
-        }
         if (target instanceof Promise || target && Object.getPrototypeOf(target)?.constructor.name === 'Promise') {
           target = await target;
+        }
+        if (checkPipeline && metadata && (!metadata.pipeline || !metadata.pipeline.length)) {
+          breakVar = true;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
           target = (await target.__execute())[0];
