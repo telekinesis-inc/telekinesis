@@ -668,9 +668,11 @@ export class Telekinesis extends Function {
     }
     let target: any = this._target;
     let prevTarget = this._prevTarget || target;
+    let breakVar = false;
     let touched: Set<Telekinesis> = this._session.targets.get(this._target) || new Set();
 
     for (let step in pipeline) {
+      let checkPipeline = false;
       if (breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && (
         target._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
         !this._session.channels.has(target._target.channel)
@@ -721,6 +723,10 @@ export class Telekinesis extends Function {
         }
 
         if (target._tk_inject_first === true) {
+          if (metadata) {
+            metadata.pipeline = pipeline.slice(Number(step)+1)
+            checkPipeline = true;
+          }
           args = [metadata as RequestMetadata, ...args];
         }
 
@@ -732,6 +738,9 @@ export class Telekinesis extends Function {
           } catch (e2) {
             throw (e)
           }
+        }
+        if (checkPipeline && metadata && (!metadata.pipeline || !metadata.pipeline.length)) {
+          breakVar = true;
         }
         if (target instanceof Promise || target && Object.getPrototypeOf(target)?.constructor.name === 'Promise') {
           target = await target;
@@ -758,6 +767,9 @@ export class Telekinesis extends Function {
         }
       }
       touched = new Set([...touched, ...(this._session.targets.get(target) || [])])
+      if (breakVar) {
+        break;
+      }
     }
 
     for (const tk of touched) {

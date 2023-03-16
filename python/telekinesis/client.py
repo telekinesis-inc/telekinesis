@@ -680,3 +680,4 @@ class RequestMetadata:
         self.caller = caller
         self.raw_messages = raw_messages
         self.reply_to = None
+        self.pipeline = None

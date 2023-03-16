@@ -584,6 +584,7 @@ class Telekinesis:
         target = self._target
 
         touched = self._session.targets.get(id(target))
+        break_var = False
         for i, (action, arg) in enumerate(pipeline):
             if (
                 break_on_telekinesis
@@ -651,7 +652,11 @@ class Telekinesis:
                     "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg or
                     isinstance(target, type) and "_tk_inject_first_arg" in dir(target.__init__) and target.__init__._tk_inject_first_arg
                 ):
+                    if metadata:
+                        metadata.pipeline = pipeline[i+1:]
                     target = target(metadata, *args, **kwargs)
+                    if metadata and not metadata.pipeline:
+                        break_var = True
                 else:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):
@@ -682,6 +687,8 @@ class Telekinesis:
                     tk._clients[arg._target.session]["cache_attributes"] = True
                     tk._subscribers.add(arg)
             touched = touched.union((self._session.targets.get(id(target))) or set())
+            if break_var:
+                break
 
         for tk in touched:
             tk._state.update_from_target(tk._target)

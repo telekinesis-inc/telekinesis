@@ -775,6 +775,7 @@ export class RequestMetadata {
   caller: Route;
   rawMessages: {}[];
   replyTo?: Route;
+  pipeline?: [string, any | string | [any[], {}]][];
 
   constructor(session: Session, caller: Route, rawMessages: {}[]) {
     this._session = session;
