@@ -684,10 +684,10 @@ export class Channel {
       try {
         token = await Token.decode(tokens[depth]) as Token;
       } catch (e) {
-        if (e === 'Invalid Signature') { return false }
+        if ((e as Error).message === 'Invalid Signature') { return false }
         throw e;
       }
-      if ((token.asset === asset) && (token.issuer === lastReceiver)) {
+      if ((token.asset === asset) && (token.issuer === lastReceiver) && token.signature) {
         if (token.issuer === sessionId) {
           if (!this.session.issuedTokens.has(token.signature as string)) { return false }
         }

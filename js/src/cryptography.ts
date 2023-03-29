@@ -8,9 +8,11 @@ export class PrivateKey {
   repr?: string;
   key?: CryptoKeyPair;
   exportedKey?: string;
+  name?: string;
 
-  constructor(use: "sign" | "derive", importedKey?: string) {
+  constructor(use: "sign" | "derive", importedKey?: string, name?: string) {
     this.exportedKey = importedKey;
+    this.name = importedKey ? importedKey.split('-----END PRIVATE KEY-----').slice(1).join('-----END PRIVATE KEY-----').replace('\n', ''): name;
     if (use === 'sign') {
       this._algorithm = 'ECDSA';
       this._usage = ['sign'];
@@ -26,7 +28,7 @@ export class PrivateKey {
       let privateKey, jwk;
       privateKey = await webcrypto.subtle.importKey(
         "pkcs8",
-        b64decode(this.exportedKey.split('\n').slice(1,-1).join('')),
+        b64decode(this.exportedKey.split('-----END PRIVATE KEY-----')[0].split('\n').slice(1).join('')),
         {
           name: this._algorithm,
           namedCurve: "P-256"
@@ -74,6 +76,7 @@ export class PrivateKey {
       )
       return new Uint8Array(signatureBuf)
     }
+    throw new Error('key is undefined');
   }
   async publicSerial() {
     if (this.key === undefined) {
@@ -81,12 +84,13 @@ export class PrivateKey {
     }
     if (this.key !== undefined) {
       let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey as CryptoKey)).slice(1);
-      let out = b64encode(new Uint8Array(publicKey))
+      let out = (this.name ? `${this.name}.` : '') + b64encode(new Uint8Array(publicKey));
       if (this.repr === undefined) {
         this.repr = out;
       }
       return out;
     }
+    throw new Error('key is undefined')
   }
   async exportKey() {
     if (this.exportedKey == undefined) {
@@ -97,7 +101,9 @@ export class PrivateKey {
         this.exportedKey = 
           "-----BEGIN PRIVATE KEY-----\n" +
           b64encode(new Uint8Array(await webcrypto.subtle.exportKey("pkcs8", this.key.privateKey as CryptoKey))) +
-          "\n-----END PRIVATE KEY-----"
+          "\n-----END PRIVATE KEY-----" + (this.name? `\n${this.name}` : '')
+      } else {
+        throw new Error('key is undefined');
       }
     }
     return this.exportedKey;
@@ -108,9 +114,11 @@ export class PublicKey {
   _usage: ["verify"] | [];
   publicSerial: string;
   key?: CryptoKey;
+  name?: string;
 
   constructor(use: "verify" | "derive", publicSerial: string) {
     this.publicSerial = publicSerial
+    this.name = publicSerial.split('.').slice(0, -1).join('.')
     if (use === 'verify') {
       this._algorithm = 'ECDSA'
       this._usage = ['verify']
@@ -121,11 +129,11 @@ export class PublicKey {
       this._usage = []
       return
     }
-    throw "expected input 'use' should be 'verify' or 'derive'"
+    throw new Error("expected input 'use' should be 'verify' or 'derive'");
 
   }
   async generate() {
-    let decodedPublicSerial = b64decode(this.publicSerial)
+    let decodedPublicSerial = b64decode(this.publicSerial.split('\n').slice(-1)[0])
     this.key = await webcrypto.subtle.importKey(
       'raw',
       new Uint8Array([4, ...decodedPublicSerial]).buffer,
@@ -151,8 +159,9 @@ export class PublicKey {
         this.key,
         signature,
         message
-      )) { return; } else { throw 'Invalid Signature'; }
+      )) { return; } else { throw new Error('Invalid Signature'); }
     }
+    throw new Error('key is undefined');
   }
 }
 export class SharedKey {

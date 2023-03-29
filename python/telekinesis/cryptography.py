@@ -11,12 +11,15 @@ from cryptography.exceptions import InvalidSignature
 
 
 class PrivateKey:
-    def __init__(self, key_file=None, password=None):
+    def __init__(self, key_file=None, password=None, name=None):
         self._public_serial_cache = None
+        self.name = name
         if key_file and os.path.exists(key_file):
-            with open(key_file, "rb") as kf:
+            with open(key_file, "r") as kf:
                 data = kf.read()
-            self.key = PrivateKey.from_private_serial(data, password).key
+            pk = PrivateKey.from_private_serial(data, password)
+            self.key = pk.key
+            self.name = pk.name
             return
 
         self.key = ec.generate_private_key(curve=ec.SECP256R1, backend=default_backend())
@@ -32,7 +35,7 @@ class PrivateKey:
     def public_serial(self):
         if not self._public_serial_cache:
             Q = self.key.public_key().public_numbers()
-            self._public_serial_cache = base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
+            self._public_serial_cache = (f'{self.name}.' if self.name else '') + base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
         return self._public_serial_cache
 
     def private_serial(self, password=None):
@@ -43,29 +46,30 @@ class PrivateKey:
         )
         return self.key.private_bytes(
             encoding=serialization.Encoding.PEM, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=enc,
-        )
+        ).decode() + (f'\n{self.name}' if self.name else '')
+
     def save_key_file(self, key_file, password=None):
-        with open(key_file, "wb") as kf:
+        with open(key_file, "w") as kf:
             kf.write(self.private_serial(password))
 
     @staticmethod
     def from_private_serial(data, password=None):
         out = PrivateKey()
+        end = '-----END PRIVATE KEY-----' if '-----END PRIVATE KEY-----' in data else '-----END ENCRYPTED PRIVATE KEY-----'
+        serial, *name = data.split(end)
+        out.name = end.join(name).replace('\n', '') if name else None
+        serial += end
         out.key = serialization.load_pem_private_key(
-            data, None if password is None else password.encode(), default_backend()
+            data.encode(), None if password is None else password.encode(), default_backend()
         )
         return out
-
-    def __getstate__(self):
-        return {'private_serial': self.private_serial()}
-
-    def __setstate__(self, state):
-        self.key = PrivateKey.from_private_serial(state['private_serial']).key
 
 
 class PublicKey:
     def __init__(self, public_serial):
-        self.key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), b"\x04" + base64.b64decode(public_serial))
+        self.public_serial = public_serial
+        self.key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), b"\x04" + base64.b64decode(public_serial.split('.')[-1]))
+        self.name = '.'.join(public_serial.split('.')[:-1])
 
     def verify(self, raw_signature, message):
         r = int.from_bytes(raw_signature[:32], "big")
