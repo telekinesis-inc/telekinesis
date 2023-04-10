@@ -473,7 +473,7 @@ export class Channel {
             let ch = (chunksMap.get(ii) as [Uint8Array, RequestMetadata]);
             payloadSer = new Uint8Array([...payloadSer, ...ch[0]])
             if (ii != i) {
-              metadata.rawMessages.push(ch[1]);
+              metadata.rawMessages?.push(ch[1]);
             }
           }
           this.chunks.delete(mid);
@@ -772,12 +772,12 @@ export class Route {
 export class RequestMetadata {
   _session: Session;
   sessionPublicKey: string;
-  caller: Route;
-  rawMessages: {}[];
+  caller?: Route;
+  rawMessages?: {}[];
   replyTo?: Route;
   pipeline?: [string, any | string | [any[], {}]][];
 
-  constructor(session: Session, caller: Route, rawMessages: {}[]) {
+  constructor(session: Session, caller?: Route, rawMessages?: {}[]) {
     this._session = session;
     this.sessionPublicKey = "";
     session.sessionKey.publicSerial().then((s: string) => { this.sessionPublicKey = s })

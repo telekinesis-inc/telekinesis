@@ -507,11 +507,11 @@ export class Telekinesis extends Function {
     let replyTo;
 
     try {
-      if (this._clients && !this._clients.has(metadata.caller.session.join())) {
+      if (this._clients && metadata.caller && !this._clients.has(metadata.caller?.session.join())) {
         this._clients.set(metadata.caller.session.join(), { lastState: null, cacheAttributes: null });
         this._clients.delete([metadata.caller.session[0], null].join());
       }
-      if ((payload as any)['close'] !== undefined) {
+      if ((payload as any)['close'] !== undefined && metadata.caller) {
         this._clients?.delete(metadata.caller.session.join());
         for (const delegation of ((payload as any)['close'] as Array<[string, string | null]>)) {
           if (this._clients && !this._clients.has(delegation.join())) {
@@ -525,9 +525,9 @@ export class Telekinesis extends Function {
           await this._close();
         }
 
-      } else if ((payload as any)['ping'] !== undefined) {
+      } else if ((payload as any)['ping'] !== undefined && metadata.caller) {
         await channel.send(metadata.caller, { repr: this._state.repr })
-      } else if ((payload as any)['pipeline'] !== undefined) {
+      } else if ((payload as any)['pipeline'] !== undefined && metadata.caller) {
         let requestObj = {metadata, payload, channel};
         this._requests.set(metadata.caller, requestObj)
         if ((payload as any)['reply_to']) {
@@ -555,7 +555,9 @@ export class Telekinesis extends Function {
       } else {
         errorMessage = { error: e + '', error_type: 'Error'}
       }
-      await this._respondRequest(metadata.caller, errorMessage, undefined, true);
+      if (metadata.caller) {
+        await this._respondRequest(metadata.caller, errorMessage, undefined, true);
+      }
     }
   } 
   async _respondRequest(caller: Route, returnObject: any, prevTarget?: any, error=false) {
@@ -657,6 +659,10 @@ export class Telekinesis extends Function {
 
     this._state.pipeline = [];
 
+    if (metadata === undefined) {
+      metadata = new RequestMetadata(this._session)
+    }
+
     if (this._target instanceof Route) {
       return [await this._forward(pipeline), undefined];
     }
@@ -723,10 +729,8 @@ export class Telekinesis extends Function {
         }
 
         if (target._tk_inject_first === true) {
-          if (metadata) {
-            metadata.pipeline = pipeline.slice(Number(step)+1)
-            checkPipeline = true;
-          }
+          metadata.pipeline = pipeline.slice(Number(step)+1)
+          checkPipeline = true;
           args = [metadata as RequestMetadata, ...args];
         }
 
@@ -742,7 +746,7 @@ export class Telekinesis extends Function {
         if (target instanceof Promise || target && Object.getPrototypeOf(target)?.constructor.name === 'Promise') {
           target = await target;
         }
-        if (checkPipeline && metadata && (!metadata.pipeline || !metadata.pipeline.length)) {
+        if (checkPipeline && (!metadata.pipeline || !metadata.pipeline.length)) {
           breakVar = true;
         }
         if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
@@ -751,7 +755,7 @@ export class Telekinesis extends Function {
       } else if (action === 'subscribe') {
         const cb = pipeline[step][1] as Telekinesis;
         const r = cb._target as Route;
-        if (metadata && await r.validateTokenChain(metadata.caller.session[0])) {
+        if (metadata && metadata.caller && await r.validateTokenChain(metadata.caller.session[0])) {
           const tk = Telekinesis._reuse(
             target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth
           )
@@ -809,7 +813,7 @@ export class Telekinesis extends Function {
 
       if ((response as any).root_parent) {
         const root = this._getRootParent();
-        const [lastVersion, diffs] = root._decode((response as any).root_parent, metadata.caller.session[0])._state.getDiffs(0, undefined, true);
+        const [lastVersion, diffs] = root._decode((response as any).root_parent, metadata.caller?.session[0])._state.getDiffs(0, undefined, true);
         root._updateState(lastVersion, diffs);
       }
       // console.log(response)

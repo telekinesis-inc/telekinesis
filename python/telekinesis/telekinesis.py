@@ -1,12 +1,11 @@
 import asyncio
-from cmath import isfinite
 import inspect
 import types
 import traceback
 import logging
 import re
 
-from .client import Route, Channel
+from .client import Route, Channel, RequestMetadata
 
 
 class State:
@@ -573,6 +572,9 @@ class Telekinesis:
         pipeline = self._state.pipeline + pipeline
         self._state.pipeline.clear()
 
+        if not metadata:
+            metadata = RequestMetadata(self._session, None, None)
+
         if isinstance(self._target, Route):
             return await self._forward(pipeline)
 
@@ -653,16 +655,15 @@ class Telekinesis:
                     "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg or
                     isinstance(target, type) and "_tk_inject_first_arg" in dir(target.__init__) and target.__init__._tk_inject_first_arg
                 ):
-                    if metadata:
-                        metadata.pipeline = pipeline[i+1:]
-                        check_pipeline = True
+                    metadata.pipeline = pipeline[i+1:]
+                    check_pipeline = True
                     target = target(metadata, *args, **kwargs)
                 else:
                     target = target(*args, **kwargs)
                 if asyncio.iscoroutine(target):
                     target = await target
 
-                if check_pipeline and metadata and not metadata.pipeline:
+                if check_pipeline and not metadata.pipeline:
                     break_var = True
                 if (
                     isinstance(target, Telekinesis)
