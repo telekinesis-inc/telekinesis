@@ -749,7 +749,7 @@ export class Telekinesis extends Function {
         if (checkPipeline && (!metadata.pipeline || !metadata.pipeline.length)) {
           breakVar = true;
         }
-        if (!breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && target._state.pipeline.length) {
+        if (target instanceof Telekinesis && target._state.pipeline.length && !(breakOnTelekinesis && target._target instanceof Route) ) {
           target = (await target.__execute())[0];
         }
       } else if (action === 'subscribe') {

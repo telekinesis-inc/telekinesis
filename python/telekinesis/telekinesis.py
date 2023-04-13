@@ -667,10 +667,14 @@ class Telekinesis:
                     break_var = True
                 if (
                     isinstance(target, Telekinesis)
-                    and isinstance(target._target, Route)
                     and target._state.pipeline
-                    and not break_on_telekinesis
-                ):
+                    and (
+                        not break_on_telekinesis or
+                        not isinstance(target._target, Route)
+                    )
+                    # and not break_on_telekinesis
+                    # and isinstance(target._target, Route)
+                 ):
                     target = await target._execute()
             if action == "subscribe":
                 if arg._target.validate_token_chain(metadata.caller.session[0]):
