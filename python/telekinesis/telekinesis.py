@@ -665,17 +665,6 @@ class Telekinesis:
 
                 if check_pipeline and not metadata.pipeline:
                     break_var = True
-                if (
-                    isinstance(target, Telekinesis)
-                    and target._state.pipeline
-                    and (
-                        not break_on_telekinesis or
-                        not isinstance(target._target, Route)
-                    )
-                    # and not break_on_telekinesis
-                    # and isinstance(target._target, Route)
-                 ):
-                    target = await target._execute()
             if action == "subscribe":
                 if arg._target.validate_token_chain(metadata.caller.session[0]):
                     tk = Telekinesis._reuse(
@@ -694,6 +683,15 @@ class Telekinesis:
                         tk._clients[arg._target.session]["last_state"] = 0
                     tk._clients[arg._target.session]["cache_attributes"] = True
                     tk._subscribers.add(arg)
+            if (
+                isinstance(target, Telekinesis)
+                and not (
+                    break_on_telekinesis
+                    and isinstance(target._target, Route) 
+                    # and target._state.pipeline
+                    )
+                ):
+                target = await target._execute()
             touched = touched.union((self._session.targets.get(id(target))) or set())
             if break_var:
                 break

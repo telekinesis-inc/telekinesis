@@ -749,9 +749,6 @@ export class Telekinesis extends Function {
         if (checkPipeline && (!metadata.pipeline || !metadata.pipeline.length)) {
           breakVar = true;
         }
-        if (target instanceof Telekinesis && target._state.pipeline.length && !(breakOnTelekinesis && target._target instanceof Route) ) {
-          target = (await target.__execute())[0];
-        }
       } else if (action === 'subscribe') {
         const cb = pipeline[step][1] as Telekinesis;
         const r = cb._target as Route;
@@ -769,6 +766,9 @@ export class Telekinesis extends Function {
           tk._subscribers.add(cb);
 
         }
+      }
+      if (target instanceof Telekinesis && !(breakOnTelekinesis && target._target instanceof Route) ) {
+        target = (await target.__execute())[0];
       }
       touched = new Set([...touched, ...(this._session.targets.get(target) || [])])
       if (breakVar) {
