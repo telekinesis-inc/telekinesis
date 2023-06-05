@@ -32,11 +32,11 @@ class PrivateKey:
         r, s = utils.decode_dss_signature(signature)
         return b"".join([x.to_bytes(32, "big") for x in (r, s)])
 
-    def public_serial(self):
+    def public_serial(self, show_name=True):
         if not self._public_serial_cache:
             Q = self.key.public_key().public_numbers()
-            self._public_serial_cache = (f'{self.name}.' if self.name else '') + base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
-        return self._public_serial_cache
+            self._public_serial_cache = base64.b64encode(b"".join([x.to_bytes(32, "big") for x in (Q.x, Q.y)])).decode()
+        return (f'{self.name}.' if self.name and show_name else '') + self._public_serial_cache
 
     def private_serial(self, password=None):
         enc = (

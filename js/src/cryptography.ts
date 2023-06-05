@@ -78,13 +78,13 @@ export class PrivateKey {
     }
     throw new Error('key is undefined');
   }
-  async publicSerial() {
+  async publicSerial(showName: boolean=true) {
     if (this.key === undefined) {
       await this.generate();
     }
     if (this.key !== undefined) {
       let publicKey = (await webcrypto.subtle.exportKey('raw', this.key.publicKey as CryptoKey)).slice(1);
-      let out = (this.name ? `${this.name}.` : '') + b64encode(new Uint8Array(publicKey));
+      let out = (this.name && showName ? `${this.name}.` : '') + b64encode(new Uint8Array(publicKey));
       if (this.repr === undefined) {
         this.repr = out;
       }

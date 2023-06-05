@@ -49,7 +49,7 @@ class Connection:
         await self.is_connecting_lock.wait()
 
     async def _connect(self):
-        self.logger.info("%s connecting", self.session.session_key.public_serial()[:4])
+        self.logger.info("%s connecting", self.session.session_key.public_serial(False)[:4])
         if self.websocket:
             await self.websocket.close()
 
@@ -61,7 +61,7 @@ class Connection:
         self.t_offset = int(time.time()) - t_broker
         signature = self.session.session_key.sign(challenge)
 
-        pk = self.session.session_key.public_serial().encode()
+        pk = self.session.session_key.public_serial(False).encode()
 
         sent_challenge = os.urandom(32)
         sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
@@ -110,7 +110,7 @@ class Connection:
         if not ack_message_id:
             self.logger.info(
                 "%s sending: %s %s",
-                self.session.session_key.public_serial()[:4],
+                self.session.session_key.public_serial(False)[:4],
                 " ".join(h[0] for h in header),
                 len(payload),
             )
@@ -143,7 +143,7 @@ class Connection:
 
         for retry in range(self.MAX_SEND_RETRIES + 1):
             if not self.websocket or self.websocket.closed:
-                self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial()[:4], retry)
+                self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial(False)[:4], retry)
                 if self.is_connecting_lock.is_set():
                     await self.reconnect()
                 else:
@@ -152,7 +152,7 @@ class Connection:
             try:
                 await self.websocket.send(s + mm)
             except Exception:
-                self.logger.info("%s Connection.send", self.session.session_key.public_serial()[:4], exc_info=True)
+                self.logger.info("%s Connection.send", self.session.session_key.public_serial(False)[:4], exc_info=True)
                 continue
 
             if not expect_ack or await self.expect_ack(message_id, lock):
@@ -160,10 +160,10 @@ class Connection:
 
             if retry < (self.MAX_SEND_RETRIES):
                 s, mm = encode(header, payload, message_id, retry + 1)
-                self.logger.info("%s retrying send %d", self.session.session_key.public_serial()[:4], retry)
+                self.logger.info("%s retrying send %d", self.session.session_key.public_serial(False)[:4], retry)
 
         raise ConnectionError(["%s send %s %s - %s max retries reached" % (
-            self.session.session_key.public_serial()[:4],
+            self.session.session_key.public_serial(False)[:4],
             h['destination']['session'][0][:4], 
             h['destination']['session'][1][:2],
             h['destination']['channel'][:4],
@@ -185,7 +185,7 @@ class Connection:
 
     def clear(self, bundle_id):
         if bundle_id:
-            self.logger.info("%s clearing %s", self.session.session_key.public_serial()[:4], bundle_id[:4])
+            self.logger.info("%s clearing %s", self.session.session_key.public_serial(False)[:4], bundle_id[:4])
             ks = []
             for k, v in self.awaiting_ack.items():
                 if v[1] == bundle_id:
@@ -202,14 +202,14 @@ class Connection:
                     await self.recv()
                     n_tries = 0
             except Exception:
-                self.logger.warning("%s Connection.listen", self.session.session_key.public_serial()[:4], exc_info=True)
+                self.logger.warning("%s Connection.listen", self.session.session_key.public_serial(False)[:4], exc_info=True)
 
             self.is_connecting_lock.clear()
             await asyncio.sleep(1)
 
             if n_tries > self.MAX_SEND_RETRIES:
                 self.is_connecting_lock.set()
-                raise ConnectionError("%s Max tries reached" % self.session.session_key.public_serial()[:4])
+                raise ConnectionError("%s Max tries reached" % self.session.session_key.public_serial(False)[:4])
             n_tries += 1
 
     async def recv(self):
@@ -230,7 +230,7 @@ class Connection:
             full_payload = message[73 + len_h : 73 + len_h + len_p]
             self.logger.info(
                 "%s received: %s %s",
-                self.session.session_key.public_serial()[:4],
+                self.session.session_key.public_serial(False)[:4],
                 " ".join(h[0] for h in header),
                 len(full_payload),
             )
@@ -251,7 +251,7 @@ class Connection:
                                 None,
                                 ret_signature,
                             )
-                            # print(self.session.session_key.public_serial()[:4], 'sent ack', ret_signature[:4])
+                            # print(self.session.session_key.public_serial(False)[:4], 'sent ack', ret_signature[:4])
                             if hashlib.sha256(payload).digest() == full_payload[65 : 65 + 32]:
                                 if (ret_signature == signature) or self.session.check_no_repeat(
                                     ret_signature, timestamp + self.t_offset
@@ -261,7 +261,7 @@ class Connection:
                                 raise AssertionError("Message payload does not match signed hash")
 
     def ack(self, source_id, message_id):
-        # print(self.session.session_key.public_serial()[:4], 'received ack', message_id[:4], 'from', source_id[:4])
+        # print(self.session.session_key.public_serial(False)[:4], 'received ack', message_id[:4], 'from', source_id[:4])
         header = self.awaiting_ack.get(message_id, [[]])[0]
         for action, content in header:
             if action == "send":
@@ -381,7 +381,7 @@ class Session:
 
     def __repr__(self):
         return "Session %s %s" % (
-            self.session_key.public_serial()[:4],
+            self.session_key.public_serial(False)[:4],
             self.instance_id[:2],
         )
 

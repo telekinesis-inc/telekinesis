@@ -75,7 +75,7 @@ export class Connection {
       let challenge = await recv();
       let signature = await this.session.sessionKey.sign(challenge) as Uint8Array;
 
-      let pk = new TextEncoder().encode(await this.session.sessionKey.publicSerial());
+      let pk = new TextEncoder().encode(await this.session.sessionKey.publicSerial(false));
 
       let sentChallenge = webcrypto.getRandomValues(new Uint8Array(32));
       let sentMetadata = new TextEncoder().encode(
