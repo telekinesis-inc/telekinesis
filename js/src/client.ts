@@ -337,7 +337,7 @@ export class Session {
     }
     if (!cached) {
       token = new Token(
-        await this.sessionKey.publicSerial() as string,
+        await this.sessionKey.publicSerial(false) as string,
         this.connections.map(c => c.brokerId as string),
         receiver,
         asset as string,
@@ -352,14 +352,14 @@ export class Session {
   }
   async extendRoute(route: Route, receiver: string, maxDepth?: number) {
     let newTokenStr;
-    if (route.session[0] === await this.sessionKey.publicSerial()) {
+    if (route.session[0] === await this.sessionKey.publicSerial(false)) {
       newTokenStr = await this.issueToken(route.channel, receiver, maxDepth) as string;
       route.tokens = [newTokenStr];
       return;
     } else {
       for (var i in route.tokens) {
         let token = await Token.decode(route.tokens[i]) as Token;
-        if (token.receiver === await this.sessionKey.publicSerial()) {
+        if (token.receiver === await this.sessionKey.publicSerial(false)) {
           route.tokens = route.tokens.slice(0, parseInt(i) + 1);
         }
         if (token.receiver === receiver) {
@@ -424,9 +424,9 @@ export class Channel {
 
     this.then = this._then;
 
-    this.channelKey.publicSerial().then(channelId => {
+    this.channelKey.publicSerial(false).then(channelId => {
       this.session.channels.set(channelId as string, this)
-      this.session.sessionKey.publicSerial().then(sessionId => {
+      this.session.sessionKey.publicSerial(false).then(sessionId => {
         this.route = new Route(
           this.session.connections.map(c => c.brokerId) as string[],
           [sessionId as string, this.session.instanceId],
@@ -671,11 +671,11 @@ export class Channel {
     }
   }
   async validateTokenChain(sourceId: string, tokens: string[]) {
-    let sessionId = await this.session.sessionKey.publicSerial()
+    let sessionId = await this.session.sessionKey.publicSerial(false)
     if (this.isPublic || (sourceId === sessionId)) { return true }
     if (tokens.length === 0) { return false }
 
-    let asset = await this.channelKey.publicSerial();
+    let asset = await this.channelKey.publicSerial(false);
     let lastReceiver = sessionId;
     let maxDepth = null;
 
@@ -780,7 +780,7 @@ export class RequestMetadata {
   constructor(session: Session, caller?: Route, rawMessages?: {}[]) {
     this._session = session;
     this.sessionPublicKey = "";
-    session.sessionKey.publicSerial().then((s: string) => { this.sessionPublicKey = s })
+    session.sessionKey.publicSerial(false).then((s: string) => { this.sessionPublicKey = s })
     this.caller = caller;
     this.rawMessages = rawMessages;
   }

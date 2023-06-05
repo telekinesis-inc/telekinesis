@@ -337,7 +337,7 @@ class Session:
                 break
         else:
             token = Token(
-                self.session_key.public_serial(),
+                self.session_key.public_serial(False),
                 [x.broker_id for x in self.connections],
                 receiver,
                 asset,
@@ -357,14 +357,14 @@ class Session:
 
     def extend_route(self, route, receiver, max_depth=None):
 
-        if route.session[0] == self.session_key.public_serial():
+        if route.session[0] == self.session_key.public_serial(False):
             token_header = self.issue_token(route.channel, receiver, max_depth)
             route.tokens = [token_header[1][1]]
             return token_header
 
         for i, enc_token in enumerate(route.tokens):
             token = Token.decode(enc_token)
-            if token.receiver == self.session_key.public_serial():
+            if token.receiver == self.session_key.public_serial(False):
                 route.tokens = route.tokens[: i + 1]
 
         token = Token.decode(route.tokens[-1], False)
@@ -397,14 +397,14 @@ class Channel:
         self.is_public = is_public
         self.route = Route(
             list(set(c.broker_id for c in self.session.connections)),
-            (self.session.session_key.public_serial(), self.session.instance_id),
-            self.channel_key.public_serial(),
+            (self.session.session_key.public_serial(False), self.session.instance_id),
+            self.channel_key.public_serial(False),
         )
         self.header_buffer = []
         self.chunks = {}
         self.messages = deque()
         self.lock = asyncio.Event()
-        session.channels[self.channel_key.public_serial()] = self
+        session.channels[self.channel_key.public_serial(False)] = self
 
         self.telekinesis = None
 
@@ -556,20 +556,20 @@ class Channel:
 
     def close(self):
         self.header_buffer.append(("close", self.route.to_dict()))
-        self.session.revoke_tokens(self.channel_key.public_serial())
+        self.session.revoke_tokens(self.channel_key.public_serial(False))
 
-        self.session.channels.pop(self.channel_key.public_serial(), None)
+        self.session.channels.pop(self.channel_key.public_serial(False), None)
 
         return self
 
     def validate_token_chain(self, source_id, tokens):
-        if self.is_public or (source_id == self.session.session_key.public_serial()):
+        if self.is_public or (source_id == self.session.session_key.public_serial(False)):
             return True
         if not tokens:
             return False
 
-        asset = self.channel_key.public_serial()
-        last_receiver = self.session.session_key.public_serial()
+        asset = self.channel_key.public_serial(False)
+        last_receiver = self.session.session_key.public_serial(False)
         max_depth = None
 
         for depth, token_string in enumerate(tokens):
@@ -578,7 +578,7 @@ class Channel:
             except InvalidSignature:
                 return False
             if (token.asset == asset) and (token.issuer == last_receiver):
-                if token.issuer == self.session.session_key.public_serial():
+                if token.issuer == self.session.session_key.public_serial(False):
                     if token.signature not in self.session.issued_tokens:
                         return False
                 if token.max_depth:
@@ -595,9 +595,9 @@ class Channel:
 
     def __repr__(self):
         return "Channel %s %s - %s: %s" % (
-            self.session.session_key.public_serial()[:4],
+            self.session.session_key.public_serial(False)[:4],
             self.session.instance_id[:2],
-            self.channel_key.public_serial()[:4],
+            self.channel_key.public_serial(False)[:4],
             self.telekinesis,
         )
 
@@ -676,7 +676,7 @@ class Route:
 class RequestMetadata:
     def __init__(self, session, caller, raw_messages):
         self._session = session
-        self.session_public_key = session.session_key.public_serial()
+        self.session_public_key = session.session_key.public_serial(False)
         self.caller = caller
         self.raw_messages = raw_messages
         self.reply_to = None
