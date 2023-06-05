@@ -395,7 +395,7 @@ class Telekinesis:
                 raise PermissionError("Cannot delegate remote Channel to public.")
             if not route.tokens:
                 extend_route = False
-            if receiver == self._session.session_key.public_serial():
+            if receiver == self._session.session_key.public_serial(False):
                 extend_route = False
 
         else:
@@ -472,7 +472,7 @@ class Telekinesis:
                 # print('...', self._requests.keys())
                 if payload.get("reply_to"):
                     reply_to = Route(**payload["reply_to"])
-                    reply_to.validate_token_chain(self._session.session_key.public_serial())
+                    reply_to.validate_token_chain(self._session.session_key.public_serial(False))
                     metadata.reply_to = reply_to
                 ret = await self._execute(metadata, pipeline, True)
                 await self._respond_request(metadata.caller, ret, False)
@@ -505,7 +505,7 @@ class Telekinesis:
                     isinstance(return_object, Telekinesis)
                     and isinstance(return_object._target, Route)
                     and return_object._state.pipeline
-                    and return_object._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
+                    and return_object._target.session != (self._session.session_key.public_serial(False), self._session.instance_id)
                 ):
                     await return_object._forward(
                         return_object._state.pipeline,
@@ -594,7 +594,7 @@ class Telekinesis:
                 and isinstance(target, Telekinesis)
                 and isinstance(target._target, Route)
                 and (
-                    target._target.session != (self._session.session_key.public_serial(), self._session.instance_id)
+                    target._target.session != (self._session.session_key.public_serial(False), self._session.instance_id)
                     or target._target.channel not in self._session.channels
                 )
             ):
@@ -851,7 +851,7 @@ class Telekinesis:
         # ..  keep a copy of the target so it doesn't get garbage collected - which messes up the id()
 
         if receiver is None:
-            receiver = (self._session.session_key.public_serial(), self._session.instance_id)
+            receiver = (self._session.session_key.public_serial(False), self._session.instance_id)
 
 
         if type(target) in (str, bytes, bool, type(None)):
@@ -961,7 +961,7 @@ class Telekinesis:
             route = Route(**obj[0])
             state_diff = self._decode(input_stack, caller_id, obj[1], output_stack)
 
-            if route.session == (self._session.session_key.public_serial(), self._session.instance_id) and route.channel in self._session.channels:
+            if route.session == (self._session.session_key.public_serial(False), self._session.instance_id) and route.channel in self._session.channels:
                 channel = self._session.channels.get(route.channel)
                 if channel.validate_token_chain(caller_id, route.tokens):
 

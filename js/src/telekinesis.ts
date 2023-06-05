@@ -532,7 +532,7 @@ export class Telekinesis extends Function {
         this._requests.set(metadata.caller, requestObj)
         if ((payload as any)['reply_to']) {
           replyTo = Route.fromObject((payload as any)['reply_to'])
-          await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial());
+          await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial(false));
           metadata.replyTo = replyTo;
         }
         pipeline = this._decode((payload as any)['pipeline']) as [];
@@ -567,7 +567,7 @@ export class Telekinesis extends Function {
       this._requests.delete(metadata.caller);
       if (!error) {
         if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && (
-          returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
+          returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(false), this._session.instanceId].toString() ||
           !this._session.channels.has(returnObject._target.channel)
         )) {
           await (returnObject as Telekinesis)._forward(
@@ -680,7 +680,7 @@ export class Telekinesis extends Function {
     for (let step in pipeline) {
       let checkPipeline = false;
       if (breakOnTelekinesis && target instanceof Telekinesis && target._target instanceof Route && (
-        target._target.session.toString() !== [await this._session.sessionKey.publicSerial(), this._session.instanceId].toString() ||
+        target._target.session.toString() !== [await this._session.sessionKey.publicSerial(false), this._session.instanceId].toString() ||
         !this._session.channels.has(target._target.channel)
       )) {
         const oldState = target._state;
@@ -895,7 +895,7 @@ export class Telekinesis extends Function {
     }
 
     if (receiver === undefined) {
-      receiver = [await this._session.sessionKey.publicSerial(), this._session.instanceId]
+      receiver = [await this._session.sessionKey.publicSerial(false), this._session.instanceId]
     }
     let out = [id, ['placeholder', null as any]]
     traversalStack.set(target, out as [string, [string, any]])

@@ -1,4 +1,4 @@
-from telekinesis import Broker, Telekinesis, Connection, Session, Channel
+from telekinesis import Broker, Telekinesis, Connection, Session, Channel, PrivateKey
 import random
 import asyncio
 import pytest
@@ -23,7 +23,7 @@ async def test_walkthrough():
 
     broker_0 = await FaultyBroker().serve(port=8777)
 
-    conn_0 = await Connection(Session(), "ws://localhost:8777")
+    conn_0 = await Connection(Session(PrivateKey(name='demo')), "ws://localhost:8777")
     conn_0.RESEND_TIMEOUT = 1
 
     broker_0.entrypoint = await Telekinesis(lambda x: (lambda y: x + y), conn_0.session)._delegate("*")
