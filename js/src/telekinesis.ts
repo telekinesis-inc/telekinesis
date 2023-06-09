@@ -573,6 +573,8 @@ export class Telekinesis extends Function {
           await (returnObject as Telekinesis)._forward(
             returnObject._state.pipeline,
             replyTo || metadata.caller,
+            await returnObject._session.sessionKey.publicSerial(false) != await this._session.sessionKey.publicSerial(false) ? this._session : undefined,
+            //self._session if return_object._session.session_key.public_serial(False) != self._session.session_key.public_serial(False) else None,
             { root_parent: replyTo ? (payload as any).root_parent : [this, metadata.caller.session] }
           );
         } else {
@@ -852,10 +854,13 @@ export class Telekinesis extends Function {
       console.error(e)
     }
   }
-  async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route, kwargs?: {}) {
+  async _forward(pipeline: [string, Telekinesis | string | [string[], {}]][], replyTo?: Route, session?: Session, kwargs?: {}) {
     let newChannel = new Channel(this._session);
     try {
       if (replyTo !== undefined) {
+        if (session !== undefined) {
+          await session.extendRoute(replyTo, await this._session.sessionKey.publicSerial(false))
+        }
         await this._session.extendRoute(replyTo, (this._target as Route).session[0])
       }
       if (kwargs) {

@@ -510,6 +510,7 @@ class Telekinesis:
                     await return_object._forward(
                         return_object._state.pipeline,
                         reply_to or metadata.caller,
+                        self._session if return_object._session.session_key.public_serial(False) != self._session.session_key.public_serial(False) else None,
                         root_parent=payload.get("root_parent") if reply_to else (self, metadata.caller.session),
                     )
                 else:
@@ -755,9 +756,11 @@ class Telekinesis:
         except Exception:
             self._session.logger.error("Error closing Telekinesis Object: %s", self._target, exc_info=True)
 
-    async def _forward(self, pipeline, reply_to=None, **kwargs):
+    async def _forward(self, pipeline, reply_to=None, session=None, **kwargs):
         async with Channel(self._session) as new_channel:
             if reply_to:
+                if session:
+                    session.extend_route(reply_to, self._session.session_key.public_serial(False))
                 self._session.extend_route(reply_to, self._target.session[0])
             for key, value in kwargs.items():
                 if isinstance(value, tuple) and isinstance(value[0], Telekinesis):
