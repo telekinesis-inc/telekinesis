@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import inspect
 import types
 import traceback
@@ -485,11 +486,26 @@ class Telekinesis:
                     self._logger.error("Telekinesis request error with pipeline %s", pipeline, exc_info=True)
 
             self._state.pipeline.clear()
-            err_message = {
-                "error": traceback.format_exc() if self._expose_tb else "", 
+
+            if self._expose_tb:
+                _, _, exc_traceback = sys.exc_info()
+                tb = traceback.extract_tb(exc_traceback)
+
+                adjusted_tb = tb[2:]
+
+                # Format the modified traceback and include it in the exception message
+                err_message = str(e) + '\n'
+                for frame in adjusted_tb:
+                    err_message += f'  File "{frame.filename}" in {frame.name}, line {frame.lineno}\n'
+                    err_message += f'    {frame.line}\n'
+            else:
+                err_message = ''
+
+            err_dict = {
+                "error": err_message, 
                 "error_type": type(e).__name__
             }
-            await self._respond_request(metadata.caller, err_message, True)
+            await self._respond_request(metadata.caller, err_dict, True)
 
     async def _respond_request(self, caller, return_object, error):
         # print('here')
@@ -577,7 +593,20 @@ class Telekinesis:
             metadata = RequestMetadata(self._session, None, None)
 
         if isinstance(self._target, Route):
-            return await self._forward(pipeline)
+            try:
+                return await self._forward(pipeline)
+            except Exception:
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb = traceback.extract_tb(exc_traceback)
+
+                adjusted_tb = tb[2:]
+
+                new_message = str(exc_value) + '\n'
+                for _ in adjusted_tb:
+                    new_message += f'  Remote exception on Telekinesis object "\u2248\033 {self._state.repr}", {self._session}, {str(self._target)}\n'
+
+                # Raise a new exception with the error message forwarded from the remote telekinesis object
+                raise exc_type(new_message) from None
 
         async def exc(x):
             if isinstance(x, Telekinesis) and x._state.pipeline:
