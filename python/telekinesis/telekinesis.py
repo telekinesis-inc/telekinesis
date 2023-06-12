@@ -488,16 +488,19 @@ class Telekinesis:
             self._state.pipeline.clear()
 
             if self._expose_tb:
-                _, _, exc_traceback = sys.exc_info()
-                tb = traceback.extract_tb(exc_traceback)
+                if callable(self._expose_tb):
+                    err_message = self._expose_tb(e)
+                else:
+                    _, _, exc_traceback = sys.exc_info()
+                    tb = traceback.extract_tb(exc_traceback)
 
-                adjusted_tb = tb[2:]
+                    adjusted_tb = tb[2:]
 
-                # Format the modified traceback and include it in the exception message
-                err_message = str(e) + '\n'
-                for frame in adjusted_tb:
-                    err_message += f'  File "{frame.filename}" in {frame.name}, line {frame.lineno}\n'
-                    err_message += f'    {frame.line}\n'
+                    # Format the modified traceback and include it in the exception message
+                    err_message = str(e) + '\n'
+                    for frame in adjusted_tb:
+                        err_message += f'  File "{frame.filename}" in {frame.name}, line {frame.lineno}\n'
+                        err_message += f'    {frame.line}\n'
             else:
                 err_message = ''
 
