@@ -85,7 +85,7 @@ describe("Telekinesis", () => {
     const counterPython = await (new Entrypoint(HOST) as any).get('counter_python') as any;
     let ee = new Error();
     await counterPython.increment('x').catch((e: any) => {ee = e})
-    expect(ee.message).toContain('TypeError')
+    expect(ee.message).toContain('unsupported operand type(s) for +=')
   });
   it('throws errors (in callback)', async () => {
     const callAll = await (new Entrypoint(HOST) as any).get('call_all');
