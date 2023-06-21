@@ -1,4 +1,4 @@
-import { Channel, Header, RequestMetadata, Route, Session } from './client';
+import { Channel, Connection, Header, RequestMetadata, Route, Session } from './client';
 import { eqSet } from './utils';
 
 export class State {
@@ -105,6 +105,9 @@ export class State {
   }
   updateFromTarget(target: Object) {
     if (target !== undefined && target !== null) {
+      if ((target as Telekinesis)._isTelekinesisObject) {
+        return (target as Telekinesis)._state;
+      }
       const newProps = {
         attributes: Object.getOwnPropertyNames(target)
           .filter(x => x[0] !== '_')
@@ -566,9 +569,10 @@ export class Telekinesis extends Function {
       let replyTo = metadata.replyTo;
       this._requests.delete(metadata.caller);
       if (!error) {
-        if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && (
-          returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(false), this._session.instanceId].toString() ||
-          !this._session.channels.has(returnObject._target.channel)
+        if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && 
+          (returnObject._session.connections.filter((x: Connection) => this._session.connections.map(c => c.brokerId).includes(x.brokerId)).length > 0) && (
+            returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(false), this._session.instanceId].toString() ||
+            !this._session.channels.has(returnObject._target.channel)
         )) {
           await (returnObject as Telekinesis)._forward(
             returnObject._state.pipeline,
@@ -689,7 +693,11 @@ export class Telekinesis extends Function {
         target = new Telekinesis(target._target, target._session, target._mask, target._exposeTb, target._maxDelegationDepth, target._parent);
         target._state = oldState.clone();
         target._state.pipeline.push(...pipeline.slice(parseInt(step)));
-        target._blockThen = true;
+        if (target._session.connections.filter((x: Connection) => this._session.connections.map(c => c.brokerId).includes(x.brokerId)).length == 0) {
+          target = await target;
+        } else {
+          target._blockThen = true;
+        }
         break;
       }
       let action = pipeline[step][0];
