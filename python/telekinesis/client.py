@@ -27,6 +27,7 @@ class Connection:
         self.t_offset = 0
         self.broker_id = None
         self.entrypoint = None
+        self.broker_peers = []
 
         self.is_connecting_lock = asyncio.Event()
         self.awaiting_ack = OrderedDict()
@@ -79,6 +80,7 @@ class Connection:
 
         self.broker_id = broker_id
         self.entrypoint = Route(**metadata.get("entrypoint")) if metadata.get("entrypoint") else None
+        self.broker_peers = metadata.get("peers", [])
 
         headers = []
         for channel in self.session.channels.values():
@@ -622,7 +624,7 @@ class Channel:
 
 
 class Route:
-    def __init__(self, brokers, session, channel, tokens=None, parent_channel=None):
+    def __init__(self, brokers, session, channel, tokens=None, parent_channel=None, **_):
         self.brokers = brokers
         self.session = tuple(session)
         self.channel = channel
@@ -630,7 +632,7 @@ class Route:
         self._parent_channel = parent_channel
 
     def to_dict(self):
-        return {"brokers": self.brokers, "session": self.session, "channel": self.channel, "tokens": self.tokens}
+        return {"brokers": self.brokers, "session": self.session, "channel": self.channel, "tokens": self.tokens }
 
     def clone(self):
         return Route(**self.to_dict())

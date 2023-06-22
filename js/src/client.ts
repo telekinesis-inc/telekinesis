@@ -18,6 +18,7 @@ export class Connection {
   url: string;
   websocket?: WebSocket;
   brokerId?: string;
+  brokerPeers?: string[];
   tOffset: number;
   entrypoint?: Route;
   awaitingAck: Map<string, any>;
@@ -102,6 +103,9 @@ export class Connection {
       // console.log(metadata)
       if (metadata.hasOwnProperty('entrypoint') && (metadata as any).entrypoint) {
         this.entrypoint = Route.fromObject((metadata as any).entrypoint as any);
+      }
+      if (metadata.hasOwnProperty('peers') && (metadata as any).peers) {
+        this.brokerPeers = (metadata as any).peers;
       }
 
       try {

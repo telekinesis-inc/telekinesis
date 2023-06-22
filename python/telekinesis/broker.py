@@ -22,7 +22,7 @@ class Connection:
         self.channels = set()
         self.tasks = set()
 
-    async def handshake(self, sessions, broker_key, entrypoint):
+    async def handshake(self, sessions, broker_key, entrypoint, peers):
         challenge = os.urandom(32) + int(time.time()).to_bytes(4, "big")
 
         await self.websocket.send(challenge)
@@ -41,7 +41,10 @@ class Connection:
         await self.websocket.send(
             broker_key.sign(client_challenge)
             + broker_key.public_serial().encode()
-            + ujson.dumps({"entrypoint": entrypoint and entrypoint.to_dict()}, escape_forward_slashes=False).encode()
+            + ujson.dumps({
+                "entrypoint": entrypoint and entrypoint.to_dict(),
+                "peers": peers,
+            }, escape_forward_slashes=False).encode()
         )
 
         if session_id not in sessions:
@@ -154,7 +157,7 @@ class Broker:
     async def handle_connection(self, websocket, _):
         connection = None
         try:
-            connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.entrypoint)
+            connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.entrypoint, list(self.topology_cache[0]))
             self.logger.info("%s: new connection %s", self.broker_key.public_serial()[:4], connection.session.session_id[:4])
 
             async for message in websocket:

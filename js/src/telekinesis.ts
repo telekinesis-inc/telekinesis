@@ -569,11 +569,10 @@ export class Telekinesis extends Function {
       let replyTo = metadata.replyTo;
       this._requests.delete(metadata.caller);
       if (!error) {
-        if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && 
-          (returnObject._session.connections.filter((x: Connection) => this._session.connections.map(c => c.brokerId).includes(x.brokerId)).length > 0) && (
+        if (returnObject instanceof Telekinesis && returnObject._target instanceof Route && (
             returnObject._target.session.toString() !== [await this._session.sessionKey.publicSerial(false), this._session.instanceId].toString() ||
             !this._session.channels.has(returnObject._target.channel)
-        )) {
+        ) && this.__onSameNetwork(returnObject._session)) {
           await (returnObject as Telekinesis)._forward(
             returnObject._state.pipeline,
             replyTo || metadata.caller,
@@ -693,7 +692,7 @@ export class Telekinesis extends Function {
         target = new Telekinesis(target._target, target._session, target._mask, target._exposeTb, target._maxDelegationDepth, target._parent);
         target._state = oldState.clone();
         target._state.pipeline.push(...pipeline.slice(parseInt(step)));
-        if (target._session.connections.filter((x: Connection) => this._session.connections.map(c => c.brokerId).includes(x.brokerId)).length == 0) {
+        if (!this.__onSameNetwork(target._session)) {
           target = await target;
         } else {
           target._blockThen = true;
@@ -951,7 +950,7 @@ export class Telekinesis extends Function {
       out[1] = ['route', target.toObject()];
     } else {
       let obj: Telekinesis;
-      if (target._isTelekinesisObject === true) {
+      if (target._isTelekinesisObject === true && (!(target._target instanceof Route ) || this.__onSameNetwork(target._session))) {
         obj = target;
       } else {
         obj = Telekinesis._reuse(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, undefined)
@@ -1088,6 +1087,16 @@ export class Telekinesis extends Function {
       outputStack.set(root, out);
       return out;
     }
+  }
+  __onSameNetwork(session: Session): boolean {
+    for (let connection of session.connections) {
+      for (let thisSessionConnection of this._session.connections) {
+        if ([...(connection.brokerPeers || []), (connection.brokerId || '')].filter(x => [...(thisSessionConnection.brokerPeers || []), (thisSessionConnection.brokerId || '')].includes(x)).length) {
+          return true;
+        }
+      }
+    }
+    return false
   }
   get __signature__() {
     if (this._state.pipeline.length) {
