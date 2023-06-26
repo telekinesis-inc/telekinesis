@@ -1133,7 +1133,7 @@ export function blockArgEvaluation(func: any) {
   func._tk_block_arg_evaluation = true;
   return func;
 }
-class PermissionError extends Error {
+export class PermissionError extends Error {
   constructor(message: any) {
     super(message); // (1)
     this.name = "PermissionError"; // (2)

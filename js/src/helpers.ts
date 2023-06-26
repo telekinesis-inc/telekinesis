@@ -1,12 +1,37 @@
 import { Channel, Connection, Session } from "./client";
-import { Telekinesis } from "./telekinesis";
+import { Telekinesis, PermissionError } from "./telekinesis";
 
-export function authenticate(url: string = 'ws://localhost:8776', sessionKey?: string,
-  printCallback: ((output: any) => void) = console.log, kwargs?: any) {
+export async function authenticate(urlOrEntrypoint: string | Telekinesis = 'ws://localhost:8776', sessionKey?: string,
+    printCallback: ((output: any) => void) = console.log, kwargs?: any) {
+  
+  let entrypoint: any;
+  if (typeof urlOrEntrypoint === 'string') {
+    entrypoint = new Entrypoint(urlOrEntrypoint,sessionKey);
+  } else {
+    entrypoint = urlOrEntrypoint;
+  }
+  
+  let pubkeyWasChecked = false;
 
-  let user = (new Entrypoint(url, sessionKey) as any)
-    .authenticate._call([printCallback], kwargs);
+  async function printCallbackWrapper(...args: any) {
+    if (!pubkeyWasChecked){
+      if (args[0] !== await entrypoint._session.sessionKey.publicSerial()) {
+        throw new PermissionError("Public keys don't match")
+      }
+      pubkeyWasChecked = true;
+      if (!printCallback) {
+        return
+      }
+      args = ["Your session public key is:\n"+args[0], ...args.slice(1)];
+    }
+    await printCallback.apply(null, args);
+  }
 
+  let user = await entrypoint.authenticate._call([printCallbackWrapper], kwargs);
+  
+  if (!pubkeyWasChecked) {
+    throw new PermissionError('Session Public Key was never checked')
+  }
   return user;
 }
 
