@@ -525,7 +525,7 @@ class Telekinesis:
                     and isinstance(return_object._target, Route)
                     and return_object._state.pipeline
                     and return_object._target.session != (self._session.session_key.public_serial(False), self._session.instance_id)
-                    and self.__on_same_network(return_object._session)
+                    and self._on_same_network(return_object._session)
                 ):
                     await return_object._forward(
                         return_object._state.pipeline,
@@ -644,7 +644,7 @@ class Telekinesis:
                 )
                 target._state = new_state
                 target._state.pipeline += pipeline[i:]
-                if not self.__on_same_network(target._session):
+                if not self._on_same_network(target._session):
                     target = await target
                 break
 
@@ -918,7 +918,7 @@ class Telekinesis:
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
         else:
-            if isinstance(target, Telekinesis) and (not isinstance(target._target, Route) or self.__on_same_network(target._session)):
+            if isinstance(target, Telekinesis) and (not isinstance(target._target, Route) or self._on_same_network(target._session)):
                 obj = target
             else:
                 obj = Telekinesis._reuse(
@@ -1069,7 +1069,7 @@ class Telekinesis:
         output_stack[root] = out
         return out
 
-    def __on_same_network(self, session):
+    def _on_same_network(self, session):
         for c in self._session.connections:
             for cc in session.connections:
                 if set([c.broker_id, *c.broker_peers]).intersection([cc.broker_id, *cc.broker_peers]):
