@@ -46,6 +46,7 @@ async def authenticate(url_or_entrypoint="ws://localhost:8776", session_key=None
             await print_callback(*x)
         else:
             print_callback(*x)
+        return print_callback
         
     user = await entrypoint.authenticate(wrapped_print_callback, **kwargs)._subscribe()
 

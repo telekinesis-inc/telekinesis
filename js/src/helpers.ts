@@ -25,6 +25,7 @@ export async function authenticate(urlOrEntrypoint: string | Telekinesis = 'ws:/
       args = ["Your session public key is:\n"+args[0], ...args.slice(1)];
     }
     await printCallback.apply(null, args);
+    return printCallback
   }
 
   let user = await entrypoint.authenticate._call([printCallbackWrapper], kwargs);
