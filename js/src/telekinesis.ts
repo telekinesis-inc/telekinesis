@@ -893,7 +893,7 @@ export class Telekinesis extends Function {
       await newChannel.close()
     }
   }
-  async _encode(target: any, receiver?: [string, string], channel?: Channel, prevTarget?: any, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false) {
+  async _encode(target: any, receiver?: [string, string], channel?: Channel, prevTarget?: any, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false, blockSideEffects: boolean = false) {
 
     let id = 0;
 
@@ -950,7 +950,7 @@ export class Telekinesis extends Function {
       out[1] = ['route', target.toObject()];
     } else {
       let obj: Telekinesis;
-      if (target._isTelekinesisObject === true && (!(target._target instanceof Route ) || this._onSameNetwork(target._session))) {
+      if (target._isTelekinesisObject === true && (!(target._target instanceof Route ) || blockSideEffects || this._onSameNetwork(target._session))) {
         obj = target;
       } else {
         obj = Telekinesis._reuse(target, this._session, this._mask, this._exposeTb, this._maxDelegationDepth, undefined)

@@ -876,7 +876,7 @@ class Telekinesis:
         if self._parent is None and not self._block_gc:
             self._session.pending_tasks.add(asyncio.get_event_loop().create_task(self._close()))
 
-    def _encode(self, target, receiver=None, channel=None, traversal_stack=None, block_recursion=False):
+    def _encode(self, target, receiver=None, channel=None, traversal_stack=None, block_recursion=False, block_side_effects=False):
         if traversal_stack is None:
             i = 0
             traversal_stack = {}
@@ -918,8 +918,10 @@ class Telekinesis:
         elif isinstance(target, Route):
             tup = ("route", target.to_dict())
         else:
-            if isinstance(target, Telekinesis) and (not isinstance(target._target, Route) or self._on_same_network(target._session)):
+            if isinstance(target, Telekinesis) and (not isinstance(target._target, Route) or block_side_effects or self._on_same_network(target._session)):
                 obj = target
+                if block_side_effects:
+                    obj._block_gc = True
             else:
                 obj = Telekinesis._reuse(
                     target,
