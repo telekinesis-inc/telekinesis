@@ -1,79 +1,49 @@
-# Instant SDKs
+# Control Objects and Functions Remotely
 
-## Why?
+Telekinesis introduces a unique methodology for interacting with functions and objects residing on different machines. It is designed for environments where mutual trust is limited, offering a secure and efficient approach to remote procedure calls.
 
-I just love to autocomplete my way out of any coding challenge on a REPL. I particularly love how in Jupyter notebooks for Python I can `Shift+Tab` on any function or object and get the function signature and docstrings right in front of me.
+Telekinesis objects serve as 'web-pointers', enabling remote parties to interact with them by calling methods, accessing attributes, and even forwarding them to other peers. A key feature of Telekinesis is its automatic creation of Telekinesis objects for any function or object used as an argument when calling a method of another Telekinesis object. This applies to everything except built-in types such as int, float, str, etc.
 
-When you have a good SDK for a service you barely have to `Alt+Tab` to a documentation's page, all the relevant information you need is easily accessible on your REPL
+Similarly, when a function returns an object or another function, a Telekinesis object is automatically created to represent it. This design enables seamless interaction and manipulation of remote resources, ushering in a new level of interconnectivity between separate systems.
 
-The problem with SDKs is: somebody has to develop and maintain them. Moreover, if you look at the bigger picture of a client consuming a service from a server, it currently looks something like:
-```
-  Client UX      fetch logic      http requests    API server          Service
-    logic   <--->   or SDK      <--------------->    logic     <--->    logic
- (value add)    (requires dev)                    (requires dev)     (value add)
-```
-Telekinesis aims to standardize the communication logic, so that, from a development perspective the picture would look more like: 
-```
-  Client UX                     telekinesis                            Service
-    logic   <------------------------------------------------------>    logic
- (value add)                                                         (value add)
-```
-Under the hood, telekinesis communication is based on WebSocket clients on both the client and service sides, with WebSocket servers in between acting as message brokers. Keeping the client and service sides symmetrical opens a lot of possibilities.
+## Key Features
 
-## Example
+- **Automated Telekinesis Object Creation:** Telekinesis intelligently creates web-pointer objects for non-built-in types used as arguments in remote function calls or returned by these calls, facilitating seamless interactions with remote resources.
+- **Flexibility in Interaction:** Telekinesis objects act as dynamic web-pointers that can be interacted with (through method calls or attribute access) or even forwarded to other peers, providing flexibility and ease of use.
+- **Limited Trust Environment Compatibility:** Designed with security in mind, Telekinesis thrives in environments where parties trust each other to a limited extent. It offers a secure way to control objects and functions remotely. Supports end-to-end encryption, authenticated connections, and authorization validations to secure your communications.
+- **Enhanced Remote Procedure Calls:** Telekinesis simplifies RPCs by offering a unique approach to control remote objects and functions, greatly enhancing the client-server communication process.
+- **Abstracts Communication:** Telekinesis handles all your communication logic, simplifying the development perspective and adding value to both client and service logic.
+- **WebSockets Based:**: Telekinesis operates on WebSocket clients on both client and service sides, with WebSocket servers acting as message brokers. This approach provides increased symmetry and opens a wealth of possibilities.
+- **Interactive Development:** Get relevant information for any function or object in your REPL using autocomplete, minimizing the need to switch between documentation and code.
+- **Privacy Support:** To safeguard the integrity of your objects, Telekinesis respects privacy conventions. It blocks all access to attributes and methods of an object that begin with an underscore (_), thus enabling the implementation of private attributes and methods. Only standard dunder methods such as __call__, __init__, __add__, etc., are exempted from this restriction. This feature ensures that the internal state and functionality of your objects remain under control while still allowing for extensive interactions.
 
-Note: you can follow along on IPython or on a Jupyter notebook, you just need to `pip install telekinesis` first.
+## Getting Started
 
-```python
-# On IPython or a Jupyter notebook
+This section includes examples to guide you on how to install and use Telekinesis.
 
-import telekinesis as tk
-import pandas # For example
+### Prerequisites
 
-# First let's set up a local telekinesis network
-broker = await tk.Broker().serve() # That's it
+- Python
+- Jupyter notebook or IPython (optional but recommended)
+- JavaScript
 
-# Let's put pandas behind a passkey check so it's not exposed to 
-# every tab on your web browser 
-def passkey_check(submitted_passkey):
-    PASSKEY = '<write a random passkey here>'
-    if submitted_passkey == PASSKEY:
-        return pandas
-    raise PermissionError()
+### Installation
 
-# Now, let's create an SDK for the whole pandas module
-broker.entrypoint, _ = await tk.create_entrypoint(passkey_check) # Done!
+For Python, use pip to install Telekinesis:
+
+```bash
+pip install telekinesis
 ```
 
-Now, for example, we can create and manipulate pandas DataFrames from javascript in a web browser. All you need to do is to either create or navigate to a webpage that has the `telekinesis-js` npm package installed - like (shameless plug) https://www.telekinesis.cloud - and fire up the JS console.
+For JavaScript, make sure to install the correct package: `telekinesis-js`, **not** ~~`telekinesis`~~:
 
-```javascript
-// On a JS console, at a website with telekinesis-js installed
-// (On www.telekinesis.cloud window.TK points to the telekinesis library)
-
-entrypoint = await new TK.Entrypoint() // Connect to our entrypoint
-
-pandas = await entrypoint('<your passkey>') // Let's get to our pandas sdk :)
-
-df = await pandas.DataFrame() // Freedom, so much!
-
-await df.to_ // Try autocomplete!
-
-// Telekinesis also bundles function signatures and docstrings
-console.log(df.to_dict.__signature__)
-console.log(df.to_dict,__doc__)
+```bash
+npm install telekinesis-js
 ```
 
-## Encoding logic
+### Data Encoding
 
-Every time you pass data between a client and a service (like when you're passing an argument to a function or when that function returns something), that data has to be encoded. To make it easy to use, `telekinesis` always follows the same logic:
-
-* Primitives or built in types (`str`, `bytes`, `int`, `float`, `bool`, `NoneType`, `range` and `slice`) are sent directly (meaning they'll be encoded using `bson` on one side and decoded on the other)
-* Collections (`dict`, `list` and `set`) are encoded recursively
-* Telekinesis objects are passed directly
-* Everything else is wrapped in a Telekinesis object so it can be manipulated from the other side.  
-
-You can quickly see this in action by creating a function that returns the argument's type:
+Telekinesis provides a simple and intuitive encoding logic to manage various data types and collections. Here's how you can use it:
 
 ```python
 broker.entrypoint, _ = await tk.create_entrypoint(
@@ -104,8 +74,13 @@ return_dict = await tk.Entrypoint()
 print(await return_dict()) 
 # >> {'int': 10, 'str': 'asdf', 'list': [1, 2, ≈ function <lambda>...]}
 ```
-
-One last thing to note is that whenever a Telekinesis object is passed back to its creator, it gets converted back to the original object it was wrapping. For example:
+To summarize:
+* Primitives or built in types (`str`, `bytes`, `int`, `float`, `bool`, `NoneType`, `range` and `slice`) are sent directly (meaning they'll be encoded using `bson` on one side and decoded on the other)
+* Collections (`dict`, `list` and `set`) are encoded recursively
+* Telekinesis objects are passed directly
+* Everything else is wrapped in a Telekinesis object so it can be manipulated from the other side.
+  
+One other thing to note is that whenever a Telekinesis object is passed back to its creator, it gets converted back to the original object it was wrapping. For example:
 
 ```python
 broker.entrypoint, _ = await tk.create_entrypoint(
@@ -125,31 +100,57 @@ print(await inner_lambda(outer_lambda)) # >> "<class 'function'>"
 # (instead of "<class telekinesis.telekinesis.Telekinesis'>")
 ```
 
+### Usage
 
-## Security
+#### Python
 
-Beware:
-* Telekinesis assumes you know what you're doing: it won't stop you from sharing potentially dangerous functions or objects. For example, `numpy` objects have a `to_file` method that can modify files in your filesystem. Be mindful of what what you share and to whom.
-* **Zero** security experts have gone through the code, checked for vulnerabilities and implemented fixes. Use at your discretion.
+Set up a local telekinesis network and expose a module like pandas:
 
-Having said that, Telekinesis boasts the following features aiming the library to be secure:
+```python
+import telekinesis as tk
+import pandas # For example
 
-* All communication is End-to-End encrypted
-* Every connection is authenticated with a private/public key pair
-* Message brokers validate authorization token chains on every message
-* Clients can only call functions and methods exposed to them
-* Private attributes and methods (those whose name starts with '_') are unreachable by callers (except for `__call__`, `__init__`, `__add__`, and other standard dunder methods)
+# Set up a local telekinesis network
+broker = await tk.Broker().serve()
 
-If you like hacking stuff (while being nice and good), you can help me find  vulnerabilities in this library, and submit them as issues [here](https://github.com/telekinesis-inc/telekinesis/issues).
+# Let's create a simple passkey_check
+def passkey_check(submitted_passkey):
+    PASSKEY = '<write a random passkey here>'
+    if submitted_passkey == PASSKEY:
+        return pandas
+    raise PermissionError()
 
-## Other features
+# Expose pandas module with a passkey check
+broker.entrypoint, _ = await tk.create_entrypoint(passkey_check) 
+```
 
-If you're like me and prefer reading code to written text, then: great news! You can read all the features built into telekinesis at [the python's tests folder](https://github.com/telekinesis-inc/telekinesis/tree/main/python/test) or at the [js spec file](https://github.com/telekinesis-inc/telekinesis/blob/main/js/src/telekinesis.spec.ts).
+#### JavaScript
 
-If you prefer written text and guides to code... I guess you'll have to wait for now, sorry :/
+Create and manipulate pandas DataFrames from JavaScript in a web browser:
 
-## Join me
+```javascript
+// Connect to the entrypoint
+entrypoint = await new TK.Entrypoint()
 
-So far I've been developing this by myself, mostly with the idea of making [serverless easy and powerful](https://www.telekinesis.cloud). However, if you like where this *"Instant SDKs"* project is going (or think this is a cool idea like me), it'd be great to talk with you.
+// Get pandas sdk
+pandas = await entrypoint('<your passkey>')
 
-You can email me at [contact@telekinesis.cloud](contact@telekinesis.cloud) or chat with me on [Discord](https://discord.gg/p7Trmr2S)
+// Create a DataFrame
+df = await pandas.DataFrame()
+```
+
+## Security Notice
+
+Please note that Telekinesis won't stop you from sharing potentially dangerous functions or objects, and you are responsible for what you expose. However, we've implemented several security measures to secure your communications. If you find any vulnerabilities, feel free to submit them as issues on our [GitHub page](https://github.com/telekinesis-inc/telekinesis/issues). You can also the maintainer directly by (email)[elias@payperrun.com).
+
+## Additional Features
+
+Explore all features built into Telekinesis at our [Python tests folder](https://github.com/telekinesis-inc/telekinesis/tree/main/python/test) or the [JavaScript spec file](https://github.com/telekinesis-inc/telekinesis/blob/main/js/src/telekinesis.spec.ts).
+
+## Contributing
+
+We welcome contributions from the community. If you're interested in helping, please check out our [contributing guide](CONTRIBUTING.md).
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for more details.
