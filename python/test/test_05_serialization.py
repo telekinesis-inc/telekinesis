@@ -33,8 +33,8 @@ async def test_serialize():
         def serialize(self, arg):
             arg._block_gc = True
             self._data = bson.dumps(Telekinesis(None, self._session)._encode(arg))
-        def deserialize(self):
-            return Telekinesis(None, self._session)._decode(bson.loads(self._data))
+        async def deserialize(self):
+            return await Telekinesis(None, self._session)._decode(bson.loads(self._data))
 
 
     registry_0 = await Entrypoint(f"ws://localhost:{BROKER_PORT}")
@@ -42,7 +42,8 @@ async def test_serialize():
     registry_2 = await Entrypoint(f"ws://localhost:{BROKER_PORT}")
 
     await registry_0.update({"arg_keeps_pipeline": arg_keeps_pipeline})
-    assert await registry_1.get("arg_keeps_pipeline")(registry_1.get)
+    takp = await registry_1.get('arg_keeps_pipeline')
+    assert await takp(registry_1.get)
 
     serializer = Serializer(registry_0._session)
     await registry_0.update({"serializer": serializer})

@@ -106,7 +106,13 @@ export class State {
   updateFromTarget(target: Object) {
     if (target !== undefined && target !== null) {
       if ((target as Telekinesis)._isTelekinesisObject) {
-        return (target as Telekinesis)._state;
+        // console.log((target as Telekinesis)._state)
+        const newState = (target as Telekinesis)._state.clone();
+        this._historyOffset = 1;
+        for (let prop of ['attributes', 'methods', 'repr', 'doc', 'name']) {
+          (this as any)[prop] = (newState as any)[prop];
+        }
+        return this;
       }
       const newProps = {
         attributes: Object.getOwnPropertyNames(target)
@@ -538,7 +544,7 @@ export class Telekinesis extends Function {
           await replyTo.validateTokenChain(await this._session.sessionKey.publicSerial(false));
           metadata.replyTo = replyTo;
         }
-        pipeline = this._decode((payload as any)['pipeline']) as [];
+        pipeline = await this._decode((payload as any)['pipeline'], metadata.caller.session[0]) as [];
         // console.log(`${metadata.caller.session.slice(0, 4)} called ${pipeline.length}`)
 
         // console.log('>>>', this._state.repr)
@@ -822,18 +828,15 @@ export class Telekinesis extends Function {
 
       if ((response as any).root_parent) {
         const root = this._getRootParent();
-        const [lastVersion, diffs] = root._decode((response as any).root_parent, metadata.caller?.session[0])._state.getDiffs(0, undefined, true);
+        const [lastVersion, diffs] = (await root._decode((response as any).root_parent, metadata.caller?.session[0]))._state.getDiffs(0, undefined, true);
         root._updateState(lastVersion, diffs);
       }
       // console.log(response)
       if (Object.getOwnPropertyNames(response).includes('error')) {
         throw Error((response as any).error);
       } else if (Object.getOwnPropertyNames(response).includes('return')) {
-        let out = this._decode((response as any)['return'], (this._target as Route).session[0])
-        if (out?._isTelekinesisObject === true) {
-          out._lastUpdate = Date.now();
-          out._blockThen = true;
-        }
+        // console.log(response)
+        let out = await this._decode((response as any)['return'], (this._target as Route).session[0]);
         // console.log(out)
         return out
       }
@@ -1000,7 +1003,7 @@ export class Telekinesis extends Function {
     }
     return id.toString();
   }
-  _decode(inputStack: {}, callerId?: string, root?: string, outputStack: Map<string, any> = new Map()) {
+  async _decode(inputStack: {}, callerId?: string, root?: string, outputStack: Map<string, any> = new Map()) {
     let out: any;
     if (root === undefined) {
       // console.log(inputStack)
@@ -1023,7 +1026,7 @@ export class Telekinesis extends Function {
         let arr = Array(obj.length);
         outputStack.set(root, arr);
         for (let k in (obj as [])) {
-          arr[k] = this._decode(inputStack, callerId, obj[k], outputStack);
+          arr[k] = await this._decode(inputStack, callerId, obj[k], outputStack);
         }
         if (typ === 'set') {
           out = arr.reduce((p, v) => { p.add(v); return p }, new Set());
@@ -1044,8 +1047,8 @@ export class Telekinesis extends Function {
         outputStack.set(root, out);
 
         for (let [k_raw, v_raw] of obj) {
-          let k = this._decode(inputStack, callerId, k_raw, outputStack);;
-          out[k] = this._decode(inputStack, callerId, v_raw, outputStack);
+          let k = await this._decode(inputStack, callerId, k_raw, outputStack);;
+          out[k] = await this._decode(inputStack, callerId, v_raw, outputStack);
         }
         outputStack.set(root, out);
       } else if (typ === 'route') {
@@ -1053,37 +1056,80 @@ export class Telekinesis extends Function {
       } else {
         // console.log(typ, obj)
         const route = Route.fromObject(obj[0]);
-        const [lastVersion, stateDiffs] = this._decode(inputStack, callerId, obj[1], outputStack) as [number, any];
+        const [lastVersion, stateDiffs] = await this._decode(inputStack, callerId, obj[1], outputStack) as [number, any];
+        // console.log(
+        //   JSON.stringify(route.session) == JSON.stringify([await this._session.sessionKey.publicSerial(false), this._session.instanceId]),
+        //   this._session.channels.has(route.channel), callerId 
+        // )
 
-        if (!this._session.routes.has(route._hash)) {
-          this._session.routes.set(route._hash, { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() })
-        }
-        const o = this._session.routes.get(route._hash) as any;
-        o.state.updateFromDiffs(lastVersion, stateDiffs)
+        if (
+          JSON.stringify(route.session) == JSON.stringify([await this._session.sessionKey.publicSerial(false), this._session.instanceId]) &&
+          this._session.channels.has(route.channel) && callerId 
+        ) {
+          let channel = this._session.channels.get(route.channel);
 
-        if (this._parent && root === '0') {
-          this._target = route;
-          o.refcount += 1;
-          // console.log('pb', this._state)
-          this._updateState(...o.state.getDiffs(0, undefined, true));
-          // console.log('pa', this._state, o.state)
-          this._parent = undefined;
-          out = this._proxy;
-        } else if (this._target instanceof Route && JSON.stringify(this._target.toObject()) === JSON.stringify(route.toObject())) {
-          // console.log('pb', this._state)
-          this._updateState(...o.state.getDiffs(0, undefined, true));
-          out = this._proxy;
+
+          // console.log(stateDiffs)
+          if (await channel?.validateTokenChain(callerId, route.tokens)) {
+            if (stateDiffs?.pipeline) {
+              out = new Telekinesis(
+                channel?.telekinesis?._target,
+                this._session,
+                this._mask,
+                this._exposeTb,
+                this._maxDelegationDepth
+              );
+              // console.log(stateDiffs.pipeline)
+              out._state = channel?.telekinesis?._state.clone();
+              out._state.updateFromDiffs(lastVersion, stateDiffs);
+
+              out._state.pipeline = stateDiffs.pipeline
+              if (!(out._target instanceof Route)) {
+                out = await out
+              }
+              // console.log(out, out._state.pipeline)
+              // out = await out;
+            } else {
+              out = channel?.telekinesis?._target;
+            }
+          }
+
         } else {
-          out = new Telekinesis(
-            route,
-            this._session,
-            this._mask,
-            this._exposeTb,
-            this._maxDelegationDepth,
-          )
+
+          if (!this._session.routes.has(route._hash)) {
+            this._session.routes.set(route._hash, { refcount: 0, delegations: new Set<[string, string | null]>(), state: new State() })
+          }
+          const o = this._session.routes.get(route._hash) as any;
+          o.state.updateFromDiffs(lastVersion, stateDiffs)
+
+          if (this._parent && root === '0') {
+            this._target = route;
+            o.refcount += 1;
+            // console.log('pb', this._state)
+            this._updateState(...o.state.getDiffs(0, undefined, true));
+            // console.log('pa', this._state, o.state)
+            this._parent = undefined;
+            out = this._proxy;
+          } else if (this._target instanceof Route && JSON.stringify(this._target.toObject()) === JSON.stringify(route.toObject())) {
+            // console.log('pb', this._state)
+            this._updateState(...o.state.getDiffs(0, undefined, true));
+            out = this._proxy;
+          } else {
+            out = new Telekinesis(
+              route,
+              this._session,
+              this._mask,
+              this._exposeTb,
+              this._maxDelegationDepth,
+            )
+          }
         }
       }
 
+      if (out?._isTelekinesisObject === true) {
+        out._lastUpdate = Date.now();
+        out._blockThen = true;
+      }
       outputStack.set(root, out);
       return out;
     }

@@ -111,7 +111,8 @@ class State:
                         try:
                             signature = str(inspect.signature(target_attribute))
 
-                            if "_tk_inject_first_arg" in dir(target_attribute) and target_attribute._tk_inject_first_arg:
+                            if "_tk_inject_first_arg" in dir(target_attribute) and target_attribute._tk_inject_first_arg or \
+                            '__call__' in dir(target_attribute) and '_tk_inject_first_arg' in dir(target_attribute.__call__) and target_attribute.__call__._tk_inject_first_arg:
                                 signature = (
                                     re.sub(r"[a-zA-Z0-9=\_\s]+(?=[\)\,])", "", signature, 1)
                                     .replace("(,", "(", 1)
@@ -468,7 +469,9 @@ class Telekinesis:
                 await channel.channel.send(metadata.caller, {"pong": True})
             elif "pipeline" in payload:
                 self._requests[metadata.caller] = {'metadata': metadata, 'payload': payload, 'channel': channel}
-                pipeline = self._decode(payload.get("pipeline"), metadata.caller.session[0])
+                pipeline = await self._decode(
+                    payload.get("pipeline"), metadata.caller.session[0], 
+                    block_arg_evaluation="_tk_block_arg_evaluation" in dir(self._target) and self._target._tk_block_arg_evaluation)
                 self._logger.info("%s %s called %s %s", metadata.caller.session[0][:4], metadata.caller.session[1][:2], self, len(pipeline))
                 # print('...', self._requests.keys())
                 if payload.get("reply_to"):
@@ -606,8 +609,12 @@ class Telekinesis:
                 adjusted_tb = tb[2:]
 
                 new_message = str(exc_value) + '\n'
-                for _ in adjusted_tb:
-                    new_message += f'  Remote exception on Telekinesis object "\u2248\033 {self._state.repr}", {self._session}, {str(self._target)}\n'
+                for frame in adjusted_tb:
+                    new_message += f'  File "{frame.filename}" in {frame.name}, line {frame.lineno}\n'
+                    new_message += f'    {frame.line}\n'
+                # for a in adjusted_tb:
+                #     new_message += str(a) + '\n'
+                new_message += f'  Remote exception on Telekinesis object "\u2248\033 {self._state.repr}", {self._session}, {str(self._target)}\n'
 
                 # Raise a new exception with the error message forwarded from the remote telekinesis object
                 raise exc_type(new_message) from None
@@ -689,7 +696,9 @@ class Telekinesis:
 
                 if (
                     "_tk_inject_first_arg" in dir(target) and target._tk_inject_first_arg or
-                    isinstance(target, type) and "_tk_inject_first_arg" in dir(target.__init__) and target.__init__._tk_inject_first_arg
+                    isinstance(target, type) and "_tk_inject_first_arg" in dir(target.__init__) and target.__init__._tk_inject_first_arg or
+                    not isinstance(target, type) and '__call__' in dir(target) and '_tk_inject_first_arg' in dir(target.__call__) and
+                    target.__call__._tk_inject_first_arg
                 ):
                     metadata.pipeline = pipeline[i+1:]
                     check_pipeline = True
@@ -756,7 +765,7 @@ class Telekinesis:
 
             if response.get("root_parent"):
                 root = self._get_root_parent()
-                diffs = root._decode(response["root_parent"], metadata.caller.session[0])._state.get_diffs(0, None, True)
+                diffs = (await root._decode(response["root_parent"], metadata.caller.session[0]))._state.get_diffs(0, None, True)
                 root._update_state(diffs)
 
             if "error" in response:
@@ -768,7 +777,7 @@ class Telekinesis:
                     raise Exception(response["error"])
 
             if "return" in response:
-                ret = self._decode(response["return"], metadata.caller.session[0])
+                ret = await self._decode(response["return"], metadata.caller.session[0])
                 return ret
 
     async def _close(self):
@@ -965,7 +974,7 @@ class Telekinesis:
             return {str(v[0]): v[1] for v in traversal_stack.values()}
         return str(i)
 
-    def _decode(self, input_stack, caller_id=None, root=None, output_stack=None):
+    async def _decode(self, input_stack, caller_id=None, root=None, output_stack=None, block_arg_evaluation=False):
         out = None
         if root is None:
             root = "0"
@@ -982,32 +991,34 @@ class Telekinesis:
             out = [None] * len(obj)
             output_stack[root] = out
             for k, v in enumerate(obj):
-                out[k] = self._decode(input_stack, caller_id, v, output_stack)
+                out[k] = await self._decode(input_stack, caller_id, v, output_stack, block_arg_evaluation)
         elif typ == "set":
             out = set()
             output_stack[root] = out
             for v in obj:
-                out.add(self._decode(input_stack, caller_id, v, output_stack))
+                out.add(await self._decode(input_stack, caller_id, v, output_stack, block_arg_evaluation))
         elif typ == "tuple":
-            out = tuple(self._decode(input_stack, caller_id, v, output_stack) for v in obj)
+            out = tuple([await self._decode(input_stack, caller_id, v, output_stack, block_arg_evaluation) for v in obj])
         elif typ == "dict":
             out = {}
             output_stack[root] = out
             for k, v in obj:
-                out[self._decode(input_stack, caller_id, k, output_stack)] = self._decode(input_stack, caller_id, v, output_stack)
+                out[await self._decode(input_stack, caller_id, k, output_stack, block_arg_evaluation)] = \
+                    await self._decode(input_stack, caller_id, v, output_stack, block_arg_evaluation)
         elif typ == "route":
             out = Route(**obj)
         else:
             route = Route(**obj[0])
-            state_diff = self._decode(input_stack, caller_id, obj[1], output_stack)
+            state_diff = await self._decode(input_stack, caller_id, obj[1], output_stack, block_arg_evaluation)
 
             if route.session == (self._session.session_key.public_serial(False), self._session.instance_id) and route.channel in self._session.channels:
                 channel = self._session.channels.get(route.channel)
                 if channel.validate_token_chain(caller_id, route.tokens):
+                    # print('>', channel.telekinesis, state_diff[1].get('pipeline'), block_arg_evaluation)
 
                     if state_diff[1].get('pipeline'):
                         
-                        return Telekinesis._from_state(
+                        out = Telekinesis._from_state(
                             channel.telekinesis._state.clone().update_from_diffs(*state_diff),
                             channel.telekinesis._target,
                             self._session,
@@ -1017,7 +1028,10 @@ class Telekinesis:
                             self._block_gc,
                             channel.telekinesis,
                         )
-                    out = channel.telekinesis._target
+                        if not block_arg_evaluation:
+                            out = await out
+                    else:
+                        out = channel.telekinesis._target
                 else:
                     raise PermissionError(f"Unauthorized! {caller_id} {route} {route.tokens}")
             # elif self._parent and (

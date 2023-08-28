@@ -15,12 +15,12 @@ export async function authenticate(urlOrEntrypoint: string | Telekinesis = 'ws:/
 
   async function printCallbackWrapper(...args: any) {
     if (!pubkeyWasChecked){
-      if (args[0] !== await entrypoint._session.sessionKey.publicSerial()) {
-        throw new PermissionError("Public keys don't match")
-      }
       pubkeyWasChecked = true;
+      if (args[0] !== await entrypoint._session.sessionKey.publicSerial()) {
+        throw new PermissionError(`Public keys don't match`)
+      }
       if (!printCallback) {
-        return
+        return;
       }
       args = ["Your session public key is:\n"+args[0], ...args.slice(1)];
     }
