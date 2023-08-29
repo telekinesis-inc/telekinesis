@@ -72,7 +72,7 @@ class State:
     def update_from_target(self, target):
         logger = logging.getLogger(__name__)
 
-        attributes, methods, repr_ = {}, {}, ""
+        attributes, methods, repr_, doc = {}, {}, "", ""
 
         for attribute_name in dir(target):
             if attribute_name[0] != "_" or attribute_name in [
@@ -144,12 +144,16 @@ class State:
         except:
             name = None
 
-        if isinstance(target, type):
-            repr_ = str(type(target))
-            doc = target.__doc__
-        else:
-            doc = target.__doc__
-            repr_ = target.__repr__()
+        try:
+            if isinstance(target, type):
+                repr_ = str(type(target))
+                doc = target.__doc__
+            else:
+                doc = target.__doc__
+                repr_ = target.__repr__()
+        except Exception as e:
+            logger.error("Could not obtain repr or __doc__ for %s: %s", target, e)
+
 
         if self._history_offset == 0:
             self._history_offset = 1

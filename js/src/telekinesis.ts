@@ -104,6 +104,9 @@ export class State {
     return [0, out];
   }
   updateFromTarget(target: Object) {
+    const signatureRegex = /\([^\)]*\([^\)]*\)[^\)]*\([^\)]*\)[^\)]*\)|\([^\)]*\([^\)]*\)[^\)]*\)|\([^\)]*\)/
+    const docstringRegex = /^(\s*\/\*)([\s\S]*)(?=\*\/)/;
+
     if (target !== undefined && target !== null) {
       if ((target as Telekinesis)._isTelekinesisObject) {
         // console.log((target as Telekinesis)._state)
@@ -128,13 +131,42 @@ export class State {
           }, new Map()),
         methods: Object.getOwnPropertyNames(Object.getPrototypeOf(target) || {})
           .filter(x => !['constructor', 'arguments', 'caller', 'callee', 'prototype'].includes(x) && x[0] !== '_')
-          .reduce((p, v) => { p.set(v, ['(*args)', (target as any)[v].toString()]); return p }, new Map()),
-        repr: (target.toString && target.toString()) || '',
+          .reduce((p, v) => {
+            let signature = '';
+            let doc = ''
+            let str = (target as any)[v].toString();
+            try {
+              signature = (signatureRegex.exec(str) || [''])[0]
+              if (signature.length) {
+                doc = (docstringRegex.exec(str.split(signature)[1]) || [])[2] || '';
+                doc = doc.split('*/')[0];
+              }
+            } catch (e) {
+              console.info(e);
+            }
+            p.set(v, [(target as any)[v].__signature__ || signature, (target as any)[v].__doc__ || doc]); 
+            return p 
+          }, new Map()),
+        repr: ((target.toString && target.toString()) || '').slice(0, 200).split('\n')[0],
         doc: (target as any).__doc__,
         name: (target as any).__name__,
       };
       if (target instanceof Function) {
-        newProps.methods.set('__call__', ['(*args)', target.toString()]);
+        let signature = '';
+        let doc = ''
+        let str = (target as any).toString();
+        try {
+          signature = (signatureRegex.exec(str) || [''])[0]
+          if (signature.length) {
+            doc = (docstringRegex.exec(str.split(signature)[1]) || [])[2] || ''
+            doc = doc.split('*/')[0];
+            //console.log(str.split(signature)[1], doc)
+          }
+        } catch (e) {
+          console.info(e);
+        }
+        newProps.methods.set('__call__', [(target as any).__signature__ || signature, (target as any).__doc__ || doc]); 
+        // newProps.methods.set('__call__', ['(*args)', target.toString()]);
       }
       if (this._historyOffset == 0) {
         const newState = State.fromObject(newProps);
