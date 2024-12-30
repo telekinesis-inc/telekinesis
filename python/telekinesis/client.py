@@ -8,9 +8,15 @@ import zlib
 from collections import deque, OrderedDict
 from pkg_resources import get_distribution
 import hashlib
-
-import websockets
 import ujson
+
+from packaging import version
+import websockets
+
+if version.parse(websockets.__version__) >= version.parse("14.0"):
+    from websockets.legacy.client import connect as ws_connect
+else:
+    from websockets import connect as ws_connect
 
 from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignature
 
@@ -54,7 +60,7 @@ class Connection:
         if self.websocket:
             await self.websocket.close()
 
-        self.websocket = await websockets.connect(self.url)
+        self.websocket = await ws_connect(self.url)
 
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], "big")

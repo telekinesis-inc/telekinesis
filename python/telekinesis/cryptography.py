@@ -22,7 +22,7 @@ class PrivateKey:
             self.name = pk.name
             return
 
-        self.key = ec.generate_private_key(curve=ec.SECP256R1, backend=default_backend())
+        self.key = ec.generate_private_key(curve=ec.SECP256R1(), backend=default_backend())
 
         if key_file:
             self.save_key_file(key_file, password)

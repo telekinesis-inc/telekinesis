@@ -7,7 +7,15 @@ import re
 from pkg_resources import get_distribution
 
 import ujson
+
+from packaging import version
 import websockets
+
+if version.parse(websockets.__version__) >= version.parse("14.0"):
+    from websockets.legacy.client import connect as ws_connect
+    from websockets.legacy.server import serve as ws_serve
+else:
+    from websockets import serve as ws_serve
 
 from .cryptography import PrivateKey, PublicKey, Token, InvalidSignature
 from .client import Route
@@ -419,7 +427,9 @@ class Broker:
     async def serve(self, host="127.0.0.1", port=8776, **kwargs):
         if "compression" not in kwargs:
             kwargs["compression"] = None
-        server = await websockets.serve(self.handle_connection, host, port, **kwargs)
+        
+        server = await ws_serve(self.handle_connection, host, port, **kwargs)
+
         self.servers[(host, port)] = server
 
         return self
@@ -452,7 +462,10 @@ class Peer(Connection):
         if self.websocket:
             await self.websocket.close()
 
-        self.websocket = await websockets.connect(self.url)
+        if websockets.__version__ >= '14':
+            self.websocket = await websockets.legacy.client.connect(self.url)
+        else:
+            self.websocket = await websockets.connect(self.url)
 
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], "big")
