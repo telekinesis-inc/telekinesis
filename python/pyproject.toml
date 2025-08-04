@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telekinesis"
+version = "0.1.88"
+authors = [
+    {name = "Telekinesis, Inc.", email = "support@telekinesis.cloud"},
+]
+description = "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls."
+readme = "README.md"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "websockets>=10.0",
+    "cryptography",
+    "bson",
+    "ujson",
+    "packaging",
+]
+
+[project.urls]
+Homepage = "https://github.com/telekinesis-cloud/telekinesis"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
