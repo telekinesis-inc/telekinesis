@@ -4,7 +4,7 @@ import asyncio
 import time
 from packaging import version
 import re
-from pkg_resources import get_distribution
+from importlib.metadata import version as get_version
 
 import ujson
 
@@ -162,7 +162,7 @@ class Broker:
         self.seen_messages = [set(), set(), 0]
         self.topology_cache = {0: {}}
 
-    async def handle_connection(self, websocket, _):
+    async def handle_connection(self, websocket):
         connection = None
         try:
             connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.entrypoint, list(self.topology_cache[0]))
@@ -476,7 +476,7 @@ class Peer(Connection):
         pk = self.broker.broker_key.public_serial().encode()
 
         sent_challenge = os.urandom(32)
-        sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
+        sent_metadata = {"version": get_version(__name__.split(".")[0])}
         await self.websocket.send(signature + pk + sent_challenge + ujson.dumps(sent_metadata).encode())
 
         m = await asyncio.wait_for(self.websocket.recv(), 15)

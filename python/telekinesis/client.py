@@ -6,7 +6,7 @@ import asyncio
 import bson
 import zlib
 from collections import deque, OrderedDict
-from pkg_resources import get_distribution
+from importlib.metadata import version as get_version
 import hashlib
 import ujson
 
@@ -71,7 +71,7 @@ class Connection:
         pk = self.session.session_key.public_serial(False).encode()
 
         sent_challenge = os.urandom(32)
-        sent_metadata = {"version": get_distribution(__name__.split(".")[0]).version}
+        sent_metadata = {"version": get_version(__name__.split(".")[0])}
         await self.websocket.send(
             signature + pk + sent_challenge + ujson.dumps(sent_metadata, escape_forward_slashes=False).encode()
         )
