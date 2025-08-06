@@ -12,8 +12,8 @@ from packaging import version
 import websockets
 
 if version.parse(websockets.__version__) >= version.parse("14.0"):
-    from websockets.legacy.client import connect as ws_connect
-    from websockets.legacy.server import serve as ws_serve
+    from websockets.asyncio.client import connect as ws_connect
+    from websockets.asyncio.server import serve as ws_serve
 else:
     from websockets import connect as ws_connect
     from websockets import serve as ws_serve
@@ -280,7 +280,7 @@ class Broker:
                 if brokers:
                     for broker_id in brokers:
                         for broker_connection in self.topology_cache[depth][broker_id]:
-                            if broker_connection.websocket.closed == False:
+                            try:
                                 await broker_connection.websocket.send(message)
                                 self.logger.info(
                                     "%s: send %s %s ))) %s ))) %s %s (%s)",
@@ -292,6 +292,8 @@ class Broker:
                                     destination["channel"][:4],
                                     broker_id[:4],
                                 )
+                            except websockets.ConnectionClosed:
+                                continue
                     return
             for peer in set().union(*self.topology_cache[0].values()):
                 await peer.send(
@@ -470,10 +472,7 @@ class Peer(Connection):
         if self.websocket:
             await self.websocket.close()
 
-        if websockets.__version__ >= '14':
-            self.websocket = await websockets.legacy.client.connect(self.url)
-        else:
-            self.websocket = await websockets.connect(self.url)
+        self.websocket = await ws_connect(self.url)
 
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], "big")

@@ -14,7 +14,7 @@ from packaging import version
 import websockets
 
 if version.parse(websockets.__version__) >= version.parse("14.0"):
-    from websockets.legacy.client import connect as ws_connect
+    from websockets.asyncio.client import connect as ws_connect
 else:
     from websockets import connect as ws_connect
 
@@ -168,7 +168,7 @@ class Connection:
             self.awaiting_ack[message_id or s] = (header, bundle_id, lock, time.time())
 
         for retry in range(self.MAX_SEND_RETRIES + 1):
-            if not self.websocket or self.websocket.closed:
+            if not self.websocket:
                 self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial(False)[:4], retry)
                 if self.is_connecting_lock.is_set():
                     await self.reconnect()
@@ -177,6 +177,9 @@ class Connection:
 
             try:
                 await self.websocket.send(s + mm)
+            except websockets.ConnectionClosed:
+                self.websocket = None
+                continue
             except Exception:
                 self.logger.info("%s Connection.send", self.session.session_key.public_serial(False)[:4], exc_info=True)
                 continue
@@ -239,13 +242,17 @@ class Connection:
             n_tries += 1
 
     async def recv(self):
-        if not self.websocket or self.websocket.closed:
+        if not self.websocket:
             if self.is_connecting_lock.is_set():
                 await self.reconnect()
             else:
                 await self.is_connecting_lock.wait()
 
-        message = await self.websocket.recv()
+        try:
+            message = await self.websocket.recv()
+        except websockets.ConnectionClosed:
+            self.websocket = None
+            raise
 
         signature, timestamp = message[:64], int.from_bytes(message[64:68], "big")
 
