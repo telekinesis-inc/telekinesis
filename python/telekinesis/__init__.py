@@ -5,7 +5,10 @@ from .helpers import Entrypoint, authenticate, create_entrypoint
 from .cryptography import PrivateKey, PublicKey, SharedKey, Token
 from . import cryptography
 
-from importlib.metadata import version as get_version
+try:
+    from importlib.metadata import version as get_version
+except ImportError:
+    from importlib_metadata import version as get_version
 
 __version__ = get_version(__name__)
 

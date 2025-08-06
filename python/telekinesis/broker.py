@@ -4,7 +4,10 @@ import asyncio
 import time
 from packaging import version
 import re
-from importlib.metadata import version as get_version
+try:
+    from importlib.metadata import version as get_version
+except ImportError:
+    from importlib_metadata import version as get_version
 
 import ujson
 
@@ -67,7 +70,8 @@ class Connection:
 
     async def close(self, sessions, remove=True):
         try:
-            await self.websocket.close()
+            if self.websocket:
+                await self.websocket.close()
             for channel in self.channels:
                 if self in channel.connections:
                     channel.connections.remove(self)
@@ -164,7 +168,7 @@ class Broker:
         self.seen_messages = [set(), set(), 0]
         self.topology_cache = {0: {}}
 
-    async def handle_connection(self, websocket):
+    async def handle_connection(self, websocket, _=None):
         connection = None
         try:
             connection = await Connection(websocket).handshake(self.sessions, self.broker_key, self.entrypoint, list(self.topology_cache[0]))

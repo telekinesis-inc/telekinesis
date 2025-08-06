@@ -10,18 +10,18 @@ authors = [
 ]
 description = "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls."
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "websockets>=10.0",
-    "cryptography",
-    "bson",
-    "ujson",
-    "packaging",
+    "websockets>=11.0",
+    "cryptography>=35.0",
+    "bson>=0.5.10",
+    "ujson>=4.0.0",
+    "packaging>=20.0",
 ]
 
 [project.urls]

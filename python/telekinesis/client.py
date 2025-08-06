@@ -6,7 +6,10 @@ import asyncio
 import bson
 import zlib
 from collections import deque, OrderedDict
-from importlib.metadata import version as get_version
+try:
+    from importlib.metadata import version as get_version
+except ImportError:
+    from importlib_metadata import version as get_version
 import hashlib
 import ujson
 
