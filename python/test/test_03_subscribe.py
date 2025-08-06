@@ -14,30 +14,35 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 
 
 async def test_subscribe():
-    bro = await Broker().serve(port=8780)
+    async with Broker() as bro:
+        await bro.serve(port=8780)
 
-    class Registry(dict):
-        pass
+        class Registry(dict):
+            pass
 
-    bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8780")
+        bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8780")
 
-    class Counter:
-        def __init__(self, initial_value=0):
-            self.value = initial_value
+        class Counter:
+            def __init__(self, initial_value=0):
+                self.value = initial_value
 
-        def increment(self, amount=1):
-            self.value += amount
-            return self
+            def increment(self, amount=1):
+                self.value += amount
+                return self
 
-    registry = await Entrypoint("ws://localhost:8780")
-    await registry.update({"counter": Counter(2)})
+        async with Entrypoint("ws://localhost:8780") as registry:
+            await registry.update({"counter": Counter(2)})
 
-    counter0 = await Entrypoint("ws://localhost:8780").get("counter")
-    counter1 = await Entrypoint("ws://localhost:8780").get("counter")._subscribe()
+            async with Entrypoint("ws://localhost:8780") as counter0_ep:
+                counter0 = await counter0_ep.get("counter")
+                
+                async with Entrypoint("ws://localhost:8780") as counter1_ep:
+                    counter1 = await counter1_ep.get("counter")._subscribe()
 
-    assert counter1.value._last_value == 2
+                    assert counter1.value._last_value == 2
 
-    await counter0.increment(3).increment(1)
+                    await counter0.increment(3).increment(1)
 
-    await asyncio.sleep(0.1)
-    assert counter1.value._last_value == 6
+                    await asyncio.sleep(0.1)
+                    assert counter1.value._last_value == 6
+

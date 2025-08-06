@@ -787,11 +787,13 @@ class Telekinesis:
     async def _close(self):
         try:
             if isinstance(self._target, Route):
-                self._session.routes[(self._target.session, self._target.channel)]["refcount"] -= 1
-                if self._session.routes[(self._target.session, self._target.channel)]["refcount"] <= 0:
-                    o = self._session.routes.pop((self._target.session, self._target.channel))
-                    async with Channel(self._session) as new_channel:
-                        await new_channel.send(self._target, {"close": list(o["delegations"])})
+                route_key = (self._target.session, self._target.channel)
+                if route_key in self._session.routes:
+                    self._session.routes[route_key]["refcount"] -= 1
+                    if self._session.routes[route_key]["refcount"] <= 0:
+                        o = self._session.routes.pop(route_key)
+                        async with Channel(self._session) as new_channel:
+                            await new_channel.send(self._target, {"close": list(o["delegations"])})
             else:
                 # print('closing', id(self._target), self._session.targets.get(id(self._target)))
                 if id(self._target) in self._session.targets:
@@ -799,10 +801,22 @@ class Telekinesis:
                     if not self._session.targets[id(self._target)]:
                         self._session.targets.pop(id(self._target))
                     self._channel and await self._channel.close()
+                    
+            # Close the session if this is the last Telekinesis object using it
+            if len(self._session.targets) == 0 and len(self._session.routes) == 0:
+                await self._session.close()
+            
         except ConnectionError:
             self._session.logger.info("Error closing Telekinesis Object: %s", self._target, exc_info=True)
         except Exception:
             self._session.logger.error("Error closing Telekinesis Object: %s", self._target, exc_info=True)
+    
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self._close()
+        await self._session.close()
 
     async def _forward(self, pipeline, reply_to=None, session=None, **kwargs):
         async with Channel(self._session) as new_channel:

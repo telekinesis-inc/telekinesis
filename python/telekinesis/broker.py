@@ -15,10 +15,12 @@ if version.parse(websockets.__version__) >= version.parse("14.0"):
     from websockets.legacy.client import connect as ws_connect
     from websockets.legacy.server import serve as ws_serve
 else:
+    from websockets import connect as ws_connect
     from websockets import serve as ws_serve
 
 from .cryptography import PrivateKey, PublicKey, Token, InvalidSignature
 from .client import Route
+from .telekinesis import Telekinesis
 
 
 class Connection:
@@ -440,6 +442,12 @@ class Broker:
             if not host or server_host == host:
                 if not port or server_port == port:
                     self.servers.pop((server_host, server_port)).close()
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
 
 class Peer(Connection):

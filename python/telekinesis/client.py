@@ -114,6 +114,24 @@ class Connection:
 
         return self
 
+    async def close(self):
+        """Close the connection and cancel background tasks."""
+        if self.listener:
+            self.listener.cancel()
+            try:
+                await self.listener
+            except asyncio.CancelledError:
+                pass
+        if self.websocket:
+            await self.websocket.close()
+    
+    async def __aenter__(self):
+        await self
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
     async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
         if not ack_message_id:
             self.logger.info(
@@ -386,6 +404,18 @@ class Session:
     async def send(self, header, payload=b"", bundle_id=None):
         for connection in self.connections:
             await connection.send(header, payload, bundle_id)
+
+    async def close(self):
+        """Close the session and all its connections."""
+        for connection in list(self.connections):
+            await connection.close()
+        self.connections.clear()
+    
+    async def __aenter__(self):
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
 
     def __repr__(self):
         return "Session %s %s" % (

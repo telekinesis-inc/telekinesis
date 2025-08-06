@@ -12,31 +12,33 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
 
 
 async def test_garbage_collection():
-    bro = await Broker().serve(port=8781)
+    async with Broker() as bro:
+        await bro.serve(port=8781)
 
-    class Registry(dict):
-        pass
+        class Registry(dict):
+            pass
 
-    bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8781")
+        bro.entrypoint, _ = await create_entrypoint(Registry(), "ws://localhost:8781")
 
-    class Counter:
-        def __init__(self, initial_value=0):
-            self.value = initial_value
+        class Counter:
+            def __init__(self, initial_value=0):
+                self.value = initial_value
 
-        def increment(self, amount=1):
-            self.value += amount
-            return self
+            def increment(self, amount=1):
+                self.value += amount
+                return self
 
-    registry = await Entrypoint("ws://localhost:8781")
-    await registry.update({"Counter": Counter})
+        async with Entrypoint("ws://localhost:8781") as registry:
+            await registry.update({"Counter": Counter})
 
-    assert len(registry._session.targets) == 1
+            assert len(registry._session.targets) == 1
 
-    counter = await Entrypoint("ws://localhost:8781").get("Counter")(2)
+            async with Entrypoint("ws://localhost:8781") as counter_ep:
+                counter = await counter_ep.get("Counter")(2)
 
-    assert len(registry._session.targets) == 2
+                assert len(registry._session.targets) == 2
 
-    del counter
+                del counter
 
-    await asyncio.sleep(0.1)
-    assert len(registry._session.targets) == 1
+            await asyncio.sleep(0.1)
+            assert len(registry._session.targets) == 1
