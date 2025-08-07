@@ -21,6 +21,9 @@ if version.parse(websockets.__version__) >= version.parse("14.0"):
 else:
     from websockets import connect as ws_connect
 
+# Import fake websockets for HTTP fallback
+from .fake_websockets import fake_ws_connect
+
 from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignature
 
 
@@ -63,7 +66,12 @@ class Connection:
         if self.websocket:
             await self.websocket.close()
 
-        self.websocket = await ws_connect(self.url)
+        # Use HTTP fallback if URL protocol is http/https
+        if self.url.startswith(("http://", "https://")):
+            self.logger.info("%s using HTTP fallback for URL: %s", self.session.session_key.public_serial(False)[:4], self.url)
+            self.websocket = await fake_ws_connect(self.url)
+        else:
+            self.websocket = await ws_connect(self.url)
 
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], "big")

@@ -6,16 +6,24 @@ import bson
 from telekinesis.helpers import create_entrypoint
 
 pytestmark = pytest.mark.asyncio
-BROKER_PORT = 8785
 
-async def test_serialize():
+async def run_serialize_test(host: str, port: int):
+    """Test serialization functionality with specified host (determines transport type)."""
+    # Determine URL based on host
+    if host.startswith(('http://', 'https://')):
+        url = f"{host}:{port}"
+    else:
+        url = f"ws://{host}:{port}"
+    
+    print(f"  Testing serialization with {url}")
+
     async with Broker() as bro:
-        await bro.serve(port=BROKER_PORT)
+        await bro.serve(host, port=port)
 
         class Registry(dict):
             pass
 
-        bro.entrypoint, _ = await create_entrypoint(Registry(), f"ws://localhost:{BROKER_PORT}")
+        bro.entrypoint, _ = await create_entrypoint(Registry(), url)
 
         @block_arg_evaluation
         def arg_keeps_pipeline(arg):
@@ -32,9 +40,9 @@ async def test_serialize():
             async def deserialize(self):
                 return await Telekinesis(None, self._session)._decode(bson.loads(self._data))
 
-        async with Entrypoint(f"ws://localhost:{BROKER_PORT}") as registry_0:
-            async with Entrypoint(f"ws://localhost:{BROKER_PORT}") as registry_1:
-                async with Entrypoint(f"ws://localhost:{BROKER_PORT}") as registry_2:
+        async with Entrypoint(url) as registry_0:
+            async with Entrypoint(url) as registry_1:
+                async with Entrypoint(url) as registry_2:
 
                     await registry_0.update({"arg_keeps_pipeline": arg_keeps_pipeline})
                     takp = await registry_1.get('arg_keeps_pipeline')
@@ -60,8 +68,20 @@ async def test_serialize():
                         await ser.serialize(Telekinesis(prt._target, ser._session)("I shouldn't have permissions"))
                     
                     assert serializer._data == olddata
+
+
+async def test_serialize_websocket():
+    """Test serialization with WebSocket transport."""
+    print("📦 Testing serialization with WebSocket")
+    await run_serialize_test("localhost", 8785)
+
+
+async def test_serialize_http():
+    """Test serialization with HTTP fallback transport."""
+    print("📦 Testing serialization with HTTP fallback")
+    await run_serialize_test("http://localhost", 8786)
     
 
 if __name__ == '__main__':
-    asyncio.run(test_serialize())
+    asyncio.run(test_serialize_websocket())
 

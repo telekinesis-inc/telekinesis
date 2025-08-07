@@ -13,7 +13,22 @@ def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
     yield asyncio.get_event_loop()
 
 
-async def test_walkthrough():
+async def run_walkthrough_test(host_template_1: str, host_template_2: str, start_port: int):
+    """Test walkthrough with two different host templates for broker communication patterns."""
+    
+    # Generate URLs for different brokers
+    def make_url(host_template: str, port: int) -> str:
+        if host_template.startswith(('http://', 'https://')):
+            return f"{host_template}:{port}"
+        else:
+            return f"ws://{host_template}:{port}"
+    
+    url_0 = make_url(host_template_1, start_port)
+    url_1 = make_url(host_template_2, start_port + 1) 
+    url_2 = make_url(host_template_1, start_port + 2)  # Use template_1 for broker_2
+    
+    print(f"  Testing broker communication: {url_0} <-> {url_1} <-> {url_2}")
+    
     class FaultyBroker(Broker):  # Telekinesis should survive broker errors
         async def handle_send(self, *args, **kwargs):
             if random.random() < 0.01:
@@ -22,20 +37,20 @@ async def test_walkthrough():
             await super().handle_send(*args, **kwargs)
 
     async with FaultyBroker() as broker_0:
-        await broker_0.serve(port=8777)
+        await broker_0.serve(host_template_1, port=start_port)
 
-        conn_0 = await Connection(Session(PrivateKey(name='demo')), "ws://localhost:8777")
+        conn_0 = await Connection(Session(PrivateKey(name='demo')), url_0)
         conn_0.RESEND_TIMEOUT = 1
 
         entrypoint_tk = Telekinesis(lambda x: (lambda y: x + y), conn_0.session)
         broker_0.entrypoint = await entrypoint_tk._delegate("*")
 
         async with FaultyBroker() as broker_1:  # Telekinesis works with clusters of Brokers
-            await broker_1.serve(port=8778)
-            await broker_1.add_broker("ws://localhost:8777", True)
+            await broker_1.serve(host_template_2, port=start_port + 1)
+            await broker_1.add_broker(url_0, True)
 
             await asyncio.sleep(0.1)
-            conn_1 = await Connection(Session(), "ws://localhost:8778")
+            conn_1 = await Connection(Session(), url_1)
             conn_1.RESEND_TIMEOUT = 1
 
             f_tk = Telekinesis(conn_1.entrypoint, conn_1.session)
@@ -49,12 +64,12 @@ async def test_walkthrough():
             assert b"Hello, " + long_message == await g(long_message)._timeout(20)  # Telekinesis should handle big messages
 
             async with FaultyBroker() as broker_2:  # Yet another Broker!
-                await broker_2.serve(port=8779)
-                await broker_2.add_broker("ws://localhost:8777", True)
-                await broker_2.add_broker("ws://localhost:8778")
+                await broker_2.serve(host_template_1, port=start_port + 2)
+                await broker_2.add_broker(url_0, True)
+                await broker_2.add_broker(url_1)
 
                 await asyncio.sleep(0.1)
-                conn_2 = await Connection(Session(), "ws://localhost:8778")
+                conn_2 = await Connection(Session(), url_1)
                 conn_2.RESEND_TIMEOUT = 1
 
                 with pytest.raises(asyncio.TimeoutError):
@@ -135,3 +150,21 @@ async def test_walkthrough():
             await f_tk._close()
 
         await entrypoint_tk._close()
+
+
+async def test_walkthrough_ws_ws():
+    """Test walkthrough with WebSocket <-> WebSocket broker communication."""
+    print("🔀 Testing WebSocket <-> WebSocket broker communication")
+    await run_walkthrough_test("localhost", "localhost", 8777)
+
+
+async def test_walkthrough_ws_http():
+    """Test walkthrough with WebSocket <-> HTTP broker communication."""
+    print("🔀 Testing WebSocket <-> HTTP broker communication")  
+    await run_walkthrough_test("localhost", "http://localhost", 8780)
+
+
+async def test_walkthrough_http_http():
+    """Test walkthrough with HTTP <-> HTTP broker communication."""
+    print("🔀 Testing HTTP <-> HTTP broker communication")
+    await run_walkthrough_test("http://localhost", "http://localhost", 8783)

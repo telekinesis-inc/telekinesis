@@ -21,6 +21,9 @@ else:
     from websockets import connect as ws_connect
     from websockets import serve as ws_serve
 
+# Import fake websockets for HTTP fallback
+from .fake_websockets import fake_ws_serve, fake_ws_connect
+
 from .cryptography import PrivateKey, PublicKey, Token, InvalidSignature
 from .client import Route
 from .telekinesis import Telekinesis
@@ -436,7 +439,23 @@ class Broker:
         if "compression" not in kwargs:
             kwargs["compression"] = None
         
-        server = await ws_serve(self.handle_connection, host, port, **kwargs)
+        # Parse protocol from host if included
+        use_http_fallback = False
+        actual_host = host
+        
+        if "://" in host:
+            protocol, actual_host = host.split("://", 1)
+            if protocol.lower() in ["http", "https"]:
+                use_http_fallback = True
+                self.logger.info(f"Using HTTP fallback for protocol: {protocol}")
+        
+        # Use HTTP fallback if protocol is http/https
+        if use_http_fallback:
+            # Remove websockets-specific args that fake_ws_serve doesn't understand
+            http_kwargs = {k: v for k, v in kwargs.items() if k in ['ssl']}
+            server = await fake_ws_serve(self.handle_connection, actual_host, port, **http_kwargs)
+        else:
+            server = await ws_serve(self.handle_connection, actual_host, port, **kwargs)
 
         self.servers[(host, port)] = server
 
@@ -476,7 +495,12 @@ class Peer(Connection):
         if self.websocket:
             await self.websocket.close()
 
-        self.websocket = await ws_connect(self.url)
+        # Use HTTP fallback if URL protocol is http/https
+        if self.url.startswith(("http://", "https://")):
+            self.logger.info("Peer using HTTP fallback for URL: %s", self.url)
+            self.websocket = await fake_ws_connect(self.url)
+        else:
+            self.websocket = await ws_connect(self.url)
 
         challenge = await self.websocket.recv()
         t_broker = int.from_bytes(challenge[-4:], "big")
