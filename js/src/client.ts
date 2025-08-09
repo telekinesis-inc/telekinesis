@@ -2,11 +2,11 @@ import { deserialize, serialize } from "bson";
 import { deflate, inflate } from "pako";
 import { PrivateKey, PublicKey, SharedKey, Token } from "./cryptography";
 import { bytesToInt, intToBytes, b64encode, b64decode } from "./utils";
+import { createWebSocket } from "./fakeWebSocket";
 
 const isNode = typeof global !== 'undefined' && (global as any)?.isNode == true;
-const version = '0.1.60';
+const version = '0.1.88';
 const webcrypto = isNode ? global.crypto : crypto;
-const WS = isNode ? global.WebSocket : WebSocket;
 
 export type Header = ["send", any] | ["listen", any] | ["close", any]
 
@@ -40,7 +40,7 @@ export class Connection {
         this.websocket.close();
         this.websocket = undefined;
       }
-      this.websocket = new WS(this.url) as WebSocket;
+      this.websocket = createWebSocket(this.url) as WebSocket;
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
           console.warn(`Failed connecting to ${this.url}. Retrying: ${retryCount + 1} of ${this.MAX_SEND_RETRIES}`)
