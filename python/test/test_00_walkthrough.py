@@ -5,12 +5,7 @@ import pytest
 import os
 
 pytestmark = pytest.mark.asyncio
-random.seed(42)
-
-
-@pytest.fixture
-def event_loop():  # This avoids 'Task was destroyed but it is pending!' message
-    yield asyncio.get_event_loop()
+random.seed(44)
 
 
 async def run_walkthrough_test(host_template_1: str, host_template_2: str, start_port: int):
@@ -33,7 +28,7 @@ async def run_walkthrough_test(host_template_1: str, host_template_2: str, start
         async def handle_send(self, *args, **kwargs):
             if random.random() < 0.01:
                 self.logger.error("Gotcha!!!")
-                kwargs["message"] = Exception("Random Fault Injection")
+                raise Exception("Random Fault Injection")
             await super().handle_send(*args, **kwargs)
 
     async with FaultyBroker() as broker_0:
@@ -163,6 +158,10 @@ async def test_walkthrough_ws_http():
     print("🔀 Testing WebSocket <-> HTTP broker communication")  
     await run_walkthrough_test("localhost", "http://localhost", 8780)
 
+async def test_walkthrough_http_ws():
+    """Test walkthrough with WebSocket <-> HTTP broker communication."""
+    print("🔀 Testing WebSocket <-> HTTP broker communication")  
+    await run_walkthrough_test("http://localhost", "localhost", 8783)
 
 async def test_walkthrough_http_http():
     """Test walkthrough with HTTP <-> HTTP broker communication."""
