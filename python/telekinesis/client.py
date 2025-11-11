@@ -178,36 +178,25 @@ class Connection:
                 lock.set()
             self.awaiting_ack[message_id or s] = (header, bundle_id, lock, time.time())
 
-        for retry in range(self.MAX_SEND_RETRIES + 1):
-            if not self.websocket:
-                self.logger.info("%s reconnecting during send retry %d", self.session.session_key.public_serial(False)[:4], retry)
-                if self.is_connecting_lock.is_set():
-                    await self.reconnect()
-                else:
-                    await self.is_connecting_lock.wait()
+        if not self.websocket:
+            if self.is_connecting_lock.is_set():
+                await self.reconnect()
+            else:
+                await self.is_connecting_lock.wait()
 
-            try:
-                await self.websocket.send(s + mm)
-            except websockets.ConnectionClosed:
-                self.websocket = None
-                continue
-            except Exception:
-                self.logger.info("%s Connection.send", self.session.session_key.public_serial(False)[:4], exc_info=True)
-                continue
+        try:
+            await self.websocket.send(s + mm)
+        except (websockets.ConnectionClosed, ConnectionError):
+            self.websocket = None
+            raise ConnectionError("WebSocket closed during send")
+        except Exception:
+            self.logger.info("%s Connection.send", self.session.session_key.public_serial(False)[:4], exc_info=True)
+            raise ConnectionError("Send failed")
 
-            if not expect_ack or await self.expect_ack(message_id, lock):
-                return
+        if not expect_ack or await self.expect_ack(message_id, lock):
+            return
 
-            if retry < (self.MAX_SEND_RETRIES):
-                s, mm = encode(header, payload, message_id, retry + 1)
-                self.logger.info("%s retrying send %d", self.session.session_key.public_serial(False)[:4], retry)
-
-        raise ConnectionError(["%s send %s %s - %s max retries reached" % (
-            self.session.session_key.public_serial(False)[:4],
-            h['destination']['session'][0][:4], 
-            h['destination']['session'][1][:2],
-            h['destination']['channel'][:4],
-            ) for a, h in header if a == 'send'][0])
+        raise TimeoutError("ACK not received in time")
 
     async def expect_ack(self, message_id, lock):
         await lock.wait()
@@ -261,7 +250,7 @@ class Connection:
 
         try:
             message = await self.websocket.recv()
-        except websockets.ConnectionClosed:
+        except (websockets.ConnectionClosed, ConnectionError):
             self.websocket = None
             raise
 
@@ -343,7 +332,44 @@ class Session:
         self.issued_tokens = {}
         self.pending_tasks = set()
         self.message_listener = None
+        # Scoring weights for connection priority decisions
+        self.score_weights = {
+            "transport_ws": 2.0,
+            "transport_http": 0.0,
+            "short_success": 5.0,
+            "long_success": 2.0,
+            "low_load": 3.0,
+            "broker_affinity": 4.0,
+        }
         self.logger = logging.getLogger(__name__)
+
+    def _connection_score(self, connection, route=None):
+        score = 0.0
+        # Transport type
+        if getattr(connection, "type", None) == "ws":
+            score += self.score_weights["transport_ws"]
+        else:
+            score += self.score_weights["transport_http"]
+
+        # Success rates
+        short_rate = getattr(connection, "success_10s", 1.0)
+        long_rate = getattr(connection, "success_1m", 1.0)
+        score += short_rate * self.score_weights["short_success"]
+        score += long_rate * self.score_weights["long_success"]
+
+        # Load (lower awaiting ack count is better)
+        load = len(getattr(connection, "awaiting_ack", []))
+        score += max(0, self.score_weights["low_load"] - load)
+
+        # Broker affinity
+        if route and hasattr(route, "brokers") and hasattr(connection, "broker_id"):
+            try:
+                idx = route.brokers.index(connection.broker_id)
+                score += self.score_weights["broker_affinity"] / (idx + 1)
+            except ValueError:
+                pass
+
+        return score
 
     def check_no_repeat(self, signature, timestamp):
         now = int(time.time())
@@ -400,7 +426,6 @@ class Session:
         self.issued_tokens.pop(asset, None)
 
     def extend_route(self, route, receiver, max_depth=None):
-
         if route.session[0] == self.session_key.public_serial(False):
             token_header = self.issue_token(route.channel, receiver, max_depth)
             route.tokens = [token_header[1][1]]
@@ -419,9 +444,41 @@ class Session:
         for connection in self.connections:
             connection.clear(bundle_id)
 
-    async def send(self, header, payload=b"", bundle_id=None):
-        for connection in self.connections:
-            await connection.send(header, payload, bundle_id)
+    async def send(self, header, payload=b"", bundle_id=None, route=None):
+        t0 = time.time()
+        exceptions = []
+
+        # Sort connections once by priority
+        sorted_connections = sorted(
+            self.connections,
+            key=lambda conn: self._connection_score(conn, route),
+            reverse=True
+        )
+
+        if not sorted_connections:
+            raise ConnectionError('Session not connected')
+
+        # Prepare a round-robin over all connections and their retry budgets
+        send_plan = [
+            (conn, attempt)
+            for conn in sorted_connections
+            for attempt in range(conn.MAX_SEND_RETRIES)
+        ]
+
+        for i, (conn, attempt) in enumerate(send_plan):
+            try:
+                #print(f'>>>> sending attempt {i} ({attempt} for {conn})')
+                await asyncio.wait_for(
+                    conn.send(header, payload, bundle_id),
+                    conn.RESEND_TIMEOUT * 3
+                )
+                break  # success
+            except Exception as e:
+                exceptions.append(e)
+        else:
+            # exhausted all retries
+            raise ConnectionError(f'All send attempts failed: {exceptions}')
+
 
     async def close(self):
         """Close the session and all its connections."""
@@ -737,3 +794,4 @@ class RequestMetadata:
         self.raw_messages = raw_messages
         self.reply_to = None
         self.pipeline = None
+

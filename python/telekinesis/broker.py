@@ -299,7 +299,7 @@ class Broker:
                                     destination["channel"][:4],
                                     broker_id[:4],
                                 )
-                            except websockets.ConnectionClosed:
+                            except (websockets.ConnectionClosed, ConnectionError):
                                 continue
                     return
             for peer in set().union(*self.topology_cache[0].values()):
@@ -578,7 +578,7 @@ class Peer(Connection):
                 return
 
             except Exception:
-                self.logger.error("Peer.listen", exc_info=True)
+                self.logger.warning("Peer.listen", exc_info=True)
                 await self.close(self.broker.sessions, False)
                 self.lock.set()
 

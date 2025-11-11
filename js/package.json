@@ -1,6 +1,6 @@
 {
   "name": "telekinesis-js",
-  "version": "0.1.88",
+  "version": "0.1.89",
   "description": "Open Source, End-to-End Encrypted, Anywhere-to-Anywhere, Remote Procedure Calls.",
   "main": "./lib/index.js",
   "typings": "./lib/index.d.ts",

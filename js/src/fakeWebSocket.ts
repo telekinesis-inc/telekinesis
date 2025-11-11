@@ -104,15 +104,7 @@ export class FakeWebSocket {
 
   constructor(url: string) {
     this.url = url;
-    
-    // Convert ws:// or wss:// to http:// or https://
-    if (url.startsWith('ws://')) {
-      this.baseUrl = 'http://' + url.slice(5);
-    } else if (url.startsWith('wss://')) {
-      this.baseUrl = 'https://' + url.slice(6);
-    } else {
-      this.baseUrl = url;
-    }
+    this.baseUrl = url; // URL is already http:// or https://
 
     // Start connection process
     setTimeout(() => this.connect(), 0);
@@ -120,7 +112,7 @@ export class FakeWebSocket {
 
   private async connect(): Promise<void> {
     try {
-      console.log(`FakeWebSocket connecting to ${this.baseUrl}`);
+      // console.log(`FakeWebSocket connecting to ${this.baseUrl}`);
       
       // Establish connection by POST to /connect
       const response = await httpClient.request('POST', `${this.baseUrl}/connect`);
@@ -129,9 +121,9 @@ export class FakeWebSocket {
         const responseText = new TextDecoder().decode(response.body);
         const responseData = JSON.parse(responseText);
         this.connectionId = responseData.connection_id;
-        
+
         this.readyState = FakeWebSocket.OPEN;
-        console.log(`FakeWebSocket connected with ID: ${this.connectionId}`);
+        // console.log(`FakeWebSocket connected with ID: ${this.connectionId}`);
         
         // Start polling for messages
         this.startPolling();
@@ -171,7 +163,7 @@ export class FakeWebSocket {
 
         if (response.status === 200 && response.body.length > 0) {
           // Got a message
-          console.log(`FakeWebSocket received ${response.body.length} bytes`);
+          // console.log(`FakeWebSocket received ${response.body.length} bytes`);
           if (this.onmessage) {
             // Create a MessageEvent-like object with the binary data
             const messageEvent = {
@@ -182,10 +174,10 @@ export class FakeWebSocket {
           }
         } else if (response.status === 204) {
           // No content - timeout, continue polling
-          console.log('FakeWebSocket poll timeout, continuing...');
+          // console.log('FakeWebSocket poll timeout, continuing...');
         } else if (response.status === 400) {
           // Connection invalid - likely closed
-          console.log('FakeWebSocket connection invalid, closing...');
+          // console.log('FakeWebSocket connection invalid, closing...');
           this.close();
           break;
         } else {
@@ -220,7 +212,7 @@ export class FakeWebSocket {
       binaryData = data;
     }
 
-    console.log(`FakeWebSocket sending ${binaryData.length} bytes`);
+    // console.log(`FakeWebSocket sending ${binaryData.length} bytes`);
 
     // Send data asynchronously
     this.sendAsync(binaryData).catch(error => {
@@ -262,7 +254,7 @@ export class FakeWebSocket {
       return;
     }
 
-    console.log(`FakeWebSocket closing connection ${this.connectionId}`);
+    // console.log(`FakeWebSocket closing connection ${this.connectionId}`);
     this.readyState = FakeWebSocket.CLOSING;
 
     // Stop polling
@@ -292,10 +284,11 @@ export class FakeWebSocket {
 
 /**
  * Factory function to create appropriate WebSocket implementation
- * based on URL protocol (ws/wss vs http/https).
+ * based on URL protocol (http/https vs ws/wss).
  */
 export function createWebSocket(url: string): WebSocket | FakeWebSocket {
   if (url.startsWith('http://') || url.startsWith('https://')) {
+    // Use fake WebSocket for http:// and https:// URLs
     return new FakeWebSocket(url) as any;
   } else {
     // Use native WebSocket for ws:// and wss:// URLs

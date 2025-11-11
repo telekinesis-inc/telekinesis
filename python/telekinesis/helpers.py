@@ -25,7 +25,7 @@ async def authenticate(url_or_entrypoint="ws://localhost:8776", session_key=None
         **kwargs: additional arguments the broker's authenticator may implement
     """
 
-    if isinstance(url_or_entrypoint , str):
+    if isinstance(url_or_entrypoint , str) or isinstance(url_or_entrypoint, list):
         entrypoint = Entrypoint(url_or_entrypoint, session_key)
     else:
         entrypoint = url_or_entrypoint
@@ -60,41 +60,55 @@ def Entrypoint(url="ws://localhost:8776", session_key=None, **kwargs):
     """
         Connect to a telekinesis server and connect to the entrypoint object
         
-        url: string - url of the telekinesis Broker. example: "wss://telekinesis.cloud"
+        url: string | list[string] - url or list of urls of the telekinesis Broker. 
+            Example: "wss://telekinesis.cloud"
 
         session_key: string | tk.Session | None - session private key used to identify yourself
 
         **kwargs: additional arguments passed to the Telekinesis init
     """
-    s = Session(session_key)
+    session = Session(session_key)
 
-    if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
-        i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
-        url = url[:i] + ":8776" + url[i:]
-
-    c = Connection(s, url)
+    if isinstance(url, str):
+        urls = [url]
+    else:
+        urls = url
+    
+    for i, url in enumerate(urls):
+        if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
+            i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
+            url = url[:i] + ":8776" + url[i:]
+        urls[i] = url
 
     async def await_entrypoint():
-        await c
-        return c.entrypoint
+        async def connect(url):
+            return await Connection(session, url)
+        for coro in asyncio.as_completed([asyncio.create_task(connect(url)) for url in urls]):
+            return (await coro).entrypoint
 
-    return Telekinesis(await_entrypoint(), s, **kwargs)
+    return Telekinesis(await_entrypoint(), session, **kwargs)
 
 
 async def create_entrypoint(target, url="ws://localhost:8776", session_key=None, channel_key=None, is_public=True, **kwargs):
     """
     Returns a tuple (tk._channel.route, tk) with tk being a Telekinesis object pointing to `target`.
     """
-    s = Session(session_key)
+    session = Session(session_key)
 
-    if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
-        i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
-        url = url[:i] + ":8776" + url[i:]
+    if isinstance(url, str):
+        urls = [url]
+    else:
+        urls = url
+    
+    for url in urls:
+        if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
+            i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
+            url = url[:i] + ":8776" + url[i:]
+            print(url)
+        await Connection(session, url)
 
-    c = await Connection(s, url)
-
-    tk = Telekinesis(target, s, **kwargs)
-    tk._channel = await Channel(s, channel_key, is_public=is_public).listen()
+    tk = Telekinesis(target, session, **kwargs)
+    tk._channel = await Channel(session, channel_key, is_public=is_public).listen()
     tk._channel.telekinesis = tk
 
     return tk._channel.route, tk

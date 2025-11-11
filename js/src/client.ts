@@ -208,45 +208,65 @@ export class Connection {
         return [s, new Uint8Array([...s, ...m, ...payload])]
       }
 
+      // Ensure connection is ready
+      if (this.websocket === undefined || this.websocket.readyState > 1) {
+        try {
+          await this.connect();
+        } catch (e) {
+          rej(new Error(`Connection failed: ${e}`));
+          return;
+        }
+      }
+
       let [s, mm] = await encode();
       const expectAck = headers.map(([a, _]) => a).includes('send') && reply == undefined;
       const messageId = b64encode(s);
 
-      if (expectAck) {
-        this.awaitingAck.set(messageId, [headers, res]);
-      }
-      for (let i in Array(this.MAX_SEND_RETRIES + 1).fill(0)) {
-        if (this.websocket === undefined || this.websocket.readyState > 1) {
-          await this.connect()
-        }
+      // Try to send the message
+      try {
         if (this.websocket !== undefined) {
           this.websocket.send(mm);
-        };
-        if (!expectAck) {
-          res(undefined);
-          break;
-        }
-        await new Promise(rr => setTimeout(rr, this.RESEND_TIMEOUT * 1000))
-        if (!this.awaitingAck.has(messageId)) {
-          break;
-        } else if (parseInt(i) === this.MAX_SEND_RETRIES) {
-          this.awaitingAck.delete(messageId);
-          const h = headers.filter(([a, _]) => a === 'send')[0][1] as any; 
-          rej(`${h?.source?.session[0].slice(0, 4)} send ${h?.destination?.session[0].slice(0, 4)} ${h.destination?.session[1].slice(0, 2)} - ${h?.destination?.channel?.slice(0,4)} max retries reached `);// ${bundleId}`);
         } else {
-          [s, mm] = await encode(messageId, parseInt(i));
+          throw new Error('WebSocket not connected');
         }
+      } catch (e) {
+        // On send failure, reset websocket and reject
+        console.warn(`WebSocket send failed: ${e}`);
+        this.websocket = undefined;
+        rej(new Error(`Send failed: ${e}`));
+        return;
       }
+
+      if (!expectAck) {
+        res(undefined);
+        return;
+      }
+
+      // Wait for ACK with timeout
+      const ackTimeout = setTimeout(() => {
+        if (this.awaitingAck.has(messageId)) {
+          this.awaitingAck.delete(messageId);
+          this.websocket = undefined; // Reset connection on timeout
+          rej(new Error('ACK timeout'));
+        }
+      }, this.RESEND_TIMEOUT * 1000);
+
+      // Store headers, resolve function, and timeout so we can clear it on ACK
+      this.awaitingAck.set(messageId, [headers, res, ackTimeout]);
+
+      // Note: ACK will be received via this.ack() which calls the resolve function
+      // stored in awaitingAck
     })
   }
   ack(sourceId: string, messageId: string) {
     if (this.awaitingAck.has(messageId)) {
-      const [headers, resolve] = this.awaitingAck.get(messageId);
+      const [headers, resolve, timeout] = this.awaitingAck.get(messageId);
       // console.log(sourceId, messageId, headers)
       if (headers !== undefined) {
         for (let [action, content] of headers) {
           if (action === 'send' && content.destination.session[0] === sourceId) {
             this.awaitingAck.delete(messageId);
+            if (timeout) clearTimeout(timeout);
             resolve(undefined);
           }
         }
@@ -272,6 +292,14 @@ export class Session {
   targets: Map<any, Set<any>>;
   routes: Map<string, any>;
   messageListener?: (requestMetadata: RequestMetadata) => null
+  scoreWeights: {
+    transport_ws: number;
+    transport_http: number;
+    short_success: number;
+    long_success: number;
+    low_load: number;
+    broker_affinity: number;
+  };
 
   constructor(sessionKey?: string) {
     this.sessionKey = new PrivateKey('sign', sessionKey);
@@ -282,9 +310,51 @@ export class Session {
     this.issuedTokens = new Map();
     this.targets = new Map();
     this.routes = new Map();
+    // Scoring weights for connection priority decisions
+    this.scoreWeights = {
+      transport_ws: 2.0,
+      transport_http: 0.0,
+      short_success: 5.0,
+      long_success: 2.0,
+      low_load: 3.0,
+      broker_affinity: 4.0,
+    };
   }
   toString() {
     return `Session ${this.sessionKey.repr?.slice(0, 4)} ${this.instanceId.slice(0, 2)}`
+  }
+  _connectionScore(connection: Connection, route?: Route): number {
+    let score = 0.0;
+    // Transport type
+    if ((connection as any).type === 'ws') {
+      score += this.scoreWeights.transport_ws;
+    } else {
+      score += this.scoreWeights.transport_http;
+    }
+
+    // Success rates
+    const shortRate = (connection as any).success_10s ?? 1.0;
+    const longRate = (connection as any).success_1m ?? 1.0;
+    score += shortRate * this.scoreWeights.short_success;
+    score += longRate * this.scoreWeights.long_success;
+
+    // Load (lower awaiting ack count is better)
+    const load = connection.awaitingAck?.size ?? 0;
+    score += Math.max(0, this.scoreWeights.low_load - load);
+
+    // Broker affinity
+    if (route && route.brokers && connection.brokerId) {
+      try {
+        const idx = route.brokers.indexOf(connection.brokerId);
+        if (idx !== -1) {
+          score += this.scoreWeights.broker_affinity / (idx + 1);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    return score;
   }
   checkNoRepeat(signature: Uint8Array, timestamp: number) {
     let now = Date.now() / 1000;
@@ -382,11 +452,46 @@ export class Session {
       connection.clear(bundleId)
     }
   }
-  async send(headers: Header[], payload: Uint8Array = new Uint8Array([]), bundleId?: Uint8Array) {
-    for (var i in this.connections) {
-      let connection = this.connections[i]
-      await connection.send(headers, payload, bundleId)//.catch(e => {throw e})
+  async send(headers: Header[], payload: Uint8Array = new Uint8Array([]), bundleId?: Uint8Array, route?: Route) {
+    const exceptions: Error[] = [];
+
+    // Sort connections once by priority
+    const sortedConnections = [...this.connections].sort(
+      (a, b) => this._connectionScore(b, route) - this._connectionScore(a, route)
+    );
+
+    if (sortedConnections.length === 0) {
+      throw new Error('Session not connected');
     }
+
+    // Prepare a round-robin over all connections and their retry budgets
+    const sendPlan: [Connection, number][] = [];
+    for (const conn of sortedConnections) {
+      for (let attempt = 0; attempt < conn.MAX_SEND_RETRIES; attempt++) {
+        sendPlan.push([conn, attempt]);
+      }
+    }
+
+    for (let i = 0; i < sendPlan.length; i++) {
+      const [conn, attempt] = sendPlan[i];
+      try {
+        // Add timeout wrapper - allow time for reconnection + ACK wait
+        // Connection retry can take up to MAX_SEND_RETRIES * RESEND_TIMEOUT
+        // Plus ACK timeout of RESEND_TIMEOUT
+        await Promise.race([
+          conn.send(headers, payload, bundleId),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Send timeout')), conn.RESEND_TIMEOUT * 5 * 1000)
+          )
+        ]);
+        return; // success
+      } catch (e) {
+        exceptions.push(e as Error);
+      }
+    }
+
+    // exhausted all retries
+    throw new Error(`All send attempts failed: ${exceptions.map(e => e.message).join(', ')}`);
   }
 }
 

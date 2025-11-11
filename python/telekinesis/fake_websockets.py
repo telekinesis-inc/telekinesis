@@ -46,27 +46,27 @@ class FakeWebSocketConnection:
             
         logger.debug(f"FakeWS send: {len(data)} bytes (conn: {self._connection_id})")
         
-        try:
-            if self.is_server:
-                # Server-side: add to connection's message queue for polling
-                if self._server_ref:
-                    await self._server_ref._queue_message_for_connection(self._connection_id, data)
-                else:
-                    logger.warning(f"No server reference for connection {self._connection_id}")
-                    raise ConnectionError("Server connection lost")
+        #try:
+        if self.is_server:
+            # Server-side: add to connection's message queue for polling
+            if self._server_ref:
+                await self._server_ref._queue_message_for_connection(self._connection_id, data)
             else:
-                # Client-side: HTTP POST to server
-                if self._client_ref:
-                    await self._client_ref._http_send(data)
-                else:
-                    logger.warning(f"No client reference for connection {self._connection_id}")
-                    raise ConnectionError("Client connection lost")
-        except Exception as e:
-            # Log but don't immediately fail - the connection might recover
-            logger.debug(f"Temporary send error for connection {self._connection_id}: {e}")
+                logger.warning(f"No server reference for connection {self._connection_id}")
+                raise ConnectionError("Server connection lost")
+        else:
+            # Client-side: HTTP POST to server
+            if self._client_ref:
+                await self._client_ref._http_send(data)
+            else:
+                logger.warning(f"No client reference for connection {self._connection_id}")
+                raise ConnectionError("Client connection lost")
+        #except Exception as e:
+        # Log but don't immediately fail - the connection might recover
+        #    logger.debug(f"Temporary send error for connection {self._connection_id}: {e}")
             # Re-raise only if it's a permanent connection issue
-            if "Connection closed" in str(e) or "Invalid connection_id" in str(e):
-                raise
+            #if "Connection closed" in str(e) or "Invalid connection_id" in str(e):
+        #    raise
             # For other errors (like broker issues), just log and continue
     
     async def recv(self) -> bytes:
@@ -208,7 +208,10 @@ class FakeWebSocketServer:
                 query_params = {}
                 
             # Route to appropriate handler
-            if method == 'POST' and path_part == '/connect':
+            if method == 'OPTIONS':
+                # Handle CORS preflight requests
+                await self._send_http_response(writer, 200, b'')
+            elif method == 'POST' and path_part == '/connect':
                 await self._handle_connect(reader, writer, headers, query_params)
             elif method == 'POST' and path_part == '/send':
                 await self._handle_send(reader, writer, headers, query_params)
@@ -386,23 +389,29 @@ class FakeWebSocketServer:
             
         await self._send_http_response(writer, 200, b'OK')
         
-    async def _send_http_response(self, writer: asyncio.StreamWriter, status_code: int, 
+    async def _send_http_response(self, writer: asyncio.StreamWriter, status_code: int,
                                  body: bytes, headers: dict = None) -> None:
         """Send an HTTP response."""
         response_headers = headers or {}
         response_headers.setdefault('Content-Length', str(len(body)))
-        
+
+        # Add CORS headers for cross-origin requests
+        response_headers.setdefault('Access-Control-Allow-Origin', '*')
+        response_headers.setdefault('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        response_headers.setdefault('Access-Control-Allow-Headers', 'Content-Type, Content-Length')
+        response_headers.setdefault('Access-Control-Max-Age', '86400')
+
         # Status line
         response = f"HTTP/1.1 {status_code} {HTTPStatus(status_code).phrase}\r\n".encode()
-        
+
         # Headers
         for key, value in response_headers.items():
             response += f"{key}: {value}\r\n".encode()
         response += b"\r\n"
-        
+
         # Body
         response += body
-        
+
         writer.write(response)
         await writer.drain()
 
@@ -412,30 +421,22 @@ class FakeWebSocketClient:
     Fake WebSocket client using HTTP requests.
     Mimics websockets.connect() behavior.
     """
-    
+
     def __init__(self, url: str):
         self.url = url
         self.parsed_url = urlparse(url)
         self._connection = None
         self._connection_id = None
         self._poll_task = None
-        
+
     async def connect(self) -> FakeWebSocketConnection:
         """Connect to fake websocket server."""
         logger.info(f"FakeWS client connecting to {self.url}")
-        
-        # Convert ws://host:port to http://host:port for HTTP requests
-        if self.url.startswith('ws://'):
-            base_url = 'http://' + self.url[5:]
-        elif self.url.startswith('wss://'):
-            base_url = 'https://' + self.url[6:]
-        else:
-            base_url = self.url
-            
+
         # Establish connection by POST to /connect
         reader, writer = await asyncio.open_connection(
             self.parsed_url.hostname,
-            self.parsed_url.port or (443 if self.parsed_url.scheme == 'wss' else 80)
+            self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
         )
         
         try:
@@ -509,7 +510,7 @@ class FakeWebSocketClient:
             # Open connection for sending
             reader, writer = await asyncio.open_connection(
                 self.parsed_url.hostname,
-                self.parsed_url.port or (443 if self.parsed_url.scheme == 'wss' else 80)
+                self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
             )
             
             try:
@@ -552,7 +553,7 @@ class FakeWebSocketClient:
         # Open connection for polling
         reader, writer = await asyncio.open_connection(
             self.parsed_url.hostname,
-            self.parsed_url.port or (443 if self.parsed_url.scheme == 'wss' else 80)
+            self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
         )
         
         try:
@@ -637,11 +638,11 @@ async def fake_ws_serve(
 async def fake_ws_connect(url: str, **kwargs) -> FakeWebSocketConnection:
     """
     Connect to a fake WebSocket server using HTTP fallback.
-    
+
     Args:
-        url: WebSocket URL (ws:// or wss://)
+        url: HTTP URL (http:// or https://)
         **kwargs: Additional arguments (ignored for compatibility)
-        
+
     Returns:
         FakeWebSocketConnection instance
     """
