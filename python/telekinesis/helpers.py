@@ -74,11 +74,11 @@ def Entrypoint(url="ws://localhost:8776", session_key=None, **kwargs):
     else:
         urls = url
     
-    for i, url in enumerate(urls):
+    for j, url in enumerate(urls):
         if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
             i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
             url = url[:i] + ":8776" + url[i:]
-        urls[i] = url
+        urls[j] = url
 
     async def await_entrypoint():
         async def connect(url):
