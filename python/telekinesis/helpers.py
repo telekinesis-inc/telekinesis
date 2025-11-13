@@ -75,7 +75,7 @@ def Entrypoint(url="ws://localhost:8776", session_key=None, **kwargs):
         urls = url
     
     for j, url in enumerate(urls):
-        if re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
+        if not url.startswith('http://' and not url.startswith('https://') and re.sub(r"(?![\w\d]+:\/\/[\w\d.]+):[\d]+", "", url) == url:
             i = len(re.findall(r"[\w\d]+:\/\/[\w\d.]+", url)[0])
             url = url[:i] + ":8776" + url[i:]
         urls[j] = url
