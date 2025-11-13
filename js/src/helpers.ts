@@ -45,7 +45,7 @@ export class Entrypoint {
 
     // Normalize URLs - add default port if not specified
     const normalizedUrls = urls.map(u => {
-      if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(u)) {
+      if (!((u.slice(0, 7) == 'http://') || (u.slice(0,8) == 'https://')) && !/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(u)) {
         const match = /[\w\d]+:\/\/[\w\d.]+/.exec(u);
         if (match) {
           const i = match[0].length;
@@ -81,7 +81,7 @@ export async function createEntrypoint(target: Object, url: string | string[] = 
 
   // Normalize URLs and create connections
   for (let u of urls) {
-    if (!/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(u)) {
+    if (!((u.slice(0, 7) == 'http://') || (u.slice(0,8) == 'https://')) && !/(?![\w\d]+:\/\/[\w\d.]+):[\d]+/.exec(u)) {
       const match = /[\w\d]+:\/\/[\w\d.]+/.exec(u);
       if (match) {
         const i = match[0].length;
