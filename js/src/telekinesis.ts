@@ -925,7 +925,7 @@ export class Telekinesis extends Function {
         throw e;
       }
     } finally {
-      await newChannel.close()
+      newChannel.close()
     }
   }
   async _encode(target: any, receiver?: [string, string], channel?: Channel, prevTarget?: any, traversalStack?: Map<any, [string, [string, any]]>, blockRecursion: boolean = false, blockSideEffects: boolean = false) {

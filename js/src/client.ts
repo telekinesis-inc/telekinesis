@@ -299,6 +299,7 @@ export class Session {
     long_success: number;
     low_load: number;
     broker_affinity: number;
+    connected: number;
   };
 
   constructor(sessionKey?: string) {
@@ -318,6 +319,7 @@ export class Session {
       long_success: 2.0,
       low_load: 3.0,
       broker_affinity: 4.0,
+      connected: 100.0,  // Heavily prioritize already-connected connections
     };
   }
   toString() {
@@ -325,6 +327,12 @@ export class Session {
   }
   _connectionScore(connection: Connection, route?: Route): number {
     let score = 0.0;
+
+    // Connection readiness - heavily prioritize already-connected connections
+    if (connection.websocket && connection.websocket.readyState === 1) {
+      score += this.scoreWeights.connected;
+    }
+
     // Transport type
     if ((connection as any).type === 'ws') {
       score += this.scoreWeights.transport_ws;
@@ -466,11 +474,16 @@ export class Session {
 
     // Prepare a round-robin over all connections and their retry budgets
     const sendPlan: [Connection, number][] = [];
-    for (const conn of sortedConnections) {
-      for (let attempt = 0; attempt < conn.MAX_SEND_RETRIES; attempt++) {
-        sendPlan.push([conn, attempt]);
+    const maxRetries = Math.max(...sortedConnections.map(c => c.MAX_SEND_RETRIES));
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      for (const conn of sortedConnections) {
+        if (attempt < conn.MAX_SEND_RETRIES) {
+          sendPlan.push([conn, attempt]);
+        }
       }
     }
+
+    console.log(sendPlan)
 
     for (let i = 0; i < sendPlan.length; i++) {
       const [conn, attempt] = sendPlan[i];
