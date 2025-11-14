@@ -483,8 +483,6 @@ export class Session {
       }
     }
 
-    console.log(sendPlan)
-
     for (let i = 0; i < sendPlan.length; i++) {
       const [conn, attempt] = sendPlan[i];
       try {
