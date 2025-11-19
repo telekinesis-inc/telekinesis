@@ -428,6 +428,8 @@ class FakeWebSocketClient:
         self._connection = None
         self._connection_id = None
         self._poll_task = None
+        # Determine if SSL should be used
+        self._use_ssl = self.parsed_url.scheme == 'https'
 
     async def connect(self) -> FakeWebSocketConnection:
         """Connect to fake websocket server."""
@@ -436,13 +438,15 @@ class FakeWebSocketClient:
         # Establish connection by POST to /connect
         reader, writer = await asyncio.open_connection(
             self.parsed_url.hostname,
-            self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
+            self.parsed_url.port or (443 if self._use_ssl else 80),
+            ssl=True if self._use_ssl else None
         )
         
         try:
             # Send HTTP POST /connect request
+            base_path = self.parsed_url.path.rstrip('/') or ''
             request = (
-                "POST /connect HTTP/1.1\r\n"
+                f"POST {base_path}/connect HTTP/1.1\r\n"
                 f"Host: {self.parsed_url.netloc}\r\n"
                 "Content-Length: 0\r\n"
                 "\r\n"
@@ -510,13 +514,15 @@ class FakeWebSocketClient:
             # Open connection for sending
             reader, writer = await asyncio.open_connection(
                 self.parsed_url.hostname,
-                self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
+                self.parsed_url.port or (443 if self._use_ssl else 80),
+                ssl=True if self._use_ssl else None
             )
             
             try:
                 # Send HTTP POST /send request
+                base_path = self.parsed_url.path.rstrip('/') or ''
                 request = (
-                    f"POST /send?connection_id={self._connection_id} HTTP/1.1\r\n"
+                    f"POST {base_path}/send?connection_id={self._connection_id} HTTP/1.1\r\n"
                     f"Host: {self.parsed_url.netloc}\r\n"
                     f"Content-Length: {len(data)}\r\n"
                     "\r\n"
@@ -553,13 +559,15 @@ class FakeWebSocketClient:
         # Open connection for polling
         reader, writer = await asyncio.open_connection(
             self.parsed_url.hostname,
-            self.parsed_url.port or (443 if self.parsed_url.scheme == 'https' else 80)
+            self.parsed_url.port or (443 if self._use_ssl else 80),
+            ssl=True if self._use_ssl else None
         )
         
         try:
             # Send HTTP GET /poll request
+            base_path = self.parsed_url.path.rstrip('/') or ''
             request = (
-                f"GET /poll?connection_id={self._connection_id} HTTP/1.1\r\n"
+                f"GET {base_path}/poll?connection_id={self._connection_id} HTTP/1.1\r\n"
                 f"Host: {self.parsed_url.netloc}\r\n"
                 "\r\n"
             ).encode()
