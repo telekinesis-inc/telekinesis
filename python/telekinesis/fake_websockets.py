@@ -182,46 +182,60 @@ class FakeWebSocketServer:
         """Handle incoming HTTP connection and route to appropriate endpoint."""
         peer_addr = writer.get_extra_info('peername')
         logger.info(f"FakeWS server: new HTTP connection from {peer_addr}")
-        
+
         try:
-            # Read HTTP request
-            request_line = await reader.readuntil(b'\r\n')
-            method, path, version = request_line.decode().strip().split(' ', 2)
-            
-            # Read headers
-            headers = {}
+            # Keep connection alive for multiple requests
             while True:
-                line = await reader.readuntil(b'\r\n')
-                if line == b'\r\n':  # End of headers
+                try:
+                    # Read HTTP request with timeout
+                    request_line = await asyncio.wait_for(reader.readuntil(b'\r\n'), timeout=60.0)
+                except asyncio.TimeoutError:
+                    # Connection idle timeout
                     break
-                header_line = line.decode().strip()
-                if ':' in header_line:
-                    key, value = header_line.split(':', 1)
-                    headers[key.strip().lower()] = value.strip()
-            
-            # Parse path and query parameters
-            if '?' in path:
-                path_part, query_part = path.split('?', 1)
-                query_params = parse_qs(query_part)
-            else:
-                path_part = path
-                query_params = {}
-                
-            # Route to appropriate handler
-            if method == 'OPTIONS':
-                # Handle CORS preflight requests
-                await self._send_http_response(writer, 200, b'')
-            elif method == 'POST' and path_part == '/connect':
-                await self._handle_connect(reader, writer, headers, query_params)
-            elif method == 'POST' and path_part == '/send':
-                await self._handle_send(reader, writer, headers, query_params)
-            elif method == 'GET' and path_part == '/poll':
-                await self._handle_poll(reader, writer, headers, query_params)
-            elif method == 'POST' and path_part == '/close':
-                await self._handle_close_request(reader, writer, headers, query_params)
-            else:
-                await self._send_http_response(writer, 404, b'Not Found')
-                
+                except asyncio.IncompleteReadError:
+                    # Connection closed by client
+                    break
+
+                method, path, version = request_line.decode().strip().split(' ', 2)
+
+                # Read headers
+                headers = {}
+                while True:
+                    line = await reader.readuntil(b'\r\n')
+                    if line == b'\r\n':  # End of headers
+                        break
+                    header_line = line.decode().strip()
+                    if ':' in header_line:
+                        key, value = header_line.split(':', 1)
+                        headers[key.strip().lower()] = value.strip()
+
+                # Parse path and query parameters
+                if '?' in path:
+                    path_part, query_part = path.split('?', 1)
+                    query_params = parse_qs(query_part)
+                else:
+                    path_part = path
+                    query_params = {}
+
+                # Route to appropriate handler
+                if method == 'OPTIONS':
+                    # Handle CORS preflight requests
+                    await self._send_http_response(writer, 200, b'')
+                elif method == 'POST' and path_part == '/connect':
+                    await self._handle_connect(reader, writer, headers, query_params)
+                elif method == 'POST' and path_part == '/send':
+                    await self._handle_send(reader, writer, headers, query_params)
+                elif method == 'GET' and path_part == '/poll':
+                    await self._handle_poll(reader, writer, headers, query_params)
+                elif method == 'POST' and path_part == '/close':
+                    await self._handle_close_request(reader, writer, headers, query_params)
+                else:
+                    await self._send_http_response(writer, 404, b'Not Found')
+
+                # Check if client wants to close connection
+                if headers.get('connection', '').lower() == 'close':
+                    break
+
         except Exception as e:
             logger.error(f"FakeWS HTTP error: {e}")
             try:
@@ -435,6 +449,9 @@ class FakeWebSocketClient:
         self._poll_writer = None
         self._send_reader = None
         self._send_writer = None
+        # Locks to prevent concurrent access to connections
+        self._poll_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
 
     async def connect(self) -> FakeWebSocketConnection:
         """Connect to fake websocket server."""
@@ -512,43 +529,30 @@ class FakeWebSocketClient:
             await self._connection.close()
 
         # Close persistent connections
-        if self._send_writer:
-            self._send_writer.close()
-            try:
-                await self._send_writer.wait_closed()
-            except:
-                pass
-            self._send_writer = None
-            self._send_reader = None
+        for writer in [self._send_writer, self._poll_writer]:
+            if writer:
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except:
+                    pass
+        self._send_writer = None
+        self._send_reader = None
+        self._poll_writer = None
+        self._poll_reader = None
 
-        if self._poll_writer:
-            self._poll_writer.close()
-            try:
-                await self._poll_writer.wait_closed()
-            except:
-                pass
-            self._poll_writer = None
-            self._poll_reader = None
-            
-    async def _get_send_connection(self):
-        """Get or create a persistent connection for sending."""
-        if self._send_writer is None or self._send_writer.is_closing():
-            self._send_reader, self._send_writer = await asyncio.open_connection(
+    async def _get_connection(self, reader_attr, writer_attr):
+        """Get or create a persistent connection."""
+        writer = getattr(self, writer_attr)
+        if writer is None or writer.is_closing():
+            reader, writer = await asyncio.open_connection(
                 self.parsed_url.hostname,
                 self.parsed_url.port or (443 if self._use_ssl else 80),
                 ssl=True if self._use_ssl else None
             )
-        return self._send_reader, self._send_writer
-
-    async def _get_poll_connection(self):
-        """Get or create a persistent connection for polling."""
-        if self._poll_writer is None or self._poll_writer.is_closing():
-            self._poll_reader, self._poll_writer = await asyncio.open_connection(
-                self.parsed_url.hostname,
-                self.parsed_url.port or (443 if self._use_ssl else 80),
-                ssl=True if self._use_ssl else None
-            )
-        return self._poll_reader, self._poll_writer
+            setattr(self, reader_attr, reader)
+            setattr(self, writer_attr, writer)
+        return getattr(self, reader_attr), getattr(self, writer_attr)
 
     async def _http_send(self, data: bytes) -> None:
         """Send data via HTTP POST to the server."""
@@ -558,120 +562,134 @@ class FakeWebSocketClient:
 
         logger.debug(f"HTTP send: {len(data)} bytes to connection {self._connection_id}")
 
-        try:
-            reader, writer = await self._get_send_connection()
+        async with self._send_lock:
+            try:
+                reader, writer = await self._get_connection('_send_reader', '_send_writer')
 
-            # Send HTTP POST /send request with keep-alive
-            base_path = self.parsed_url.path.rstrip('/') or ''
-            request = (
-                f"POST {base_path}/send?connection_id={self._connection_id} HTTP/1.1\r\n"
-                f"Host: {self.parsed_url.netloc}\r\n"
-                f"Content-Length: {len(data)}\r\n"
-                "Connection: keep-alive\r\n"
-                "\r\n"
-            ).encode() + data
+                # Send HTTP POST /send request
+                base_path = self.parsed_url.path.rstrip('/') or ''
+                request = (
+                    f"POST {base_path}/send?connection_id={self._connection_id} HTTP/1.1\r\n"
+                    f"Host: {self.parsed_url.netloc}\r\n"
+                    f"Content-Length: {len(data)}\r\n"
+                    "\r\n"
+                ).encode() + data
 
-            writer.write(request)
-            await writer.drain()
+                writer.write(request)
+                await writer.drain()
 
-            # Read response (should be 200 OK)
-            response_line = await reader.readuntil(b'\r\n')
-            status_code = int(response_line.decode().split()[1])
+                # Read response (should be 200 OK)
+                response_line = await reader.readuntil(b'\r\n')
+                status_code = int(response_line.decode().split()[1])
 
-            # Read and discard response headers
-            while True:
-                line = await reader.readuntil(b'\r\n')
-                if line == b'\r\n':
-                    break
+                # Read and discard response headers
+                while True:
+                    line = await reader.readuntil(b'\r\n')
+                    if line == b'\r\n':
+                        break
 
-            if status_code != 200:
-                logger.error(f"HTTP send failed with status {status_code}")
-                raise ConnectionError(f"Send failed with status {status_code}")
+                if status_code != 200:
+                    logger.error(f"HTTP send failed with status {status_code}")
+                    raise ConnectionError(f"Send failed with status {status_code}")
+                else:
+                    logger.debug(f"HTTP send successful for connection {self._connection_id}")
+
+            except asyncio.IncompleteReadError:
+                # Connection was closed by server, reset and retry once
+                self._send_writer = None
+                self._send_reader = None
+                # Release lock before retry
+                pass
+
+            except Exception as e:
+                # Reset connection on error
+                self._send_writer = None
+                self._send_reader = None
+                if isinstance(e, ConnectionError):
+                    raise
+                logger.error(f"HTTP send error for connection {self._connection_id}: {e}")
+                raise ConnectionError(f"Send failed: {e}")
             else:
-                logger.debug(f"HTTP send successful for connection {self._connection_id}")
+                return
 
-        except Exception as e:
-            # Reset connection on error
-            if self._send_writer:
-                self._send_writer.close()
-                try:
-                    await self._send_writer.wait_closed()
-                except:
-                    pass
-            self._send_writer = None
-            self._send_reader = None
-            logger.error(f"HTTP send error for connection {self._connection_id}: {e}")
-            raise ConnectionError(f"Send failed: {e}")
+        # Retry after IncompleteReadError (lock released)
+        return await self._http_send(data)
             
     async def _http_poll(self) -> bytes:
         """Poll for data via HTTP GET from the server."""
         if not self._connection_id:
             raise ConnectionError("Not connected")
 
-        try:
-            reader, writer = await self._get_poll_connection()
+        async with self._poll_lock:
+            try:
+                reader, writer = await self._get_connection('_poll_reader', '_poll_writer')
 
-            # Send HTTP GET /poll request with keep-alive
-            base_path = self.parsed_url.path.rstrip('/') or ''
-            request = (
-                f"GET {base_path}/poll?connection_id={self._connection_id} HTTP/1.1\r\n"
-                f"Host: {self.parsed_url.netloc}\r\n"
-                "Connection: keep-alive\r\n"
-                "\r\n"
-            ).encode()
+                # Send HTTP GET /poll request
+                base_path = self.parsed_url.path.rstrip('/') or ''
+                request = (
+                    f"GET {base_path}/poll?connection_id={self._connection_id} HTTP/1.1\r\n"
+                    f"Host: {self.parsed_url.netloc}\r\n"
+                    "\r\n"
+                ).encode()
 
-            writer.write(request)
-            await writer.drain()
+                writer.write(request)
+                await writer.drain()
 
-            # Read HTTP response
-            response_line = await reader.readuntil(b'\r\n')
-            status_code = int(response_line.decode().split()[1])
+                # Read HTTP response
+                response_line = await reader.readuntil(b'\r\n')
+                status_code = int(response_line.decode().split()[1])
 
-            # Read response headers
-            headers = {}
-            while True:
-                line = await reader.readuntil(b'\r\n')
-                if line == b'\r\n':  # End of headers
-                    break
-                header_line = line.decode().strip()
-                if ':' in header_line:
-                    key, value = header_line.split(':', 1)
-                    headers[key.strip().lower()] = value.strip()
+                # Read response headers
+                headers = {}
+                while True:
+                    line = await reader.readuntil(b'\r\n')
+                    if line == b'\r\n':  # End of headers
+                        break
+                    header_line = line.decode().strip()
+                    if ':' in header_line:
+                        key, value = header_line.split(':', 1)
+                        headers[key.strip().lower()] = value.strip()
 
-            if status_code == 200:
-                # Read response body (the message data)
-                content_length = int(headers.get('content-length', '0'))
-                if content_length > 0:
-                    return await reader.readexactly(content_length)
-                else:
-                    return b''
-            elif status_code == 204:  # No Content (timeout)
-                # No message available, retry polling
-                return await self._http_poll()
-            elif status_code == 400:
-                # Connection invalid - likely closed
-                raise ConnectionError("Connection closed or invalid")
-            else:
-                # Other errors - treat as connection issues
-                logger.debug(f"HTTP poll error: status {status_code}")
-                raise ConnectionError(f"Connection error: HTTP {status_code}")
-
-        except Exception as e:
-            # Reset connection on error
-            if self._poll_writer:
-                self._poll_writer.close()
-                try:
-                    await self._poll_writer.wait_closed()
-                except:
+                if status_code == 200:
+                    # Read response body (the message data)
+                    content_length = int(headers.get('content-length', '0'))
+                    if content_length > 0:
+                        return await reader.readexactly(content_length)
+                    else:
+                        return b''
+                elif status_code == 204:  # No Content (timeout)
+                    # No message available, will retry after releasing lock
                     pass
-            self._poll_writer = None
-            self._poll_reader = None
+                elif status_code == 400:
+                    # Connection invalid - likely closed
+                    raise ConnectionError("Connection closed or invalid")
+                else:
+                    # Other errors - treat as connection issues
+                    logger.debug(f"HTTP poll error: status {status_code}")
+                    raise ConnectionError(f"Connection error: HTTP {status_code}")
 
-            # Re-raise connection errors as-is
-            if isinstance(e, ConnectionError):
-                raise
-            logger.error(f"HTTP poll error for connection {self._connection_id}: {e}")
-            raise ConnectionError(f"Poll failed: {e}")
+            except asyncio.IncompleteReadError:
+                # Connection was closed by server, reset and retry
+                self._poll_writer = None
+                self._poll_reader = None
+                # Will retry after releasing lock
+                pass
+
+            except Exception as e:
+                # Reset connection on error
+                self._poll_writer = None
+                self._poll_reader = None
+                if isinstance(e, ConnectionError):
+                    raise
+                logger.error(f"HTTP poll error for connection {self._connection_id}: {e}")
+                raise ConnectionError(f"Poll failed: {e}")
+            else:
+                # Return result if we got status 200
+                if status_code == 200:
+                    return b''  # Already returned above for content_length > 0
+
+        # Retry polling (after timeout or IncompleteReadError)
+        return await self._http_poll()
 
 
 # Public API functions (websockets-compatible)
