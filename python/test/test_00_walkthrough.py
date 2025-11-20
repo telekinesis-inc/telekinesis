@@ -77,7 +77,7 @@ async def run_walkthrough_test(host_template_1: str, host_template_2: str, start
                 conn_2.MAX_SEND_RETRIES = 6
                 print('>>>>>>>>>>>>>>> trying to fail')
 
-                with pytest.raises(ConnectionError):#asyncio.TimeoutError):
+                with pytest.raises(asyncio.TimeoutError):
                     g_2_tk = Telekinesis(g._target, conn_2.session)
                     g_2 = await g_2_tk._timeout(8)
                     await g_2_tk._close()
