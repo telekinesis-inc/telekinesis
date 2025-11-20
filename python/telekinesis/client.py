@@ -29,7 +29,6 @@ from .cryptography import PrivateKey, PublicKey, SharedKey, Token, InvalidSignat
 
 class Connection:
     def __init__(self, session, url="ws://localhost:8776"):
-        self.RESEND_TIMEOUT = 2  # sec
         self.MAX_SEND_RETRIES = 3
 
         self.session = session
@@ -42,7 +41,6 @@ class Connection:
         self.broker_peers = []
 
         self.is_connecting_lock = asyncio.Event()
-        self.awaiting_ack = OrderedDict()
 
         if 'connections' not in dir(session):
             session.connections = set()
@@ -119,7 +117,8 @@ class Connection:
                 acc_len = l + 2
 
         for group in groups:
-            await self.send(group)
+            encoded_message, _ = self.session.encode_message(group, t_offset=self.t_offset)
+            await self.send(encoded_message)
 
         self.is_connecting_lock.set()
 
@@ -143,41 +142,8 @@ class Connection:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close()
 
-    async def send(self, header, payload=b"", bundle_id=None, ack_message_id=None):
-        if not ack_message_id:
-            self.logger.info(
-                "%s sending: %s %s",
-                self.session.session_key.public_serial(False)[:4],
-                " ".join(h[0] for h in header),
-                len(payload),
-            )
-
-        def encode(header, payload, message_id, retry):
-            h = ujson.dumps(header, escape_forward_slashes=False).encode()
-            r = (retry).to_bytes(1, "big") + (message_id or b"0" * 64)
-            p = hashlib.sha256(payload).digest()
-            m = len(h).to_bytes(2, "big") + len(r + p + payload).to_bytes(3, "big") + h + r + p
-            t = int(time.time() - self.t_offset).to_bytes(4, "big")
-            s = self.session.session_key.sign(t + m)
-            return s, t + m + payload
-
-        s, mm = encode(header, payload, ack_message_id, 255 if ack_message_id else 0)
-        message_id = s
-
-        expect_ack = "send" in set(a for a, _ in header) and not ack_message_id
-        if expect_ack:
-            while True:  # Clearing old messages
-                if self.awaiting_ack:
-                    target = list(self.awaiting_ack.values())[0]
-                    if target[3] < (time.time() - (1 + self.MAX_SEND_RETRIES) * self.RESEND_TIMEOUT):
-                        self.clear(target[1])
-                        continue
-                break
-            lock = asyncio.Event()
-            if not self.awaiting_ack:
-                lock.set()
-            self.awaiting_ack[message_id or s] = (header, bundle_id, lock, time.time())
-
+    async def send(self, encoded_message):
+        """Send a pre-encoded message over the websocket."""
         if not self.websocket:
             if self.is_connecting_lock.is_set():
                 await self.reconnect()
@@ -185,42 +151,13 @@ class Connection:
                 await self.is_connecting_lock.wait()
 
         try:
-            await self.websocket.send(s + mm)
+            await self.websocket.send(encoded_message)
         except (websockets.ConnectionClosed, ConnectionError):
             self.websocket = None
             raise ConnectionError("WebSocket closed during send")
         except Exception:
             self.logger.info("%s Connection.send", self.session.session_key.public_serial(False)[:4], exc_info=True)
             raise ConnectionError("Send failed")
-
-        if not expect_ack or await self.expect_ack(message_id, lock):
-            return
-
-        raise TimeoutError("ACK not received in time")
-
-    async def expect_ack(self, message_id, lock):
-        await lock.wait()
-        if message_id not in self.awaiting_ack:
-            return True
-        lock.clear()
-        try:
-            await asyncio.wait_for(lock.wait(), self.RESEND_TIMEOUT)
-        except asyncio.TimeoutError:
-            lock.set()
-        if message_id not in self.awaiting_ack:
-            return True
-
-        return False
-
-    def clear(self, bundle_id):
-        if bundle_id:
-            self.logger.info("%s clearing %s", self.session.session_key.public_serial(False)[:4], bundle_id[:4])
-            ks = []
-            for k, v in self.awaiting_ack.items():
-                if v[1] == bundle_id:
-                    ks.append(k)
-            for k in ks:
-                self.awaiting_ack.pop(k)
 
     async def listen(self):
         n_tries = 0
@@ -274,16 +211,16 @@ class Connection:
                     if self.session.channels.get(destination.channel):
                         channel = self.session.channels.get(destination.channel)
                         if full_payload[0] == 255:
-                            self.ack(source.session[0], full_payload[1:65])
+                            self.session.ack(source.session[0], full_payload[1:65])
                         else:
                             ret_signature = signature if (full_payload[0] == 0) else full_payload[1:65]
                             payload = full_payload[65 + 32 :]
-                            await self.send(
-                                (("send", {"destination": content["source"], "source": content["destination"]}),),
-                                b"",
-                                None,
-                                ret_signature,
+                            # Send ACK response
+                            ack_header = (("send", {"destination": content["source"], "source": content["destination"]}),)
+                            encoded_ack, _ = self.session.encode_message(
+                                ack_header, b"", message_id=ret_signature, t_offset=self.t_offset, retry=255
                             )
+                            await self.send(encoded_ack)
                             # print(self.session.session_key.public_serial(False)[:4], 'sent ack', ret_signature[:4])
                             if hashlib.sha256(payload).digest() == full_payload[65 : 65 + 32]:
                                 if (ret_signature == signature) or self.session.check_no_repeat(
@@ -292,17 +229,6 @@ class Connection:
                                     channel.handle_message(source, destination, payload, message[: 73 + len_h + 65 + 32])
                             else:
                                 raise AssertionError("Message payload does not match signed hash")
-
-    def ack(self, source_id, message_id):
-        # print(self.session.session_key.public_serial(False)[:4], 'received ack', message_id[:4], 'from', source_id[:4])
-        header = self.awaiting_ack.get(message_id, [[]])[0]
-        for action, content in header:
-            if action == "send":
-                if content["destination"]["session"][0] == source_id:
-                    t = self.awaiting_ack.pop(message_id)
-                    t[2].set()
-                    if self.awaiting_ack:
-                        self.awaiting_ack[list(self.awaiting_ack.keys())[0]][2].set()
 
     def __await__(self):
         async def await_lock():
@@ -322,6 +248,8 @@ class Connection:
 
 class Session:
     def __init__(self, session_key=None, session_key_pass=None):
+        self.RESEND_TIMEOUT = 2  # sec
+
         self.session_key = session_key if isinstance(session_key, PrivateKey) else PrivateKey(session_key, session_key_pass)
         self.instance_id = base64.b64encode(os.urandom(6)).decode()
         self.channels = {}
@@ -332,13 +260,13 @@ class Session:
         self.issued_tokens = {}
         self.pending_tasks = set()
         self.message_listener = None
+        self.awaiting_ack = OrderedDict()
         # Scoring weights for connection priority decisions
         self.score_weights = {
             "transport_ws": 2.0,
             "transport_http": 0.0,
             "short_success": 5.0,
             "long_success": 2.0,
-            "low_load": 3.0,
             "broker_affinity": 4.0,
         }
         self.logger = logging.getLogger(__name__)
@@ -356,10 +284,6 @@ class Session:
         long_rate = getattr(connection, "success_1m", 1.0)
         score += short_rate * self.score_weights["short_success"]
         score += long_rate * self.score_weights["long_success"]
-
-        # Load (lower awaiting ack count is better)
-        load = len(getattr(connection, "awaiting_ack", []))
-        score += max(0, self.score_weights["low_load"] - load)
 
         # Broker affinity
         if route and hasattr(route, "brokers") and hasattr(connection, "broker_id"):
@@ -384,6 +308,28 @@ class Session:
                 self.seen_messages[lead % 2].add(signature)
                 return True
         return False
+
+    def encode_message(self, header, payload=b"", message_id=None, t_offset=0, retry=0):
+        """Encode a message with signature for transmission.
+
+        For ACK messages, set retry=255.
+        For regular messages with retries, pass the message_id from the first attempt.
+        """
+        header_bytes = ujson.dumps(header, escape_forward_slashes=False).encode()
+        retry_byte = retry.to_bytes(1, "big")
+        message_id_bytes = message_id or b"0" * 64
+        payload_hash = hashlib.sha256(payload).digest()
+
+        header_length = len(header_bytes).to_bytes(2, "big")
+        payload_section = retry_byte + message_id_bytes + payload_hash + payload
+        payload_section_length = len(payload_section).to_bytes(3, "big")
+
+        message_body = header_length + payload_section_length + header_bytes + retry_byte + message_id_bytes + payload_hash
+        timestamp = int(time.time() - t_offset).to_bytes(4, "big")
+        signature = self.session_key.sign(timestamp + message_body)
+
+        encoded_message = signature + timestamp + message_body + payload
+        return encoded_message, signature
 
     def issue_token(self, target, receiver, max_depth=None):
         if isinstance(target, Token):
@@ -441,12 +387,31 @@ class Session:
         route.tokens.append(token_header[1][1])
 
     def clear(self, bundle_id):
-        for connection in self.connections:
-            connection.clear(bundle_id)
+        if bundle_id:
+            self.logger.info("%s clearing %s", self.session_key.public_serial(False)[:4], bundle_id[:4])
+            keys_to_remove = []
+            for key, value in self.awaiting_ack.items():
+                if value[1] == bundle_id:
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                self.awaiting_ack.pop(key)
+
+    def ack(self, source_id, message_id):
+        """Process an acknowledgment for a sent message."""
+        header = self.awaiting_ack.get(message_id, [[]])[0]
+        for action, content in header:
+            if action == "send":
+                if content["destination"]["session"][0] == source_id:
+                    ack_entry = self.awaiting_ack.pop(message_id)
+                    ack_entry[2].set()
 
     async def send(self, header, payload=b"", bundle_id=None, route=None):
-        t0 = time.time()
-        exceptions = []
+        self.logger.info(
+            "%s sending: %s %s",
+            self.session_key.public_serial(False)[:4],
+            " ".join(h[0] for h in header),
+            len(payload),
+        )
 
         # Sort connections once by priority
         sorted_connections = sorted(
@@ -458,6 +423,11 @@ class Session:
         if not sorted_connections:
             raise ConnectionError('Session not connected')
 
+        # Set up ACK tracking if this is a "send" message
+        expect_ack = "send" in set(action for action, _ in header)
+        ack_lock = None
+        message_id = None
+
         # Prepare a round-robin over all connections and their retry budgets
         send_plan = [
             (conn, attempt)
@@ -465,19 +435,57 @@ class Session:
             for attempt in range(conn.MAX_SEND_RETRIES)
         ]
 
+        # Limit retries to 254 since retry byte 255 is reserved for ACK messages
+        if len(send_plan) >= 255:
+            send_plan = send_plan[:254]
+
+        exceptions = []
         for i, (conn, attempt) in enumerate(send_plan):
             try:
-                #print(f'>>>> sending attempt {i} ({attempt} for {conn})')
-                await asyncio.wait_for(
-                    conn.send(header, payload, bundle_id),
-                    conn.RESEND_TIMEOUT * 3
+                # Encode message for this connection's t_offset, using message_id for idempotency
+                encoded_message, signature = self.encode_message(
+                    header, payload, message_id, conn.t_offset, retry=i
                 )
-                break  # success
+
+                if i == 0:
+                    message_id = signature
+                    if expect_ack:
+                        # Clear old stale messages
+                        while self.awaiting_ack:
+                            oldest_entry = list(self.awaiting_ack.values())[0]
+                            max_wait_time = (1 + sum(c.MAX_SEND_RETRIES for c in sorted_connections)) * self.RESEND_TIMEOUT
+                            if oldest_entry[3] < (time.time() - max_wait_time):
+                                self.clear(oldest_entry[1])
+                            else:
+                                break
+
+                        ack_lock = asyncio.Event()
+                        self.awaiting_ack[message_id] = (header, bundle_id, ack_lock, time.time())
+
+                await conn.send(encoded_message)
+
+                if not expect_ack:
+                    return  # No ACK needed, send succeeded
+
+                # Wait for ACK with timeout
+                try:
+                    await asyncio.wait_for(ack_lock.wait(), self.RESEND_TIMEOUT)
+                except asyncio.TimeoutError:
+                    pass
+
+                if message_id not in self.awaiting_ack:
+                    return  # ACK received
+
+                # ACK timeout, try next connection/attempt
+                exceptions.append(TimeoutError(f"ACK timeout on {conn}"))
+
             except Exception as e:
                 exceptions.append(e)
-        else:
-            # exhausted all retries
-            raise ConnectionError(f'All send attempts failed: {exceptions}')
+
+        # Exhausted all retries
+        if message_id in self.awaiting_ack:
+            self.awaiting_ack.pop(message_id)
+        raise ConnectionError(f'All send attempts failed: {exceptions}')
 
 
     async def close(self):
