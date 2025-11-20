@@ -11,7 +11,6 @@ const webcrypto = isNode ? global.crypto : crypto;
 export type Header = ["send", any] | ["listen", any] | ["close", any]
 
 export class Connection {
-  RESEND_TIMEOUT: number;
   MAX_SEND_RETRIES: number;
 
   session: Session;
@@ -21,16 +20,13 @@ export class Connection {
   brokerPeers?: string[];
   tOffset: number;
   entrypoint?: Route;
-  awaitingAck: Map<string, any>;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
-    this.RESEND_TIMEOUT = 2; // sec
     this.MAX_SEND_RETRIES = 3;
 
     this.session = session;
     this.url = url;
     this.tOffset = 0;
-    this.awaitingAck = new Map();
 
     session.connections.push(this);
   }
@@ -44,7 +40,7 @@ export class Connection {
       this.websocket.onerror = e => {
         if (retryCount < this.MAX_SEND_RETRIES) {
           console.warn(`Failed connecting to ${this.url}. Retrying: ${retryCount + 1} of ${this.MAX_SEND_RETRIES}`)
-          setTimeout(async () => resolve(await this.connect(retryCount + 1)), this.RESEND_TIMEOUT * 1000);
+          setTimeout(async () => resolve(await this.connect(retryCount + 1)), this.session.RESEND_TIMEOUT * 1000);
         } else {
           reject(e);
         }
@@ -121,7 +117,7 @@ export class Connection {
       // this.websocket.onerror = console.warn;
       this.websocket.onerror = e => {
         console.warn(`Connection to ${this.url} closed: ${JSON.stringify(e, undefined, 2)}. Reconnecting...`)
-        setTimeout(() => this.connect(), this.RESEND_TIMEOUT * 1000);
+        setTimeout(() => this.connect(), this.session.RESEND_TIMEOUT * 1000);
       }
       resolve(this);
     })
@@ -154,16 +150,17 @@ export class Connection {
             if (this.session.channels.has(body.destination.channel)) {
               if (fullPayload[0] == 255) {
                 // console.log('ACK');
-                this.ack(body.source.session[0], b64encode(fullPayload.slice(1, 65)));
+                this.session.ack(body.source.session[0], b64encode(fullPayload.slice(1, 65)));
 
               } else {
                 let mid = fullPayload[0] == 0 ? signature : fullPayload.slice(1, 65)
-                await this.send(
-                  [['send', { source: body.destination, destination: body.source }]],
-                  undefined,
-                  undefined,
-                  new Uint8Array([255, ...mid])
-                ); // Send ACK 
+                // Send ACK response
+                const ackHeader: Header[] = [['send', { source: body.destination, destination: body.source }]];
+                const encodedAck = await this.session.encodeMessage(
+                  ackHeader, new Uint8Array(), mid, this.tOffset, 255
+                );
+                await this.send(encodedAck);
+
                 let payload = fullPayload.slice(65 + 32)
                 let hash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
                 if (fullPayload.slice(65, 65 + 32).reduce((p, v, i) => p && v === hash[i], true)) {
@@ -185,92 +182,17 @@ export class Connection {
       }
     }
   }
-  send(headers: Header[], payload: Uint8Array = new Uint8Array(), bundleId?: Uint8Array, reply?: Uint8Array) {
-    return new Promise(async (res, rej) => {
-      const encode = async (messageId?: string, retry?: number) => {
-        let h = new TextEncoder().encode(JSON.stringify(headers))
-        let r = reply ? reply : (
-          retry && messageId ?
-            new Uint8Array([retry, ...b64decode(messageId)]) :
-            new Uint8Array(65)
-        )
-        let p = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload))
-        let m = new Uint8Array([
-          ...intToBytes(Date.now() / 1000 - this.tOffset, 4),
-          ...intToBytes(h.length, 2),
-          ...intToBytes(payload.length + 32 + 65, 3),
-          ...h,
-          ...r,
-          ...p
-        ])
+  async send(encodedMessage: Uint8Array) {
+    // Ensure connection is ready
+    if (this.websocket === undefined || this.websocket.readyState > 1) {
+      await this.connect();
+    }
 
-        let s = await this.session.sessionKey.sign(m) as Uint8Array;
-        return [s, new Uint8Array([...s, ...m, ...payload])]
-      }
-
-      // Ensure connection is ready
-      if (this.websocket === undefined || this.websocket.readyState > 1) {
-        try {
-          await this.connect();
-        } catch (e) {
-          rej(new Error(`Connection failed: ${e}`));
-          return;
-        }
-      }
-
-      let [s, mm] = await encode();
-      const expectAck = headers.map(([a, _]) => a).includes('send') && reply == undefined;
-      const messageId = b64encode(s);
-
-      // Try to send the message
-      try {
-        if (this.websocket !== undefined) {
-          this.websocket.send(mm);
-        } else {
-          throw new Error('WebSocket not connected');
-        }
-      } catch (e) {
-        // On send failure, reset websocket and reject
-        console.warn(`WebSocket send failed: ${e}`);
-        this.websocket = undefined;
-        rej(new Error(`Send failed: ${e}`));
-        return;
-      }
-
-      if (!expectAck) {
-        res(undefined);
-        return;
-      }
-
-      // Wait for ACK with timeout
-      const ackTimeout = setTimeout(() => {
-        if (this.awaitingAck.has(messageId)) {
-          this.awaitingAck.delete(messageId);
-          this.websocket = undefined; // Reset connection on timeout
-          rej(new Error('ACK timeout'));
-        }
-      }, this.RESEND_TIMEOUT * 1000);
-
-      // Store headers, resolve function, and timeout so we can clear it on ACK
-      this.awaitingAck.set(messageId, [headers, res, ackTimeout]);
-
-      // Note: ACK will be received via this.ack() which calls the resolve function
-      // stored in awaitingAck
-    })
-  }
-  ack(sourceId: string, messageId: string) {
-    if (this.awaitingAck.has(messageId)) {
-      const [headers, resolve, timeout] = this.awaitingAck.get(messageId);
-      // console.log(sourceId, messageId, headers)
-      if (headers !== undefined) {
-        for (let [action, content] of headers) {
-          if (action === 'send' && content.destination.session[0] === sourceId) {
-            this.awaitingAck.delete(messageId);
-            if (timeout) clearTimeout(timeout);
-            resolve(undefined);
-          }
-        }
-      }
+    // Try to send the message
+    if (this.websocket !== undefined) {
+      this.websocket.send(encodedMessage);
+    } else {
+      throw new Error('WebSocket not connected');
     }
   }
   clear(bundleId: Uint8Array) { }
@@ -283,6 +205,8 @@ export class Connection {
 }
 
 export class Session {
+  RESEND_TIMEOUT: number;
+
   sessionKey: PrivateKey;
   instanceId: string;
   channels: Map<string, Channel>;
@@ -291,18 +215,20 @@ export class Session {
   issuedTokens: Map<string, [Token, Token?]>;
   targets: Map<any, Set<any>>;
   routes: Map<string, any>;
+  awaitingAck: Map<string, [Header[], (() => void), number]>;
   messageListener?: (requestMetadata: RequestMetadata) => null
   scoreWeights: {
     transport_ws: number;
     transport_http: number;
     short_success: number;
     long_success: number;
-    low_load: number;
     broker_affinity: number;
     connected: number;
   };
 
   constructor(sessionKey?: string) {
+    this.RESEND_TIMEOUT = 2; // sec
+
     this.sessionKey = new PrivateKey('sign', sessionKey);
     this.instanceId = b64encode(Uint8Array.from(webcrypto.getRandomValues(new Uint8Array(6))));
     this.channels = new Map();
@@ -311,13 +237,13 @@ export class Session {
     this.issuedTokens = new Map();
     this.targets = new Map();
     this.routes = new Map();
+    this.awaitingAck = new Map();
     // Scoring weights for connection priority decisions
     this.scoreWeights = {
       transport_ws: 2.0,
       transport_http: 0.0,
       short_success: 5.0,
       long_success: 2.0,
-      low_load: 3.0,
       broker_affinity: 4.0,
       connected: 100.0,  // Heavily prioritize already-connected connections
     };
@@ -345,10 +271,6 @@ export class Session {
     const longRate = (connection as any).success_1m ?? 1.0;
     score += shortRate * this.scoreWeights.short_success;
     score += longRate * this.scoreWeights.long_success;
-
-    // Load (lower awaiting ack count is better)
-    const load = connection.awaitingAck?.size ?? 0;
-    score += Math.max(0, this.scoreWeights.low_load - load);
 
     // Broker affinity
     if (route && route.brokers && connection.brokerId) {
@@ -381,6 +303,44 @@ export class Session {
       }
     }
     return false
+  }
+  async encodeMessage(
+    headers: Header[],
+    payload: Uint8Array = new Uint8Array(),
+    messageId: Uint8Array | null = null,
+    tOffset: number = 0,
+    retry: number = 0
+  ): Promise<Uint8Array> {
+    const headerBytes = new TextEncoder().encode(JSON.stringify(headers));
+    const retryByte = new Uint8Array([retry]);
+    const messageIdBytes = messageId || new Uint8Array(64);
+    const payloadHash = new Uint8Array(await webcrypto.subtle.digest('SHA-256', payload));
+
+    const messageBody = new Uint8Array([
+      ...intToBytes(Date.now() / 1000 - tOffset, 4),
+      ...intToBytes(headerBytes.length, 2),
+      ...intToBytes(payload.length + 32 + 65, 3),
+      ...headerBytes,
+      ...retryByte,
+      ...messageIdBytes,
+      ...payloadHash
+    ]);
+
+    const signature = await this.sessionKey.sign(messageBody) as Uint8Array;
+    const encodedMessage = new Uint8Array([...signature, ...messageBody, ...payload]);
+
+    return encodedMessage;
+  }
+  ack(sourceId: string, messageId: string) {
+    if (this.awaitingAck.has(messageId)) {
+      const [headers, resolve, timeout] = this.awaitingAck.get(messageId)!;
+      for (let [action, content] of headers) {
+        if (action === 'send' && content.destination.session[0] === sourceId) {
+          this.awaitingAck.delete(messageId);
+          resolve(); // This will resolve the Promise with true
+        }
+      }
+    }
   }
   async issueToken(target: Token | string, receiver: string, maxDepth?: number) {
     let tokenType: 'root' | 'extension';
@@ -461,8 +421,6 @@ export class Session {
     }
   }
   async send(headers: Header[], payload: Uint8Array = new Uint8Array([]), bundleId?: Uint8Array, route?: Route) {
-    const exceptions: Error[] = [];
-
     // Sort connections once by priority
     const sortedConnections = [...this.connections].sort(
       (a, b) => this._connectionScore(b, route) - this._connectionScore(a, route)
@@ -471,6 +429,10 @@ export class Session {
     if (sortedConnections.length === 0) {
       throw new Error('Session not connected');
     }
+
+    // Set up ACK tracking if this is a "send" message
+    const expectAck = headers.some(([action, _]) => action === 'send');
+    let messageId: string | null = null;
 
     // Prepare a round-robin over all connections and their retry budgets
     const sendPlan: [Connection, number][] = [];
@@ -483,25 +445,67 @@ export class Session {
       }
     }
 
+    // Limit retries to 254 since retry byte 255 is reserved for ACK messages
+    if (sendPlan.length >= 255) {
+      sendPlan.length = 254;
+    }
+
+    const exceptions: Error[] = [];
     for (let i = 0; i < sendPlan.length; i++) {
       const [conn, attempt] = sendPlan[i];
       try {
-        // Add timeout wrapper - allow time for reconnection + ACK wait
-        // Connection retry can take up to MAX_SEND_RETRIES * RESEND_TIMEOUT
-        // Plus ACK timeout of RESEND_TIMEOUT
-        await Promise.race([
-          conn.send(headers, payload, bundleId),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Send timeout')), conn.RESEND_TIMEOUT * 5 * 1000)
-          )
-        ]);
-        return; // success
+        // Encode message for this connection's tOffset
+        const encodedMessage = await this.encodeMessage(
+          headers,
+          payload,
+          messageId ? b64decode(messageId) : null,
+          conn.tOffset,
+          i
+        );
+
+        if (i === 0) {
+          // Get message_id from first encoding's signature
+          messageId = b64encode(encodedMessage.slice(0, 64));
+        }
+
+        await conn.send(encodedMessage);
+
+        if (!expectAck) {
+          return; // No ACK needed, send succeeded
+        }
+
+        // Wait for ACK with timeout
+        const ackReceived = await new Promise<boolean>((resolve) => {
+          const ackTimeout = setTimeout(() => {
+            if (this.awaitingAck.has(messageId!)) {
+              this.awaitingAck.delete(messageId!);
+              resolve(false); // Timeout
+            }
+          }, this.RESEND_TIMEOUT * 1000);
+
+          this.awaitingAck.set(messageId!, [headers, () => {
+            clearTimeout(ackTimeout);
+            resolve(true);
+          }, ackTimeout as unknown as number]);
+        });
+
+        if (ackReceived) {
+          return; // ACK received
+        }
+
+        // ACK timeout, try next connection
+        exceptions.push(new Error(`ACK timeout on connection ${i}`));
       } catch (e) {
         exceptions.push(e as Error);
       }
     }
 
-    // exhausted all retries
+    // Exhausted all retries
+    if (messageId && this.awaitingAck.has(messageId)) {
+      const [_, __, timeout] = this.awaitingAck.get(messageId)!;
+      clearTimeout(timeout);
+      this.awaitingAck.delete(messageId);
+    }
     throw new Error(`All send attempts failed: ${exceptions.map(e => e.message).join(', ')}`);
   }
 }
@@ -781,11 +785,8 @@ export class Channel {
     }
   }
   async close() {
-    for (var i in this.session.connections) {
-      let connection = this.session.connections[i]
-      let obj = await this.route?.toObject()
-      await connection.send([['close', obj]])
-    }
+    let obj = await this.route?.toObject()
+    await this.session.send([['close', obj]])
     for (var i in this.waiting) {
       this.waiting[i]([undefined, undefined])
     }
