@@ -40,6 +40,12 @@ class Connection:
         self.entrypoint = None
         self.broker_peers = []
 
+        # Set connection type based on URL protocol
+        if url.startswith(("ws://", "wss://")):
+            self.type = "ws"
+        else:
+            self.type = "http"
+
         self.is_connecting_lock = asyncio.Event()
 
         if 'connections' not in dir(session):
@@ -268,11 +274,17 @@ class Session:
             "short_success": 5.0,
             "long_success": 2.0,
             "broker_affinity": 4.0,
+            "connected": 100.0,  # Heavily prioritize already-connected connections
         }
         self.logger = logging.getLogger(__name__)
 
     def _connection_score(self, connection, route=None):
         score = 0.0
+
+        # Connection readiness - heavily prioritize already-connected connections
+        if connection.websocket and hasattr(connection.websocket, 'open') and connection.websocket.open:
+            score += self.score_weights["connected"]
+
         # Transport type
         if getattr(connection, "type", None) == "ws":
             score += self.score_weights["transport_ws"]

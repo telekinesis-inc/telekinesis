@@ -20,6 +20,7 @@ export class Connection {
   brokerPeers?: string[];
   tOffset: number;
   entrypoint?: Route;
+  type: string;
 
   constructor(session: Session, url: string = 'ws://localhost:8776') {
     this.MAX_SEND_RETRIES = 3;
@@ -27,6 +28,13 @@ export class Connection {
     this.session = session;
     this.url = url;
     this.tOffset = 0;
+
+    // Set connection type based on URL protocol
+    if (url.startsWith('ws://') || url.startsWith('wss://')) {
+      this.type = 'ws';
+    } else {
+      this.type = 'http';
+    }
 
     session.connections.push(this);
   }
@@ -114,9 +122,29 @@ export class Connection {
       }
       this.websocket.onmessage = async m => this.recv(m);
       this.brokerId = brokerId;
+
+      // Re-listen to all channels after connection/reconnection
+      const headers: Header[] = [];
+      for (const [channelId, channel] of this.session.channels.entries()) {
+        if (channel.route !== undefined) {
+          const listenDict = {
+            brokers: channel.route.brokers,
+            session: channel.route.session,
+            channel: channel.route.channel,
+            is_public: channel.isPublic,
+          };
+          headers.push(['listen', listenDict]);
+        }
+      }
+
+      if (headers.length > 0) {
+        await this.session.sendHeaders(headers);
+      }
+
       // this.websocket.onerror = console.warn;
       this.websocket.onerror = e => {
         console.warn(`Connection to ${this.url} closed: ${JSON.stringify(e, undefined, 2)}. Reconnecting...`)
+        this.websocket = undefined;
         setTimeout(() => this.connect(), this.session.RESEND_TIMEOUT * 1000);
       }
       resolve(this);
@@ -184,13 +212,25 @@ export class Connection {
   }
   async send(encodedMessage: Uint8Array) {
     // Ensure connection is ready
-    if (this.websocket === undefined || this.websocket.readyState > 1) {
+    if (this.websocket === undefined || this.websocket.readyState !== 1) {
       await this.connect();
     }
 
     // Try to send the message
-    if (this.websocket !== undefined) {
-      this.websocket.send(encodedMessage);
+    if (this.websocket !== undefined && this.websocket.readyState === 1) {
+      try {
+        this.websocket.send(encodedMessage);
+      } catch (e) {
+        console.warn(`WebSocket send failed: ${e}`);
+        // Connection is in bad state, reconnect and retry
+        await this.connect();
+        // Retry the send after reconnection
+        if (this.websocket !== undefined && this.websocket.readyState === 1) {
+          this.websocket.send(encodedMessage);
+        } else {
+          throw new Error('WebSocket not connected after reconnect');
+        }
+      }
     } else {
       throw new Error('WebSocket not connected');
     }
@@ -260,7 +300,7 @@ export class Session {
     }
 
     // Transport type
-    if ((connection as any).type === 'ws') {
+    if (connection.type === 'ws') {
       score += this.scoreWeights.transport_ws;
     } else {
       score += this.scoreWeights.transport_http;
@@ -418,6 +458,32 @@ export class Session {
     for (var i in this.connections) {
       let connection = this.connections[i]
       connection.clear(bundleId)
+    }
+  }
+  async sendHeaders(headers: Header[], payload?: Uint8Array, bundleId?: Uint8Array, route?: Route) {
+    // Chunk headers if there are too many (stay under 65536 bytes)
+    const lens = headers.map(h => [JSON.stringify(h).length, h] as [number, Header]);
+    const groups: Header[][] = [[]];
+    let accLen = 1;
+
+    for (const [l, h] of lens) {
+      if (accLen + l + 1 < 256**2) {
+        groups[groups.length - 1].push(h);
+        accLen += l + 1;
+      } else {
+        groups.push([h]);
+        accLen = l + 2;
+      }
+    }
+
+    // Send each group
+    for (const group of groups) {
+      await this.send(
+        group,
+        group.some(([action, _]) => action === 'send') ? payload : undefined,
+        bundleId,
+        route
+      );
     }
   }
   async send(headers: Header[], payload: Uint8Array = new Uint8Array([]), bundleId?: Uint8Array, route?: Route) {
@@ -748,29 +814,9 @@ export class Channel {
     if (this.route !== undefined) {
       if (this.headerBuffer.length > 0 || header !== undefined) {
         let allHeaders = header !== undefined ? this.headerBuffer.concat([header]) : this.headerBuffer;
-        let accLen = 1;
-        let groups = [[]] as Header[][];
+        this.headerBuffer = [];
 
-
-        for (let h of allHeaders) {
-          let l = JSON.stringify(h).length
-          if (accLen + l + 1 < 256**2) {
-            groups[groups.length-1].push(h);
-            accLen += l + 1;
-          } else {
-            groups.push([h])
-            accLen = l + 2
-          }
-        }
-
-        for (let headerGroup of groups) {
-          await this.session.send(
-            headerGroup,
-            headerGroup.map(([a, _]) => a).includes('send') ? payload : undefined,
-            bundleId)
-          this.headerBuffer = [];
-
-        }
+        await this.session.sendHeaders(allHeaders, payload, bundleId);
       }
     }
     this.then = undefined;
