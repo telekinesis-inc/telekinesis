@@ -295,6 +295,7 @@ class Telekinesis:
         max_delegation_depth=None,
         block_gc=False,
         parent=None,
+        block_leaky_types=True,
     ):
         self._logger = logging.getLogger(__name__)
         self._target = target
@@ -304,6 +305,7 @@ class Telekinesis:
         self._max_delegation_depth = max_delegation_depth
         self._block_gc = block_gc
         self._parent = parent
+        self._block_leaky_types = block_leaky_types
         self._channel = None
         self._clients = {}
         self._requests = {}
@@ -573,6 +575,37 @@ class Telekinesis:
                 finally:
                     pass
 
+    _LEAKY_TYPES = (
+        types.FrameType,
+        types.CodeType,
+        types.TracebackType,
+        types.CoroutineType,
+        types.GeneratorType,
+        types.AsyncGeneratorType,
+    )
+
+    @staticmethod
+    async def _resolve_target(target, block_leaky_types=True):
+        # Fully await chained coroutines so a coroutine (whose frame leaks
+        # f_globals/f_builtins) is never handed back to a remote caller.
+        for _ in range(100):
+            if inspect.iscoroutine(target):
+                target = await target
+            else:
+                break
+        else:
+            raise PermissionError("Max coroutine recursion reached")
+
+        # Frames, code, tracebacks, and (async) generators all expose the
+        # defining module's globals via non-underscore attributes, bypassing
+        # the private-attribute guard. Refuse to expose them remotely.
+        if block_leaky_types and isinstance(target, Telekinesis._LEAKY_TYPES):
+            raise PermissionError(
+                "Objects of type %s cannot be accessed remotely" % type(target).__name__
+            )
+
+        return target
+
     async def _execute(self, metadata=None, pipeline=None, break_on_telekinesis=False):
         if asyncio.iscoroutine(self._target):
             target = await self._target
@@ -652,6 +685,7 @@ class Telekinesis:
                     target._max_delegation_depth,
                     target._block_gc,
                     target._parent,
+                    target._block_leaky_types,
                 )
                 target._state = new_state
                 target._state.pipeline += pipeline[i:]
@@ -687,8 +721,7 @@ class Telekinesis:
                             target = target.__getattr__(arg)
                         except AttributeError:
                             raise ae
-                if asyncio.iscoroutine(target):
-                    target = await target
+                target = await Telekinesis._resolve_target(target, self._block_leaky_types)
                 
             if action == "call":
                 self._logger.info("%s %s", action, target)
@@ -709,8 +742,7 @@ class Telekinesis:
                     target = target(metadata, *args, **kwargs)
                 else:
                     target = target(*args, **kwargs)
-                if asyncio.iscoroutine(target):
-                    target = await target
+                target = await Telekinesis._resolve_target(target, self._block_leaky_types)
 
                 if check_pipeline and not metadata.pipeline:
                     break_var = True
